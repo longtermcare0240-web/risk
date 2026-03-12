@@ -1,0 +1,10 @@
+{
+  "name": "riskmap",
+  "version": "1.0",
+  "description": "Minimal Blueprint for deploying risk app",
+  "app": {
+    "entrypoint": "app.py",
+    "working_dir": "./",
+    "runtime": "python3.11"
+  }
+}
