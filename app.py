@@ -2523,8 +2523,17 @@ function distancePointToRoute(lat, lng, routeLatLngs){
   return minDist;
 }
 
+showResultList(filtered, startLat, startLng);
+
+if(isMobile()){
+  document.getElementById("mobileResultPanel").style.display="flex";
+}
 
 async function runRouteSearch(){
+
+  if(isMobile()){
+    openMobileMap();
+  }
   const start = document.getElementById("startInput").value.trim();
   const dest = document.getElementById("destInput").value.trim();
 
@@ -2628,6 +2637,19 @@ routeLine = L.polyline(
   routeLatLngs,
   {color:"#2563eb", weight:5}
 ).addTo(map);
+
+if(isMobile() && window.mobileLeafletMap){
+
+  if(window.mobileRouteLine){
+    window.mobileLeafletMap.removeLayer(window.mobileRouteLine);
+  }
+
+  window.mobileRouteLine = L.polyline(
+    routeLatLngs,
+    {color:"#2563eb", weight:5}
+  ).addTo(window.mobileLeafletMap);
+
+}
 
   map.fitBounds(
     [
