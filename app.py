@@ -1037,6 +1037,7 @@ setTimeout(()=>{
 let userLat = null;
 let userLng = null;
 
+
 function showMsg(text){
 
   const modal = document.getElementById("msgModal");
@@ -1141,6 +1142,20 @@ let markerGroup = L.markerClusterGroup({
 
 let routeLine = null;
 map.addLayer(markerGroup);
+
+function clearRoute(){
+
+  if(routeLine){
+    map.removeLayer(routeLine);
+    routeLine = null;
+  }
+
+  if(window.mobileRouteLine && window.mobileLeafletMap){
+    window.mobileLeafletMap.removeLayer(window.mobileRouteLine);
+    window.mobileRouteLine = null;
+  }
+
+}
 
 function setLoading(show){
   document.getElementById("loadingBox").style.display = show ? "block" : "none";
@@ -1397,6 +1412,9 @@ const data = ALL_DATA_CACHE;
 }
 
 async function loadData(){
+
+  clearRoute();   // ⭐ 추가
+
 
   if(isMobile()){
     openMobileMap();
@@ -1817,6 +1835,8 @@ if(userLat && userLng){
 
 async function findNearestToilet(){
 
+  clearRoute();   // ⭐ 추가
+
   showLoadingLocation();   // 추가
 
   if(!navigator.geolocation){
@@ -1857,6 +1877,8 @@ async function findNearestToilet(){
 
 
 async function findNearestDanger(){
+
+  clearRoute();   // ⭐ 추가
 
   showLoadingLocation();
 
@@ -2241,6 +2263,7 @@ err=>{
 
 });
 window.addEventListener("popstate", function(){
+clearRoute();   // ⭐ 추가
 
 const popup = document.getElementById("mobileMapPopup");
 const result = document.getElementById("mobileResultPanel");
@@ -2536,7 +2559,11 @@ function distancePointToRoute(lat, lng, routeLatLngs){
   return minDist;
 }
 
+
 async function runRouteSearch(){
+
+  clearRoute();   // ⭐ 추가
+
 
   if(isMobile()){
     openMobileMap();
@@ -2691,6 +2718,8 @@ if(isMobile() && window.mobileLeafletMap){
 }
 
 </script>
+
+
 
 <div class="mobile-map-popup" id="mobileMapPopup">
 
