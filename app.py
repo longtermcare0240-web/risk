@@ -1614,22 +1614,35 @@ window.addEventListener("DOMContentLoaded", function(){
     loadAllMarkers();
   });
 
+  let searchTimer = null;
+
+  function handleAutoSearch(value,id){
+
+    clearTimeout(searchTimer);
+
+    searchTimer = setTimeout(function(){
+
+      searchPlaceSuggestions(value,id);
+
+    },300);
+
+  }
+
   const destInput = document.getElementById("destInput");
 
-if(destInput){
-  destInput.addEventListener("input", function(){
-    searchPlaceSuggestions(this.value, "destInput");
-  });
-}
+  if(destInput){
+    destInput.addEventListener("input", function(){
+      handleAutoSearch(this.value,"destInput");
+    });
+  }
 
-const startInput = document.getElementById("startInput");
+  const startInput = document.getElementById("startInput");
 
-if(startInput){
-  startInput.addEventListener("input", function(){
-    searchPlaceSuggestions(this.value, "startInput");
-  });
-}
-
+  if(startInput){
+    startInput.addEventListener("input", function(){
+      handleAutoSearch(this.value,"startInput");
+    });
+  }
 
 });
 
@@ -2717,6 +2730,17 @@ if(isMobile() && window.mobileLeafletMap){
   closeRoutePopup();
 }
 
+
+window.addEventListener("pageshow", function(){
+
+  const s = document.getElementById("startInput");
+  const d = document.getElementById("destInput");
+
+  if(s) s.value="";
+  if(d) d.value="";
+
+});
+
 </script>
 
 
@@ -2821,6 +2845,8 @@ width:340px;
 
 <input id="startInput"
 placeholder="출발지 입력 (예: 나주시청)"
+autocomplete="off"
+
 style="
 width:100%;
 height:40px;
@@ -2831,6 +2857,8 @@ margin-bottom:10px;
 ">
 <input id="destInput"
 placeholder="도착지 입력 (예: 나주시청)"
+autocomplete="off"
+
 style="
 width:100%;
 height:40px;
