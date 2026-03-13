@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string, Response, send_file
 import pandas as pd
+from flask_compress import Compress
 import os
 import re
 import time
@@ -44,6 +45,9 @@ def update_visitors():
 
 
 app = Flask(__name__)
+Compress(app)
+
+app.json.ensure_ascii = False
 
 KAKAO_KEY = os.environ.get("KAKAO_KEY")
 
@@ -1011,7 +1015,7 @@ margin-top:4px;
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
 <script>
-
+let ALL_DATA_CACHE = null;
 
 
 const CATEGORY_COLORS = {
@@ -1025,6 +1029,10 @@ const CATEGORY_LIST = [
 ];
 
 const map = L.map("map", { zoomControl:true }).setView([34.85, 126.90], 9);
+
+setTimeout(()=>{
+  map.invalidateSize();
+},500);
 
 let userLat = null;
 let userLng = null;
@@ -1127,7 +1135,8 @@ L.tileLayer(
 let markerGroup = L.markerClusterGroup({
   showCoverageOnHover:false,
   spiderfyOnMaxZoom:true,
-  disableClusteringAtZoom:15
+  disableClusteringAtZoom:15,
+  chunkedLoading:true
 });
 
 let routeLine = null;
@@ -1337,8 +1346,12 @@ async function updateTowns(){
 
 async function loadAllMarkers(){
 
+  if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  const data = await res.json();
+  ALL_DATA_CACHE = await res.json();
+}
+
+const data = ALL_DATA_CACHE;
 
   markerGroup.clearLayers();
 
@@ -1407,8 +1420,14 @@ async function loadData(){
   categories.forEach(cat => params.append("category", cat));
 
   try{
-    const res = await fetch(`/data?${params.toString()}`);
-    const data = await res.json();
+    let data;
+
+if(!ALL_DATA_CACHE){
+  const res = await fetch("/data");
+  ALL_DATA_CACHE = await res.json();
+}
+
+data = ALL_DATA_CACHE;
 
     
     const bounds = [];
@@ -1562,7 +1581,7 @@ function resetFilters(){
 window.addEventListener("load", function(){
   setTimeout(()=>{
     map.invalidateSize();
-  },500);
+  },1000);
 });
 
 window.addEventListener("DOMContentLoaded", function(){
@@ -1629,7 +1648,8 @@ function openMobileMap(){
     window.mobileMarkerGroup = L.markerClusterGroup({
       showCoverageOnHover:false,
       spiderfyOnMaxZoom:true,
-      disableClusteringAtZoom:15
+      disableClusteringAtZoom:15,
+      chunkedLoading:true
     });
 
     window.mobileLeafletMap.addLayer(window.mobileMarkerGroup);
@@ -1877,8 +1897,12 @@ async function findNearestDanger(){
 
 async function runNearestSearch(lat,lng,targetType){
 
+  if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  const data = await res.json();
+  ALL_DATA_CACHE = await res.json();
+}
+
+const data = ALL_DATA_CACHE;
 
   const radius = 5000;
 
@@ -2102,8 +2126,12 @@ function showResultList(items, userLat, userLng){
 
 async function runRadius(lat,lng,km){
 
+  if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  const data = await res.json();
+  ALL_DATA_CACHE = await res.json();
+}
+
+const data = ALL_DATA_CACHE;
 
   markerGroup.clearLayers();
 
@@ -2563,8 +2591,12 @@ if(road){
   ];
 }
 
+  if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-const data = await res.json();
+  ALL_DATA_CACHE = await res.json();
+}
+
+const data = ALL_DATA_CACHE;
 
 const radius = 120;
 
@@ -2910,7 +2942,7 @@ def data():
     if categories:
         df = df[df["구분"].isin(categories)]
 
-    records = df.apply(row_to_dict, axis=1).tolist()
+    records = df.head(5000).apply(row_to_dict, axis=1).tolist()
 
     return jsonify(records)
 
