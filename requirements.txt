@@ -3,3 +3,4 @@ pandas
 openpyxl
 gunicorn
 requests
+flask-compress
