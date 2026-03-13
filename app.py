@@ -153,8 +153,7 @@ def load_df():
         raise FileNotFoundError(f"{FILE_PATH} 파일이 없습니다.")
 
     df = pd.read_excel(FILE_PATH)
-    print(df.columns)
-
+    
     required = ["순번", "구분", "시도", "시군구", "주소", "위도", "경도"]
     for col in required:
         if col not in df.columns:
@@ -954,18 +953,8 @@ margin-top:4px;
 </div>
 
 <div class="card">
-      <h3>조회 결과</h3>
+      <h3>방문자 수</h3>
       <div class="summary">
-
-<div class="summary-box">
-<div class="num" id="countTotal">0</div>
-<div class="txt">표시된 지점 수</div>
-</div>
-
-<div class="summary-box">
-<div class="num" id="countCity">전체</div>
-<div class="txt">현재 시군구</div>
-</div>
 
 <div class="summary-box">
 <div class="num">{{total_visit}}</div>
@@ -1043,62 +1032,63 @@ const map = L.map("map", { zoomControl:true }).setView([34.85, 126.90], 9);
 let userLat = null;
 let userLng = null;
 
-
 function showMsg(text){
 
   const modal = document.getElementById("msgModal");
   const txt = document.getElementById("msgText");
+  const btn = document.getElementById("msgBtn");
 
   if(!modal || !txt) return;
 
   txt.innerText = text;
+
+  if(btn){
+    btn.style.display = "inline-block";
+  }
+
   modal.style.display = "flex";
 
 }
 
 function showLoadingLocation(){
 
-  loadingStartTime = Date.now();   // 추가
+  loadingStartTime = Date.now();
 
   const modal = document.getElementById("msgModal");
-  const box = document.getElementById("msgBox");
+  const txt = document.getElementById("msgText");
+  const btn = document.getElementById("msgBtn");
 
-box.innerHTML = `
-<div style="
-display:flex;
-align-items:center;
-justify-content:center;
-gap:18px;
+  if(!modal || !txt) return;
 
-background:#ffffff;
-border-radius:22px;
-padding:28px 32px;
+  txt.innerHTML = `
+  <div style="
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:18px;
+  ">
 
-margin-left:30px;
-margin-right:30px;
+  <img src="/char_left" class="char">
 
-box-shadow:0 20px 50px rgba(0,0,0,.25);
-">
+  <div style="
+  font-size:16px;
+  font-weight:700;
+  padding:10px 14px;
+  white-space:nowrap;
+  ">
+  📍 위치 확인 중<span class="loading-dots"></span>
+  </div>
 
-<img src="/char_left" class="char">
+  <img src="/char_right" class="char">
 
-<div style="
-font-size:16px;
-font-weight:700;
-padding:10px 18px;
-white-space:nowrap;
-">
-📍 위치 확인 중<span class="loading-dots"></span>
-</div>
+  </div>
+  `;
 
-<img src="/char_right" class="char">
+  if(btn){
+    btn.style.display = "none";
+  }
 
-</div>
-`;
   modal.style.display = "flex";
-}
-function closeMsg(){
-  document.getElementById("msgModal").style.display = "none";
 }
 
 function preloadLocation(){
@@ -1167,6 +1157,14 @@ function calcDistance(lat1, lng1, lat2, lng2){
 
   return R*c;
 
+}
+
+
+function closeMsg(){
+  const modal = document.getElementById("msgModal");
+  if(modal){
+    modal.style.display = "none";
+  }
 }
 
 function showMobileResults(items, userLat, userLng){
@@ -1415,9 +1413,7 @@ async function loadData(){
     const res = await fetch(`/data?${params.toString()}`);
     const data = await res.json();
 
-    document.getElementById("countTotal").textContent = data.length;
-    document.getElementById("countCity").textContent = city || "전체";
-
+    
     const bounds = [];
 
     data.forEach(item => {
@@ -1535,9 +1531,6 @@ function resetFilters(){
   document.querySelectorAll(".category-check")
   .forEach(el => el.checked = false);
 
-  // 결과 숫자 초기화
-  document.getElementById("countTotal").textContent = 0;
-  document.getElementById("countCity").textContent = "전체";
 
   // PC 지도 마커 삭제
   if(markerGroup){
@@ -1589,7 +1582,7 @@ window.addEventListener("DOMContentLoaded", function(){
 
   const destInput = document.getElementById("destInput");
 
-  if(destInput){
+if(destInput){
   destInput.addEventListener("input", function(){
     searchPlaceSuggestions(this.value, "destInput");
   });
@@ -1602,6 +1595,7 @@ if(startInput){
     searchPlaceSuggestions(this.value, "startInput");
   });
 }
+
 
 });
 
@@ -1840,6 +1834,7 @@ async function findNearestToilet(){
     },
 
     err=>{
+      closeMsg();
       showMsg("위치를 가져올 수 없습니다.");
     },
 
@@ -1880,6 +1875,7 @@ async function findNearestDanger(){
     },
 
     err=>{
+      closeMsg();
       showMsg("위치를 가져올 수 없습니다.");
     },
 
@@ -2708,7 +2704,8 @@ z-index:5000;
 background:#ffffff;
 padding:24px 22px;
 border-radius:18px;
-width:320px;
+min-width:320px;
+max-width:90vw;
 text-align:center;
 box-shadow:0 18px 40px rgba(0,0,0,0.18);
 ">
@@ -2789,7 +2786,7 @@ margin-bottom:12px;
 box-shadow:0 4px 14px rgba(0,0,0,0.08);
 "></div>
 
-<button class="btn primary" onclick="runRouteSearch()">
+<button type="button" class="btn primary" onclick="runRouteSearch()">
 경로 조회
 </button>
 
