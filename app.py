@@ -4,10 +4,67 @@ import os
 import re
 import time
 import threading
+import requests
 import webbrowser
 from urllib.parse import quote
+import json
+from datetime import date
+
+VISITOR_FILE = "visitors.json"
+
+
+def update_visitors():
+
+    if not os.path.exists(VISITOR_FILE):
+
+        data = {
+            "total":0,
+            "today":str(date.today()),
+            "today_count":0
+        }
+
+    else:
+        with open(VISITOR_FILE,"r",encoding="utf-8") as f:
+            data=json.load(f)
+
+    today=str(date.today())
+
+    data["total"] += 1
+
+    if data["today"] == today:
+        data["today_count"] += 1
+    else:
+        data["today"]=today
+        data["today_count"]=1
+
+    with open(VISITOR_FILE,"w",encoding="utf-8") as f:
+        json.dump(data,f,ensure_ascii=False,indent=2)
+
+    return data
+
 
 app = Flask(__name__)
+
+KAKAO_KEY = os.environ.get("KAKAO_KEY")
+
+@app.route("/search_place")
+def search_place():
+
+    query = request.args.get("q","")
+
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+
+    headers = {
+        "Authorization": f"KakaoAK {KAKAO_KEY}"
+    }
+
+    params = {
+        "query": query
+    }
+
+    r = requests.get(url, headers=headers, params=params)
+
+    return jsonify(r.json())
 
 app.config["JSON_AS_ASCII"] = False
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,10 +100,10 @@ def extract_town_from_address(address):
         return "읍면동없음"
 
     # 읍/면/동/가/리 추출
-    found = re.findall(r'([가-힣0-9]+(?:읍|면|동|가|리))', addr)
+    found = re.findall(r'([가-힣0-9]+(?:읍|면|동))', addr)
     if found:
         for token in reversed(found):
-            if token.endswith(("읍", "면", "동", "가", "리")):
+            if token.endswith(("읍", "면", "동")):
                 return token
 
     return "읍면동없음"
@@ -346,10 +403,18 @@ margin-bottom:6px;
   background:#fff;
   color:#111827;
 }
+
+.btn.kakao{
+  background:#FEE500;
+  color:#191919;
+  border:none;
+}
+
 .summary{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
+display:grid;
+grid-template-columns:1fr 1fr;
+grid-auto-rows:1fr;
+gap:10px;
 }
 .summary-box{
   background:#fff;
@@ -704,7 +769,7 @@ cursor:pointer;
 }
 
 .mobile-result-panel{
-  position:fixed;
+  position:absolute;
   left:0;
   right:0;
   bottom:0;
@@ -802,6 +867,31 @@ animation:dots 1.4s steps(3,end) infinite;
 100%{content:"...";}
 }
 
+.visitor-box{
+display:flex;
+gap:15px;
+margin-top:15px;
+}
+
+.visitor-card{
+flex:1;
+background:#f1f5f9;
+border-radius:14px;
+padding:12px;
+text-align:center;
+}
+
+.visitor-title{
+font-size:13px;
+color:#666;
+}
+
+.visitor-count{
+font-size:22px;
+font-weight:700;
+margin-top:4px;
+}
+
 </style>
 </head>
 <body>
@@ -843,9 +933,13 @@ animation:dots 1.4s steps(3,end) infinite;
       <div class="check-grid" id="categoryBox"></div>
 
             <div class="btn-row">
-        <button class="btn primary" onclick="loadData()">조회</button>
-        <button class="btn secondary" onclick="resetFilters()">필터 초기화</button>
-      </div>
+  <button class="btn primary" onclick="loadData()">조회</button>
+  <button class="btn secondary" onclick="resetFilters()">필터 초기화</button>
+</div>
+
+<button class="btn kakao" onclick="openRouteSearch()">
+경로 주변 위험지역 찾기
+</button>
 
 
 <button class="btn secondary" onclick="findNearestToilet()">
@@ -862,21 +956,40 @@ animation:dots 1.4s steps(3,end) infinite;
 <div class="card">
       <h3>조회 결과</h3>
       <div class="summary">
-        <div class="summary-box">
-          <div class="num" id="countTotal">0</div>
-          <div class="txt">표시된 지점 수</div>
-        </div>
-        <div class="summary-box">
-          <div class="num" id="countCity">전체</div>
-          <div class="txt">현재 시군구</div>
-        </div>
-      </div>
-    </div>
+
+<div class="summary-box">
+<div class="num" id="countTotal">0</div>
+<div class="txt">표시된 지점 수</div>
+</div>
+
+<div class="summary-box">
+<div class="num" id="countCity">전체</div>
+<div class="txt">현재 시군구</div>
+</div>
+
+<div class="summary-box">
+<div class="num">{{total_visit}}</div>
+<div class="txt">총 방문자</div>
+</div>
+
+<div class="summary-box">
+<div class="num">{{today_visit}}</div>
+<div class="txt">오늘 방문자</div>
+</div>
+
+</div>
+</div>
 
   </aside>
 
   <main class="map-wrap">
     <div id="map"></div>
+<div class="mobile-result-panel" id="mobileResultPanel">
+  <div class="mobile-result-header">
+    검색 결과 <span id="mobileResultCount">0</span>건
+  </div>
+  <div class="mobile-result-list" id="mobileResultList"></div>
+</div>
     <button id="locBtn">📍</button>
     <div class="top-badge">모바일 / PC 지원</div>
 
@@ -925,7 +1038,6 @@ const CATEGORY_LIST = [
   "공중화장실"
 ];
 
-
 const map = L.map("map", { zoomControl:true }).setView([34.85, 126.90], 9);
 
 let userLat = null;
@@ -951,37 +1063,38 @@ function showLoadingLocation(){
   const modal = document.getElementById("msgModal");
   const box = document.getElementById("msgBox");
 
-  box.innerHTML = `
-  <div style="
+box.innerHTML = `
+<div style="
 display:flex;
 align-items:center;
 justify-content:center;
-gap:14px;
-flex-wrap:nowrap;
+gap:18px;
+
+background:#ffffff;
+border-radius:22px;
+padding:28px 32px;
+
+margin-left:30px;
+margin-right:30px;
+
+box-shadow:0 20px 50px rgba(0,0,0,.25);
 ">
 
-  <img src="/char_left" class="char">
+<img src="/char_left" class="char">
 
-  <div style="
-  background:white;
-  padding:22px;
-  border-radius:14px;
-  width:220px;
-  text-align:center;
-  box-shadow:0 10px 30px rgba(0,0,0,.25);
-  ">
+<div style="
+font-size:16px;
+font-weight:700;
+padding:10px 18px;
+white-space:nowrap;
+">
+📍 위치 확인 중<span class="loading-dots"></span>
+</div>
 
-  <div style="font-size:15px;">
-  📍 위치 확인 중<span class="loading-dots"></span>
-  </div>
+<img src="/char_right" class="char">
 
-  </div>
-
-  <img src="/char_right" class="char">
-
-  </div>
-  `;
-
+</div>
+`;
   modal.style.display = "flex";
 }
 function closeMsg(){
@@ -1029,6 +1142,8 @@ let markerGroup = L.markerClusterGroup({
   spiderfyOnMaxZoom:true,
   disableClusteringAtZoom:15
 });
+
+let routeLine = null;
 map.addLayer(markerGroup);
 
 function setLoading(show){
@@ -1225,6 +1340,54 @@ async function updateTowns(){
   fillTowns(data.towns || []);
 }
 
+async function loadAllMarkers(){
+
+  const res = await fetch("/data");
+  const data = await res.json();
+
+  markerGroup.clearLayers();
+
+  const bounds = [];
+
+  data.forEach(item=>{
+
+    const icon = buildMarkerIcon(item.마커색상);
+
+    const marker = L.marker([item.위도,item.경도],{icon});
+
+    const popupHtml = `
+    <div class="popup-wrap">
+
+    <img class="popup-img" src="${item.사진URL}">
+
+    <div class="popup-title">${escapeHtml(item.구분)}</div>
+
+    <div class="popup-meta">
+    ${escapeHtml(item.시군구)} ${escapeHtml(item.읍면동)}<br>
+    ${escapeHtml(item.주소)}
+    </div>
+
+    <div class="popup-desc">
+    ${escapeHtml(item.사고설명)}
+    </div>
+
+    </div>
+    `;
+
+    marker.bindPopup(popupHtml,{maxWidth:290});
+
+    markerGroup.addLayer(marker);
+
+    bounds.push([item.위도,item.경도]);
+
+  });
+
+  if(bounds.length>0){
+    map.setView([34.85,126.90],9);
+}
+
+}
+
 async function loadData(){
 
   if(isMobile()){
@@ -1345,6 +1508,11 @@ if(isMobile()){
   syncToMobileMap(data);
 }
 
+// 조회 결과 목록 표시 (최대 10개)
+if(data.length > 0){
+  showResultList(data, 0, 0);
+}
+
   }catch(e){
     showMsg("데이터를 불러오는 중 오류가 발생했습니다.");
     console.error(e);
@@ -1384,16 +1552,23 @@ function resetFilters(){
   // 지도 위치 초기화
   map.setView([34.85,126.90],9);
 
-    // 모바일 결과 패널 닫기
+  // ⭐ 경로선 삭제
+  if(routeLine){
+    map.removeLayer(routeLine);
+    routeLine = null;
+  }
+
+  // 모바일 결과 패널 닫기
   const result = document.getElementById("mobileResultPanel");
   if(result){
     result.style.display = "none";
   }
 
-  // 데이터 다시 불러오기
-  loadData();
+  // 전체 마커 다시 표시
+  loadAllMarkers();
 
 }
+
 window.addEventListener("load", function(){
   setTimeout(()=>{
     map.invalidateSize();
@@ -1409,12 +1584,24 @@ window.addEventListener("DOMContentLoaded", function(){
   loadMeta().then(()=>{
     document.getElementById("city").addEventListener("change", updateTowns);
     document.getElementById("province").addEventListener("change", updateCities);
-
-    if(!isMobile()){
-      loadData();
-    }
-
+    loadAllMarkers();
   });
+
+  const destInput = document.getElementById("destInput");
+
+  if(destInput){
+  destInput.addEventListener("input", function(){
+    searchPlaceSuggestions(this.value, "destInput");
+  });
+}
+
+const startInput = document.getElementById("startInput");
+
+if(startInput){
+  startInput.addEventListener("input", function(){
+    searchPlaceSuggestions(this.value, "startInput");
+  });
+}
 
 });
 
@@ -1428,7 +1615,7 @@ heartbeat();
 window.addEventListener("beforeunload", function(){
   navigator.sendBeacon("/bye");
 });
-
+ 
 
 
 function isMobile(){
@@ -1875,37 +2062,61 @@ function showResultList(items, userLat, userLng){
 
     el.onclick = function(){
 
-  map.setView([item.위도,item.경도],16);
+      map.setView([item.위도,item.경도],16);
 
-  markerGroup.eachLayer(function(layer){
+      markerGroup.eachLayer(function(layer){
 
-    if(layer.getLatLng){
+        if(layer.getLatLng){
 
-      const latlng = layer.getLatLng();
+          const latlng = layer.getLatLng();
 
-      if(
-      Math.abs(latlng.lat - item.위도) < 0.00001 &&
-      Math.abs(latlng.lng - item.경도) < 0.00001
-      ){
-      layer.openPopup();
+          if(
+            Math.abs(latlng.lat - item.위도) < 0.00001 &&
+            Math.abs(latlng.lng - item.경도) < 0.00001
+          ){
+            layer.openPopup();
+          }
+
+        }
+
+      });
+
+      if(window.mobileLeafletMap){
+
+        window.mobileLeafletMap.setView([item.위도,item.경도],16);
+
+        if(window.mobileMarkerGroup){
+
+          window.mobileMarkerGroup.eachLayer(function(layer){
+
+            if(layer.getLatLng){
+
+              const latlng = layer.getLatLng();
+
+              if(
+                Math.abs(latlng.lat - item.위도) < 0.00001 &&
+                Math.abs(latlng.lng - item.경도) < 0.00001
+              ){
+                layer.openPopup();
+              }
+
+            }
+
+          });
+
+        }
+
       }
 
-    }
-
-  });
-
-};
+    };
 
     list.appendChild(el);
 
   });
 
   document.getElementById("mobileResultCount").textContent = items.length;
-  
-
 
 }
-
 
 async function runRadius(lat,lng,km){
 
@@ -2105,14 +2316,348 @@ function closeLoadingAfterMinTime(){
 
 }
 
-</script>
+function openRouteSearch(){
+  document.getElementById("routePopup").style.display="flex";
+}
 
-<div class="mobile-result-panel" id="mobileResultPanel">
-  <div class="mobile-result-header">
-    검색 결과 <span id="mobileResultCount">0</span>건
-  </div>
-  <div class="mobile-result-list" id="mobileResultList"></div>
-</div>
+function closeRoutePopup(){
+  document.getElementById("routePopup").style.display="none";
+
+  const box = document.getElementById("destSuggestBox");
+  if(box){
+    box.style.display = "none";
+    box.innerHTML = "";
+  }
+}
+
+
+document.addEventListener("click", function(e){
+
+  const input = document.getElementById("destInput");
+  const box = document.getElementById("destSuggestBox");
+
+  if(!input || !box){
+    return;
+  }
+
+
+  if(e.target !== input && !box.contains(e.target)){
+    box.style.display = "none";
+  }
+
+});
+
+
+async function searchPlaceSuggestions(query, inputId){
+
+  const box = document.getElementById("destSuggestBox");
+
+  if(!box){
+    return;
+  }
+
+  query = query.trim();
+
+  if(query.length < 2){
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+
+  try{
+
+    const res = await fetch("/search_place?q=" + encodeURIComponent(query));
+    const data = await res.json();
+
+    box.innerHTML = "";
+
+    if(!data.documents || data.documents.length === 0){
+      box.innerHTML = `
+        <div style="padding:12px;font-size:13px;color:#64748b;">
+          검색 결과가 없습니다.
+        </div>
+      `;
+      box.style.display = "block";
+      return;
+    }
+
+    data.documents.slice(0,8).forEach(place=>{
+
+      const item = document.createElement("div");
+
+      item.style.padding="10px 12px";
+      item.style.borderBottom="1px solid #f1f5f9";
+      item.style.cursor="pointer";
+      item.style.fontSize="13px";
+      item.style.lineHeight="1.45";
+
+      item.innerHTML=`
+        <div style="font-weight:700;color:#111827;">
+          ${escapeHtml(place.place_name || "")}
+        </div>
+        <div style="color:#64748b;font-size:12px;">
+          ${escapeHtml(place.address_name || "")}
+        </div>
+      `;
+
+      item.onclick=function(){
+
+        const input=document.getElementById(inputId);
+
+        if(input){
+          input.value=place.place_name || "";
+        }
+
+        box.style.display="none";
+        box.innerHTML="";
+      };
+
+      box.appendChild(item);
+
+    });
+
+    box.style.display="block";
+
+  }catch(err){
+
+    console.error("자동완성 검색 오류:",err);
+    box.style.display="none";
+    box.innerHTML="";
+
+  }
+
+}
+
+async function geocodeAddress(query){
+
+  query = query.trim();
+
+  if(!query){
+    return null;
+  }
+
+  const res = await fetch("/search_place?q=" + encodeURIComponent(query));
+  const data = await res.json();
+
+  if(data.documents && data.documents.length > 0){
+    return {
+      lat: parseFloat(data.documents[0].y),
+      lng: parseFloat(data.documents[0].x)
+    };
+  }
+
+  return null;
+
+}
+
+
+function distancePointToLine(px,py,x1,y1,x2,y2){
+
+  const A = px-x1;
+  const B = py-y1;
+  const C = x2-x1;
+  const D = y2-y1;
+
+  const dot = A*C + B*D;
+  const len = C*C + D*D;
+
+  let param = -1;
+
+  if(len!==0){
+    param = dot/len;
+  }
+
+  let xx,yy;
+
+  if(param<0){
+    xx=x1;
+    yy=y1;
+  }else if(param>1){
+    xx=x2;
+    yy=y2;
+  }else{
+    xx=x1 + param*C;
+    yy=y1 + param*D;
+  }
+
+  return calcDistance(px,py,xx,yy);
+
+}
+
+
+async function getRoadRoute(startLat,startLng,endLat,endLng){
+
+  const url =
+  "https://router.project-osrm.org/route/v1/driving/"
+  + startLng + "," + startLat + ";"
+  + endLng + "," + endLat
+  + "?overview=full&geometries=geojson";
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if(!data.routes || data.routes.length === 0){
+    return null;
+  }
+
+  return data.routes[0].geometry.coordinates;
+
+}
+
+function distancePointToRoute(lat, lng, routeLatLngs){
+
+  let minDist = Infinity;
+
+  for(let i = 0; i < routeLatLngs.length - 1; i++){
+
+    const p1 = routeLatLngs[i];
+    const p2 = routeLatLngs[i + 1];
+
+    const dist = distancePointToLine(
+      lat, lng,
+      p1[0], p1[1],
+      p2[0], p2[1]
+    );
+
+    if(dist < minDist){
+      minDist = dist;
+    }
+  }
+
+  return minDist;
+}
+
+
+async function runRouteSearch(){
+  const start = document.getElementById("startInput").value.trim();
+  const dest = document.getElementById("destInput").value.trim();
+
+  if(!dest){
+    showMsg("도착지를 입력하세요.");
+    return;
+  }
+
+  let startLat = userLat;
+  let startLng = userLng;
+
+  if(start){
+    const startGeo = await geocodeAddress(start);
+
+    if(!startGeo){
+      showMsg("출발지를 찾을 수 없습니다.");
+      return;
+    }
+
+    startLat = startGeo.lat;
+    startLng = startGeo.lng;
+  }else{
+    if(userLat === null || userLng === null){
+      showMsg("출발지를 입력하거나 내 위치를 먼저 확인해주세요.");
+      return;
+    }
+  }
+
+  const endGeo = await geocodeAddress(dest);
+
+  if(!endGeo){
+    showMsg("도착지를 찾을 수 없습니다.");
+    return;
+  }
+
+  const endLat = endGeo.lat;
+  const endLng = endGeo.lng;
+  const road = await getRoadRoute(startLat,startLng,endLat,endLng);
+
+let routeLatLngs = [];
+
+if(road){
+  routeLatLngs = road.map(c => [c[1], c[0]]);
+}else{
+  routeLatLngs = [
+    [startLat, startLng],
+    [endLat, endLng]
+  ];
+}
+
+  const res = await fetch("/data");
+const data = await res.json();
+
+const radius = 120;
+
+const filtered = [];
+
+data.forEach(item=>{
+
+  const dist = distancePointToRoute(
+    item.위도,
+    item.경도,
+    routeLatLngs
+  );
+
+  if(dist <= radius){
+    filtered.push(item);
+  }
+
+});
+
+  markerGroup.clearLayers();
+
+  filtered.forEach(item=>{
+    const icon = buildMarkerIcon(item.마커색상);
+    const marker = L.marker([item.위도, item.경도], {icon});
+
+    const popupHtml = `
+    <div class="popup-wrap">
+      <img class="popup-img" src="${item.사진URL}">
+      <div class="popup-title">${item.구분}</div>
+      <div class="popup-meta">
+        ${item.시군구} ${item.읍면동}<br>
+        ${item.주소}
+      </div>
+      <div class="popup-desc">
+        ${item.사고설명}
+      </div>
+    </div>
+    `;
+
+    marker.bindPopup(popupHtml,{maxWidth:290});
+    markerGroup.addLayer(marker);
+  });
+
+  if(routeLine){
+    map.removeLayer(routeLine);
+  }
+
+routeLine = L.polyline(
+  routeLatLngs,
+  {color:"#2563eb", weight:5}
+).addTo(map);
+
+  map.fitBounds(
+    [
+      [startLat, startLng],
+      [endLat, endLng]
+    ],
+    {padding:[60,60]}
+  );
+
+  const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
+  const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
+
+  showMsg(
+    `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
+  );
+
+  showResultList(filtered, startLat, startLng);
+
+  if(isMobile()){
+  document.getElementById("mobileResultPanel").style.display="flex";
+}
+
+  closeRoutePopup();
+}
+
+</script>
 
 <div class="mobile-map-popup" id="mobileMapPopup">
 
@@ -2160,18 +2705,21 @@ z-index:5000;
 ">
 
 <div id="msgBox" style="
-background:white;
-padding:22px;
-border-radius:14px;
-width:420px;
+background:#ffffff;
+padding:24px 22px;
+border-radius:18px;
+width:320px;
 text-align:center;
-box-shadow:0 10px 30px rgba(0,0,0,.25);
+box-shadow:0 18px 40px rgba(0,0,0,0.18);
 ">
 
 <div id="msgText" style="
-font-size:15px;
+font-size:16px;
 margin-bottom:18px;
-line-height:1.5;
+line-height:1.7;
+white-space:pre-line;
+color:#0f172a;
+font-weight:700;
 "></div>
 
 <button id="msgBtn" onclick="closeMsg()" style="
@@ -2188,6 +2736,70 @@ cursor:pointer;
 
 </div>
 </div>
+
+<div id="routePopup" style="
+position:fixed;
+inset:0;
+background:rgba(0,0,0,.4);
+display:none;
+align-items:center;
+justify-content:center;
+z-index:6000;
+">
+
+<div style="
+background:white;
+padding:20px;
+border-radius:14px;
+width:340px;
+">
+
+<h3 style="margin-top:0">경로 설정</h3>
+
+<input id="startInput"
+placeholder="출발지 입력 (예: 나주시청)"
+style="
+width:100%;
+height:40px;
+padding:0 10px;
+border:1px solid #cbd5e1;
+border-radius:8px;
+margin-bottom:10px;
+">
+<input id="destInput"
+placeholder="도착지 입력 (예: 나주시청)"
+style="
+width:100%;
+height:40px;
+padding:0 10px;
+border:1px solid #cbd5e1;
+border-radius:8px;
+margin-bottom:12px;
+">
+
+<div id="destSuggestBox" style="
+display:none;
+width:100%;
+height:180px;
+overflow-y:auto;
+border:1px solid #e5e7eb;
+border-radius:10px;
+background:#ffffff;
+margin-bottom:12px;
+box-shadow:0 4px 14px rgba(0,0,0,0.08);
+"></div>
+
+<button class="btn primary" onclick="runRouteSearch()">
+경로 조회
+</button>
+
+<button class="btn secondary" onclick="closeRoutePopup()">
+닫기
+</button>
+
+</div>
+</div>
+
 </body>
 </html>
 """
@@ -2214,7 +2826,15 @@ def photo_ice():
 
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+
+    visitor = update_visitors()
+
+    return render_template_string(
+        HTML,
+        total_visit=visitor["total"],
+        today_visit=visitor["today_count"]
+    )
+
 
 
 @app.route("/meta")
@@ -2376,6 +2996,5 @@ if __name__ == "__main__":
     if os.environ.get("RENDER_SERVICE_ID") is None:
         threading.Thread(target=shutdown_watcher, daemon=True).start()
         threading.Thread(target=open_preferred_browser, args=(url,), daemon=True).start()
-
 
     app.run(host="0.0.0.0", port=port, debug=False)
