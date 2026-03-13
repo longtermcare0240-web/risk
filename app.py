@@ -84,9 +84,6 @@ TYPE_ORDER = [
 DEFAULT_CENTER = [34.85, 126.90]
 DEFAULT_ZOOM = 9
 
-last_heartbeat = time.time()
-shutdown_started = False
-
 
 def safe_str(v):
     if pd.isna(v):
@@ -1506,7 +1503,7 @@ if(isMobile()){
 
 // 조회 결과 목록 표시 (최대 10개)
 if(data.length > 0){
-  showResultList(data, 0, 0);
+  showResultList(data, userLat || 0, userLng || 0);
 }
 
   }catch(e){
@@ -1599,17 +1596,6 @@ if(startInput){
 
 });
 
-// ===== 브라우저 닫힘 감지용 heartbeat =====
-function heartbeat(){
-  fetch("/heartbeat", {method:"POST"}).catch(()=>{});
-}
-setInterval(heartbeat, 5000);
-heartbeat();
-
-window.addEventListener("beforeunload", function(){
-  navigator.sendBeacon("/bye");
-});
- 
 
 
 function isMobile(){
@@ -2231,17 +2217,16 @@ window.addEventListener("popstate", function(){
 const popup = document.getElementById("mobileMapPopup");
 const result = document.getElementById("mobileResultPanel");
 
-if(result && result.style.display === "flex"){
+if(result){
   result.style.display = "none";
-  return;
 }
 
-if(popup && popup.style.display === "flex"){
+if(popup){
   popup.style.display = "none";
-  return;
 }
 
 });
+
 
 window.addEventListener("DOMContentLoaded", function(){
 
@@ -2523,12 +2508,6 @@ function distancePointToRoute(lat, lng, routeLatLngs){
   return minDist;
 }
 
-showResultList(filtered, startLat, startLng);
-
-if(isMobile()){
-  document.getElementById("mobileResultPanel").style.display="flex";
-}
-
 async function runRouteSearch(){
 
   if(isMobile()){
@@ -2661,6 +2640,10 @@ if(isMobile() && window.mobileLeafletMap){
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
+
+  if(isMobile()){
+  syncToMobileMap(filtered,startLat,startLng);
+}
 
   showMsg(
     `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
@@ -2956,33 +2939,6 @@ def sample_image():
     return Response(svg, mimetype="image/svg+xml")
 
 
-@app.route("/heartbeat", methods=["POST"])
-def heartbeat():
-    global last_heartbeat
-    last_heartbeat = time.time()
-    return ("", 204)
-
-
-@app.route("/bye", methods=["POST"])
-def bye():
-    global last_heartbeat
-    last_heartbeat = 0
-    return ("", 204)
-
-
-def shutdown_watcher():
-    global shutdown_started
-    while True:
-        time.sleep(3)
-        if shutdown_started:
-            return
-
-        # 브라우저 닫힘 이후 10초 내 서버 종료
-        if time.time() - last_heartbeat > 10:
-            shutdown_started = True
-            print("브라우저 연결이 종료되어 서버를 닫습니다.")
-            os._exit(0)
-
 
 def open_preferred_browser(url):
     time.sleep(1.5)
@@ -3013,7 +2969,6 @@ if __name__ == "__main__":
 
     # 로컬 실행일 때만 브라우저 자동 열기
     if os.environ.get("RENDER_SERVICE_ID") is None:
-        threading.Thread(target=shutdown_watcher, daemon=True).start()
         threading.Thread(target=open_preferred_browser, args=(url,), daemon=True).start()
 
     app.run(host="0.0.0.0", port=port, debug=False)
