@@ -770,10 +770,10 @@ cursor:pointer;
 
 .mobile-result-panel{
   position:absolute;
-  left:0;
+  left:360px;
   right:0;
   bottom:0;
-  width:100%;
+  width:auto;
   height:180px;
   max-height:40%;
   background:white;
@@ -974,12 +974,6 @@ margin-top:4px;
 
   <main class="map-wrap">
     <div id="map"></div>
-<div class="mobile-result-panel" id="mobileResultPanel">
-  <div class="mobile-result-header">
-    검색 결과 <span id="mobileResultCount">0</span>건
-  </div>
-  <div class="mobile-result-list" id="mobileResultList"></div>
-</div>
     <button id="locBtn">📍</button>
     <div class="top-badge">모바일 / PC 지원</div>
 
@@ -1190,43 +1184,51 @@ function closeMsg(){
 }
 
 function showMobileResults(items, userLat, userLng){
+
 history.pushState({mobileResult:true}, "");
-  const panel = document.getElementById("mobileResultPanel");
-  const list = document.getElementById("mobileResultList");
 
-  panel.style.display = "flex";
+const panel = document.getElementById("mobileResultPanel");
+const list = document.getElementById("mobileResultList");
 
-  list.innerHTML = "";
+panel.style.display = "flex";
 
-  items.forEach(item=>{
+list.innerHTML = "";
 
-    const dist = Math.round(
-      calcDistance(userLat,userLng,item.위도,item.경도)
-    );
+items.forEach(item=>{
 
-    const el = document.createElement("div");
+let distHtml = "";
 
-    el.className = "mobile-result-item";
+if(userLat && userLng){
+  const dist = Math.round(
+    calcDistance(userLat,userLng,item.위도,item.경도)
+  );
 
-    el.innerHTML = `
-      <b>${item.구분}</b><br>
-      ${item.시군구} ${item.읍면동}<br>
-      <span class="mobile-result-distance">${dist} m</span>
-    `;
+  distHtml = `<span class="mobile-result-distance">${dist} m</span>`;
+}
 
-    el.onclick = function(){
+const el = document.createElement("div");
 
-      window.mobileLeafletMap.setView(
-        [item.위도,item.경도],16
-      );
+el.className = "mobile-result-item";
 
-    };
+el.innerHTML = `
+  <b>${item.구분}</b><br>
+  ${item.시군구} ${item.읍면동}<br>
+  ${distHtml}
+`;
 
-    list.appendChild(el);
+el.onclick = function(){
 
-  });
+  window.mobileLeafletMap.setView(
+    [item.위도,item.경도],16
+  );
 
-  document.getElementById("mobileResultCount").textContent = items.length;
+};
+
+list.appendChild(el);
+
+});
+
+document.getElementById("mobileResultCount").textContent = items.length;
 
 }
 
@@ -1537,15 +1539,27 @@ if(isMobile()){
 
 // 조회 결과 목록 표시 (최대 10개)
 // 결과 목록 표시 조건
+// 조회 결과 목록 표시 조건
 const panel = document.getElementById("mobileResultPanel");
 
-if(!isMobile() && data.length > 0 && data.length <= 5000){
-  showResultList(data, userLat || 0, userLng || 0);
+if(isMobile()){
+
+  if(data.length > 0 && data.length <= 1000){
+    showMobileResults(data, userLat || 0, userLng || 0);
+  }else{
+    if(panel){
+      panel.style.display = "none";
+    }
+  }
 
 }else{
 
-  if(panel){
-    panel.style.display = "none";
+  if(data.length > 0){
+    showResultList(data, userLat || 0, userLng || 0);
+  }else{
+    if(panel){
+      panel.style.display = "none";
+    }
   }
 
 }
@@ -1621,39 +1635,19 @@ window.addEventListener("DOMContentLoaded", function(){
     loadAllMarkers();
   });
 
-  let searchTimer = null;
+  document.addEventListener("input", function(e){
 
-  function handleAutoSearch(value,id){
+    if(e.target.id === "destInput"){
+      searchPlaceSuggestions(e.target.value,"destInput");
+    }
 
-    clearTimeout(searchTimer);
+    if(e.target.id === "startInput"){
+      searchPlaceSuggestions(e.target.value,"startInput");
+    }
 
-    searchTimer = setTimeout(function(){
+  });
 
-      searchPlaceSuggestions(value,id);
-
-    },300);
-
-  }
-
-  const destInput = document.getElementById("destInput");
-
-  if(destInput){
-    destInput.addEventListener("input", function(){
-      handleAutoSearch(this.value,"destInput");
-    });
-  }
-
-  const startInput = document.getElementById("startInput");
-
-  if(startInput){
-    startInput.addEventListener("input", function(){
-      handleAutoSearch(this.value,"startInput");
-    });
-  }
-
-});
-
-
+});   // 🔴 이 줄 추가
 
 function isMobile(){
   return window.innerWidth < 900;
@@ -1850,11 +1844,11 @@ items.forEach(item=>{
 
 
 // 🔵 여기 추가
-if(userLat && userLng){
-  showMobileResults(items,userLat,userLng);
-}
+  if(items.length <= 1000){
+    showMobileResults(items,userLat,userLng);
+  }
 
-}  
+}  // ← 이거 추가, syncToMobileMap 종료
 
 
 async function findNearestToilet(){
@@ -1975,7 +1969,7 @@ const data = ALL_DATA_CACHE;
   });
 
   filtered.sort((a,b)=>a._dist-b._dist);
-  filtered.splice(100);
+  filtered.splice(10);
 
   if(filtered.length === 0){
 
@@ -2091,11 +2085,7 @@ async function findRadius(km){
 function showResultList(items, userLat, userLng){
 
   const currentMap = isMobile() ? window.mobileLeafletMap : map;
-  const bounds = currentMap.getBounds();
-
-  const visible = items.filter(item =>
-    bounds.contains([item.위도, item.경도])
-  );
+  
 
   const panel = document.getElementById("mobileResultPanel");
   const list = document.getElementById("mobileResultList");
@@ -2103,11 +2093,15 @@ function showResultList(items, userLat, userLng){
   panel.style.display = "flex";
   list.innerHTML = "";
 
-  visible.forEach(item=>{
+  items.forEach(item=>{
 
-    const dist = Math.round(
-      calcDistance(userLat,userLng,item.위도,item.경도)
-    );
+    let dist = "";
+
+    if(userLat && userLng){
+      dist = Math.round(
+        calcDistance(userLat,userLng,item.위도,item.경도)
+      );
+    }
 
     const el = document.createElement("div");
 
@@ -2116,19 +2110,19 @@ function showResultList(items, userLat, userLng){
     el.innerHTML = `
       <b>${item.구분}</b><br>
       ${item.시군구} ${item.읍면동}<br>
-      <span class="mobile-result-distance">${dist} m</span>
+      ${dist ? `<span class="mobile-result-distance">${dist} m</span>` : ""}
     `;
 
     el.onclick = function(){
-  const currentMap = isMobile() ? window.mobileLeafletMap : map;
-  currentMap.setView([item.위도,item.경도],16);
-};
+      const currentMap = isMobile() ? window.mobileLeafletMap : map;
+      currentMap.setView([item.위도,item.경도],16);
+    };
 
     list.appendChild(el);
 
   });
 
-  document.getElementById("mobileResultCount").textContent = visible.length;
+  document.getElementById("mobileResultCount").textContent = items.length;
 
 }
 
@@ -2752,10 +2746,6 @@ map.on("moveend", function(){
 
   if(CURRENT_DATA && CURRENT_DATA.length > 0 && CURRENT_DATA.length <= 1000){
 
-    showResultList(CURRENT_DATA, userLat || 0, userLng || 0);
-
-  }
-
 });
 
 </script>
@@ -2770,10 +2760,10 @@ map.on("moveend", function(){
   </div>
 
   <div id="mobileMap" class="mobile-map"></div>
+
   <button id="mobileLocBtn">📍</button>
 
   <div class="map-legend">
-
 
     <div class="map-legend-item">
       <span class="map-legend-dot" style="background:#06b6d4"></span>
@@ -2785,14 +2775,21 @@ map.on("moveend", function(){
       공중화장실
     </div>
 
-<div class="map-legend-item">
-  <span class="map-legend-dot" style="background:#2563eb"></span>
-  내 위치
-</div>
-
+    <div class="map-legend-item">
+      <span class="map-legend-dot" style="background:#2563eb"></span>
+      내 위치
+    </div>
 
   </div>
 
+</div>
+
+
+<div class="mobile-result-panel" id="mobileResultPanel">
+  <div class="mobile-result-header">
+    검색 결과 <span id="mobileResultCount">0</span>건
+  </div>
+  <div class="mobile-result-list" id="mobileResultList"></div>
 </div>
 
 
