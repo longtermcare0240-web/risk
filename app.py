@@ -2276,21 +2276,28 @@ err=>{
 
 });
 window.addEventListener("popstate", function(){
-clearRoute();   // ⭐ 추가
+
+clearRoute();
 
 const popup = document.getElementById("mobileMapPopup");
 const result = document.getElementById("mobileResultPanel");
 
-if(result){
-  result.style.display = "none";
-}
+if(result) result.style.display="none";
+if(popup) popup.style.display="none";
 
-if(popup){
-  popup.style.display = "none";
+const s = document.getElementById("startInput");
+const d = document.getElementById("destInput");
+
+if(s) s.value="";
+if(d) d.value="";
+
+const box = document.getElementById("destSuggestBox");
+if(box){
+  box.style.display="none";
+  box.innerHTML="";
 }
 
 });
-
 
 window.addEventListener("DOMContentLoaded", function(){
 
@@ -2366,13 +2373,26 @@ function openRouteSearch(){
 }
 
 function closeRoutePopup(){
+
   document.getElementById("routePopup").style.display="none";
+
+  const s = document.getElementById("startInput");
+  const d = document.getElementById("destInput");
+
+  if(s){
+    s.value = "";
+  }
+
+  if(d){
+    d.value = "";
+  }
 
   const box = document.getElementById("destSuggestBox");
   if(box){
     box.style.display = "none";
     box.innerHTML = "";
   }
+
 }
 
 
@@ -2844,7 +2864,7 @@ width:340px;
 <h3 style="margin-top:0">경로 설정</h3>
 
 <input id="startInput"
-placeholder="출발지 입력 (예: 나주시청)"
+placeholder="출발지 입력 (예: 전라남도청)"
 autocomplete="off"
 
 style="
