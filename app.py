@@ -770,7 +770,7 @@ cursor:pointer;
 
 .mobile-result-panel{
   position:absolute;
-  left:360px;
+  left:0;
   right:0;
   bottom:0;
   width:auto;
