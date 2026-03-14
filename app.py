@@ -612,7 +612,13 @@ display:none;
 }
 
 .mobile-map{
-  flex:1;
+  height:calc(100vh - 180px);
+}
+
+@media (max-width:900px){
+  .mobile-map{
+    height:calc(100vh - 180px);
+  }
 }
 
 @media(min-width:901px){
@@ -1185,7 +1191,7 @@ function closeMsg(){
 
 function showMobileResults(items, userLat, userLng){
 
-history.pushState({mobileResult:true}, "");
+history.pushState({mobileResult:true,panel:true}, "");
 
 const panel = document.getElementById("mobileResultPanel");
 const list = document.getElementById("mobileResultList");
@@ -1545,7 +1551,7 @@ const panel = document.getElementById("mobileResultPanel");
 if(isMobile()){
 
   if(data.length > 0 && data.length <= 1000){
-    showMobileResults(data, userLat || 0, userLng || 0);
+
   }else{
     if(panel){
       panel.style.display = "none";
@@ -2242,14 +2248,16 @@ err=>{
   }
 
 });
-window.addEventListener("popstate", function(){
+window.addEventListener("popstate", function(event){
 
 clearRoute();
 
 const popup = document.getElementById("mobileMapPopup");
 const result = document.getElementById("mobileResultPanel");
 
-if(result) result.style.display="none";
+if(result && !event.state?.panel){
+  result.style.display="none";
+}
 if(popup) popup.style.display="none";
 
 const s = document.getElementById("startInput");
