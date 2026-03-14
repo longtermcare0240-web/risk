@@ -1342,14 +1342,18 @@ async function updateCities(){
 
   const province = document.getElementById("province").value;
 
-  const res = await fetch(`/cities?province=${encodeURIComponent(province)}`);
+  const res = await fetch(
+    "/cities?province=" + encodeURIComponent(province)
+  );
 
   const data = await res.json();
 
   fillCities(data.cities || []);
 
-}
+  // 시군구 바뀌면 읍면동도 다시 로드
+  updateTowns();
 
+}
 
 async function updateTowns(){
   const province = document.getElementById("province").value;
@@ -1363,7 +1367,8 @@ async function loadAllMarkers(){
 
   if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
+  const result = await res.json();
+  ALL_DATA_CACHE = result.data;
 }
 
 const data = ALL_DATA_CACHE;
@@ -1413,8 +1418,7 @@ const data = ALL_DATA_CACHE;
 
 async function loadData(){
 
-  clearRoute();   // ⭐ 추가
-
+  clearRoute();
 
   if(isMobile()){
     openMobileMap();
@@ -1438,16 +1442,12 @@ async function loadData(){
   categories.forEach(cat => params.append("category", cat));
 
   try{
-    let data;
 
-if(!ALL_DATA_CACHE){
-  const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
-}
+    const res = await fetch("/data?" + params.toString());
+    const result = await res.json();
+    const data = result.data;
+    const total = result.total;
 
-data = ALL_DATA_CACHE;
-
-    
     const bounds = [];
 
     data.forEach(item => {
@@ -1539,11 +1539,15 @@ if(isMobile()){
 }
 
 // 조회 결과 목록 표시 (최대 10개)
-if(data.length > 0){
+// 결과가 5000개 미만일 때만 목록 표시
+if(total < 5000){
   showResultList(data, userLat || 0, userLng || 0);
-}
-
-  }catch(e){
+}else{
+  const panel = document.getElementById("mobileResultPanel");
+  if(panel){
+    panel.style.display = "none";
+  }
+}  }catch(e){
     showMsg("데이터를 불러오는 중 오류가 발생했습니다.");
     console.error(e);
 
@@ -1617,17 +1621,23 @@ window.addEventListener("DOMContentLoaded", function(){
   const destInput = document.getElementById("destInput");
 
 if(destInput){
-  destInput.addEventListener("input", function(){
+  destInput.addEventListener(
+  "input",
+  debounce(function(){
     searchPlaceSuggestions(this.value, "destInput");
-  });
+  }, 400)
+);
 }
 
 const startInput = document.getElementById("startInput");
 
 if(startInput){
-  startInput.addEventListener("input", function(){
+  startInput.addEventListener(
+  "input",
+  debounce(function(){
     searchPlaceSuggestions(this.value, "startInput");
-  });
+  }, 400)
+);
 }
 
 
@@ -1921,7 +1931,8 @@ async function runNearestSearch(lat,lng,targetType){
 
   if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
+  const result = await res.json();
+  ALL_DATA_CACHE = result.data;
 }
 
 const data = ALL_DATA_CACHE;
@@ -2150,7 +2161,8 @@ async function runRadius(lat,lng,km){
 
   if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
+  const result = await res.json();
+  ALL_DATA_CACHE = result.data;
 }
 
 const data = ALL_DATA_CACHE;
@@ -2390,7 +2402,7 @@ async function searchPlaceSuggestions(query, inputId){
 
   query = query.trim();
 
-  if(query.length < 2){
+  if(query.length < 3){
     box.style.display = "none";
     box.innerHTML = "";
     return;
@@ -2413,7 +2425,7 @@ async function searchPlaceSuggestions(query, inputId){
       return;
     }
 
-    data.documents.slice(0,8).forEach(place=>{
+    data.documents.slice(0,5).forEach(place=>{
 
       const item = document.createElement("div");
 
@@ -2546,28 +2558,29 @@ function distancePointToRoute(lat, lng, routeLatLngs){
     const p2 = routeLatLngs[i + 1];
 
     const dist = distancePointToLine(
-      lat, lng,
-      p1[0], p1[1],
-      p2[0], p2[1]
+      lng, lat,
+      p1[1], p1[0],
+      p2[1], p2[0]
     );
 
     if(dist < minDist){
       minDist = dist;
     }
+
   }
 
   return minDist;
 }
 
-
 async function runRouteSearch(){
 
-  clearRoute();   // ⭐ 추가
-
+  clearRoute();
 
   if(isMobile()){
     openMobileMap();
+    await new Promise(r => setTimeout(r,300));
   }
+
   const start = document.getElementById("startInput").value.trim();
   const dest = document.getElementById("destInput").value.trim();
 
@@ -2618,9 +2631,10 @@ if(road){
   ];
 }
 
-  if(!ALL_DATA_CACHE){
+ if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
+  const result = await res.json();
+  ALL_DATA_CACHE = result.data;
 }
 
 const data = ALL_DATA_CACHE;
@@ -2715,6 +2729,23 @@ if(isMobile() && window.mobileLeafletMap){
 }
 
   closeRoutePopup();
+}
+
+
+function debounce(fn, delay){
+
+  let timer;
+
+  return function(...args){
+
+    clearTimeout(timer);
+
+    timer = setTimeout(()=>{
+      fn.apply(this, args);
+    }, delay);
+
+  };
+
 }
 
 </script>
@@ -2820,7 +2851,7 @@ width:340px;
 <h3 style="margin-top:0">경로 설정</h3>
 
 <input id="startInput"
-placeholder="출발지 입력 (예: 나주시청)"
+placeholder="출발지 입력 (예: 광주전라제주지역본부)"
 style="
 width:100%;
 height:40px;
@@ -2830,7 +2861,7 @@ border-radius:8px;
 margin-bottom:10px;
 ">
 <input id="destInput"
-placeholder="도착지 입력 (예: 나주시청)"
+placeholder="도착지 입력 (예: 전라남도청)"
 style="
 width:100%;
 height:40px;
@@ -2971,10 +3002,14 @@ def data():
     if categories:
         df = df[df["구분"].isin(categories)]
 
+    total_count = len(df)
+
     records = df.head(5000).apply(row_to_dict, axis=1).tolist()
 
-    return jsonify(records)
-
+    return jsonify({
+        "total": total_count,
+        "data": records
+    })
 
 @app.route("/sample-image")
 def sample_image():
