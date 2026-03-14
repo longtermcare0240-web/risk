@@ -2662,7 +2662,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 700;
+const radius = 200;
 
 const filtered = [];
 
