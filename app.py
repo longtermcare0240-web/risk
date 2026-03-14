@@ -1129,7 +1129,7 @@ L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
     maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
+    attribution: "&copy; OpenStreetMap contributors"
   }
 ).addTo(map);
 
@@ -1705,6 +1705,10 @@ function closeMobileMap(){
 
 
 function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
+
+  if(!window.mobileLeafletMap){
+  openMobileMap();
+}
 
   if(!isMobile()) return;
 
@@ -2658,7 +2662,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 120;
+const radius = 700;
 
 const filtered = [];
 
@@ -2676,7 +2680,11 @@ data.forEach(item=>{
 
 });
 
+console.log("경로 주변 검색 결과 개수:", filtered.length);
+
+  if(!isMobile()){
   markerGroup.clearLayers();
+}
 
   filtered.forEach(item=>{
     const icon = buildMarkerIcon(item.마커색상);
@@ -2697,7 +2705,9 @@ data.forEach(item=>{
     `;
 
     marker.bindPopup(popupHtml,{maxWidth:290});
-    markerGroup.addLayer(marker);
+    if(!isMobile()){
+  markerGroup.addLayer(marker);
+}
   });
 
   if(routeLine){
@@ -2722,13 +2732,16 @@ if(isMobile() && window.mobileLeafletMap){
 
 }
 
-  map.fitBounds(
-    [
-      [startLat, startLng],
-      [endLat, endLng]
-    ],
-    {padding:[60,60]}
-  );
+  const bounds = [
+  [startLat, startLng],
+  [endLat, endLng]
+];
+
+filtered.forEach(item => {
+  bounds.push([item.위도, item.경도]);
+});
+
+map.fitBounds(bounds, { padding:[60,60] });
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
@@ -2864,7 +2877,7 @@ width:340px;
 <h3 style="margin-top:0">경로 설정</h3>
 
 <input id="startInput"
-placeholder="출발지 입력 (예: 전라남도청)"
+placeholder="출발지 입력 (예: 광주전라제주지역본부)"
 autocomplete="off"
 
 style="
@@ -2876,7 +2889,7 @@ border-radius:8px;
 margin-bottom:10px;
 ">
 <input id="destInput"
-placeholder="도착지 입력 (예: 나주시청)"
+placeholder="도착지 입력 (예: 전라남도청)"
 autocomplete="off"
 
 style="
