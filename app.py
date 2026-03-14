@@ -2662,7 +2662,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 200;
+const radius = 150;
 
 const filtered = [];
 
@@ -2750,11 +2750,15 @@ map.fitBounds(bounds, { padding:[60,60] });
   syncToMobileMap(filtered,startLat,startLng);
 }
 
+  if(!isMobile()){
   showMsg(
     `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
   );
+}
 
-  showResultList(filtered, startLat, startLng);
+  if(!isMobile()){
+  showResultList(filtered,startLat,startLng);
+}
 
   if(isMobile()){
   document.getElementById("mobileResultPanel").style.display="flex";
