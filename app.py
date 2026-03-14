@@ -1532,13 +1532,17 @@ if(!isMobile()){
 
 if(isMobile()){
   syncToMobileMap(data);
+
+  setTimeout(()=>{
+    showResultList(data, userLat || 0, userLng || 0);
+  },300);
 }
 
 // 조회 결과 목록 표시 (최대 10개)
 // 결과 목록 표시 조건
 const panel = document.getElementById("mobileResultPanel");
 
-if(data.length > 0 && data.length <= 5000){
+if(data.length > 0 && data.length <= (isMobile() ? 1000 : 5000)){
 
   showResultList(data, userLat || 0, userLng || 0);
 
@@ -2090,7 +2094,8 @@ async function findRadius(km){
 
 function showResultList(items, userLat, userLng){
 
-  const bounds = map.getBounds();   // 현재 지도 영역
+  const currentMap = isMobile() ? window.mobileLeafletMap : map;
+  const bounds = currentMap.getBounds();
 
   const visible = items.filter(item =>
     bounds.contains([item.위도, item.경도])
@@ -2119,8 +2124,9 @@ function showResultList(items, userLat, userLng){
     `;
 
     el.onclick = function(){
-      map.setView([item.위도,item.경도],16);
-    };
+  const currentMap = isMobile() ? window.mobileLeafletMap : map;
+  currentMap.setView([item.위도,item.경도],16);
+};
 
     list.appendChild(el);
 
@@ -2746,7 +2752,7 @@ map.on("moveend", function(){
     return;
   }
 
-  if(CURRENT_DATA && CURRENT_DATA.length > 0 && CURRENT_DATA.length <= 5000){
+  if(CURRENT_DATA && CURRENT_DATA.length > 0 && CURRENT_DATA.length <= 1000){
 
     showResultList(CURRENT_DATA, userLat || 0, userLng || 0);
 
