@@ -3061,10 +3061,5 @@ def open_preferred_browser(url):
 if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
-    url = f"http://127.0.0.1:{port}"
-
-    # 로컬 실행일 때만 브라우저 자동 열기
-    if os.environ.get("RENDER_SERVICE_ID") is None:
-        threading.Thread(target=open_preferred_browser, args=(url,), daemon=True).start()
 
     app.run(host="0.0.0.0", port=port, debug=False)
