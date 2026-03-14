@@ -1008,6 +1008,15 @@ margin-top:4px;
 
 
     <div class="loading" id="loadingBox">데이터를 불러오는 중입니다...</div>
+    <div class="mobile-result-panel" id="mobileResultPanel">
+  <div class="mobile-result-header">
+    검색 결과 <span id="mobileResultCount">0</span>건
+  </div>
+  <div class="mobile-result-list" id="mobileResultList"></div>
+</div>
+
+
+
   </main>
 </div>
 
@@ -1540,6 +1549,7 @@ if(!isMobile()){
 
 if(isMobile()){
   syncToMobileMap(data);
+  showMobileResults(data,userLat,userLng);
 }
 
 
@@ -1550,8 +1560,8 @@ const panel = document.getElementById("mobileResultPanel");
 
 if(isMobile()){
 
-  if(data.length > 0 && data.length <= 1000){
-
+  if(data.length > 0){
+    showMobileResults(data,userLat,userLng);
   }else{
     if(panel){
       panel.style.display = "none";
@@ -1561,7 +1571,7 @@ if(isMobile()){
 }else{
 
   if(data.length > 0){
-    showResultList(data, userLat || 0, userLng || 0);
+    showMobileResults(data,userLat,userLng);
   }else{
     if(panel){
       panel.style.display = "none";
@@ -2779,14 +2789,6 @@ window.addEventListener("pageshow", function(){
 
   </div>
 
-</div>
-
-
-<div class="mobile-result-panel" id="mobileResultPanel">
-  <div class="mobile-result-header">
-    검색 결과 <span id="mobileResultCount">0</span>건
-  </div>
-  <div class="mobile-result-list" id="mobileResultList"></div>
 </div>
 
 
