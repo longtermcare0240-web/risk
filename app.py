@@ -155,7 +155,7 @@ def load_df():
 
     df = pd.read_excel(FILE_PATH)
     
-    required = ["순번", "구분", "시도", "시군구", "주소", "위도", "경도"]
+    required = ["순번", "구분", "시군구", "주소", "위도", "경도"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"엑셀에 '{col}' 열이 없습니다.")
@@ -1016,7 +1016,8 @@ margin-top:4px;
 
 <script>
 let ALL_DATA_CACHE = null;
-
+let CURRENT_DATA = [];
+let ROUTE_MODE = false;
 
 const CATEGORY_COLORS = {
   "상습결빙지역": "#06b6d4",
@@ -1412,7 +1413,7 @@ const data = ALL_DATA_CACHE;
 }
 
 async function loadData(){
-
+  ROUTE_MODE = false;
   clearRoute();   // ⭐ 추가
 
 
@@ -1438,15 +1439,10 @@ async function loadData(){
   categories.forEach(cat => params.append("category", cat));
 
   try{
-    let data;
 
-if(!ALL_DATA_CACHE){
-  const res = await fetch("/data");
-  ALL_DATA_CACHE = await res.json();
-}
-
-data = ALL_DATA_CACHE;
-
+const res = await fetch("/data?" + params.toString());
+const data = await res.json();
+CURRENT_DATA = data;
     
     const bounds = [];
 
@@ -1539,8 +1535,19 @@ if(isMobile()){
 }
 
 // 조회 결과 목록 표시 (최대 10개)
-if(data.length > 0){
+// 결과 목록 표시 조건
+const panel = document.getElementById("mobileResultPanel");
+
+if(data.length > 0 && data.length <= 5000){
+
   showResultList(data, userLat || 0, userLng || 0);
+
+}else{
+
+  if(panel){
+    panel.style.display = "none";
+  }
+
 }
 
   }catch(e){
@@ -1936,11 +1943,10 @@ async function findNearestDanger(){
 
 async function runNearestSearch(lat,lng,targetType){
 
-  if(!ALL_DATA_CACHE){
+if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
   ALL_DATA_CACHE = await res.json();
 }
-
 const data = ALL_DATA_CACHE;
 
   const radius = 5000;
@@ -1972,6 +1978,7 @@ const data = ALL_DATA_CACHE;
   filtered.splice(10);
 
   if(filtered.length === 0){
+
 
     showMsg("주변에 데이터가 없습니다.");
 
@@ -2083,13 +2090,19 @@ async function findRadius(km){
 
 function showResultList(items, userLat, userLng){
 
+  const bounds = map.getBounds();   // 현재 지도 영역
+
+  const visible = items.filter(item =>
+    bounds.contains([item.위도, item.경도])
+  );
+
   const panel = document.getElementById("mobileResultPanel");
   const list = document.getElementById("mobileResultList");
 
   panel.style.display = "flex";
   list.innerHTML = "";
 
-  items.forEach(item=>{
+  visible.forEach(item=>{
 
     const dist = Math.round(
       calcDistance(userLat,userLng,item.위도,item.경도)
@@ -2106,60 +2119,14 @@ function showResultList(items, userLat, userLng){
     `;
 
     el.onclick = function(){
-
       map.setView([item.위도,item.경도],16);
-
-      markerGroup.eachLayer(function(layer){
-
-        if(layer.getLatLng){
-
-          const latlng = layer.getLatLng();
-
-          if(
-            Math.abs(latlng.lat - item.위도) < 0.00001 &&
-            Math.abs(latlng.lng - item.경도) < 0.00001
-          ){
-            layer.openPopup();
-          }
-
-        }
-
-      });
-
-      if(window.mobileLeafletMap){
-
-        window.mobileLeafletMap.setView([item.위도,item.경도],16);
-
-        if(window.mobileMarkerGroup){
-
-          window.mobileMarkerGroup.eachLayer(function(layer){
-
-            if(layer.getLatLng){
-
-              const latlng = layer.getLatLng();
-
-              if(
-                Math.abs(latlng.lat - item.위도) < 0.00001 &&
-                Math.abs(latlng.lng - item.경도) < 0.00001
-              ){
-                layer.openPopup();
-              }
-
-            }
-
-          });
-
-        }
-
-      }
-
     };
 
     list.appendChild(el);
 
   });
 
-  document.getElementById("mobileResultCount").textContent = items.length;
+  document.getElementById("mobileResultCount").textContent = visible.length;
 
 }
 
@@ -2598,7 +2565,7 @@ function distancePointToRoute(lat, lng, routeLatLngs){
 
 
 async function runRouteSearch(){
-
+  ROUTE_MODE = true;
   clearRoute();   // ⭐ 추가
 
 
@@ -2744,29 +2711,24 @@ filtered.forEach(item => {
 map.fitBounds(bounds, { padding:[60,60] });
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
-  const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
+const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
 
-  if(isMobile()){
+if(isMobile()){
   syncToMobileMap(filtered,startLat,startLng);
 }
 
-  if(!isMobile()){
-  showMsg(
-    `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
-  );
-}
+// 결과 메시지
+showMsg(
+  `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
+);
 
-  if(!isMobile()){
+// PC 결과목록
+if(!isMobile()){
   showResultList(filtered,startLat,startLng);
 }
 
-  if(isMobile()){
-  document.getElementById("mobileResultPanel").style.display="flex";
-}
-
-  closeRoutePopup();
-}
-
+closeRoutePopup();
+} 
 
 window.addEventListener("pageshow", function(){
 
@@ -2777,6 +2739,21 @@ window.addEventListener("pageshow", function(){
   if(d) d.value="";
 
 });
+
+map.on("moveend", function(){
+
+  if(ROUTE_MODE){
+    return;
+  }
+
+  if(CURRENT_DATA && CURRENT_DATA.length > 0 && CURRENT_DATA.length <= 5000){
+
+    showResultList(CURRENT_DATA, userLat || 0, userLng || 0);
+
+  }
+
+});
+
 
 </script>
 
@@ -3036,7 +3013,7 @@ def data():
     if categories:
         df = df[df["구분"].isin(categories)]
 
-    records = df.head(5000).apply(row_to_dict, axis=1).tolist()
+    records = df.apply(row_to_dict, axis=1).tolist()
 
     return jsonify(records)
 
@@ -3090,7 +3067,7 @@ def open_preferred_browser(url):
 
 if __name__ == "__main__":
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     url = f"http://127.0.0.1:{port}"
 
     # 로컬 실행일 때만 브라우저 자동 열기
