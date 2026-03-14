@@ -155,7 +155,7 @@ def load_df():
 
     df = pd.read_excel(FILE_PATH)
     
-    required = ["순번", "구분", "시군구", "주소", "위도", "경도"]
+    required = ["순번", "구분", "시도", "시군구", "주소", "위도", "경도"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"엑셀에 '{col}' 열이 없습니다.")
@@ -612,13 +612,7 @@ display:none;
 }
 
 .mobile-map{
-  height:calc(100vh - 180px);
-}
-
-@media (max-width:900px){
-  .mobile-map{
-    height:calc(100vh - 180px);
-  }
+  flex:1;
 }
 
 @media(min-width:901px){
@@ -779,7 +773,7 @@ cursor:pointer;
   left:0;
   right:0;
   bottom:0;
-  width:auto;
+  width:100%;
   height:180px;
   max-height:40%;
   background:white;
@@ -980,6 +974,12 @@ margin-top:4px;
 
   <main class="map-wrap">
     <div id="map"></div>
+<div class="mobile-result-panel" id="mobileResultPanel">
+  <div class="mobile-result-header">
+    검색 결과 <span id="mobileResultCount">0</span>건
+  </div>
+  <div class="mobile-result-list" id="mobileResultList"></div>
+</div>
     <button id="locBtn">📍</button>
     <div class="top-badge">모바일 / PC 지원</div>
 
@@ -1008,15 +1008,6 @@ margin-top:4px;
 
 
     <div class="loading" id="loadingBox">데이터를 불러오는 중입니다...</div>
-    <div class="mobile-result-panel" id="mobileResultPanel">
-  <div class="mobile-result-header">
-    검색 결과 <span id="mobileResultCount">0</span>건
-  </div>
-  <div class="mobile-result-list" id="mobileResultList"></div>
-</div>
-
-
-
   </main>
 </div>
 
@@ -1025,8 +1016,7 @@ margin-top:4px;
 
 <script>
 let ALL_DATA_CACHE = null;
-let CURRENT_DATA = [];
-let ROUTE_MODE = false;
+
 
 const CATEGORY_COLORS = {
   "상습결빙지역": "#06b6d4",
@@ -1139,7 +1129,7 @@ L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
     maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
+    attribution: "&copy; OpenStreetMap"
   }
 ).addTo(map);
 
@@ -1199,51 +1189,43 @@ function closeMsg(){
 }
 
 function showMobileResults(items, userLat, userLng){
+history.pushState({mobileResult:true}, "");
+  const panel = document.getElementById("mobileResultPanel");
+  const list = document.getElementById("mobileResultList");
 
-history.pushState({mobileResult:true,panel:true}, "");
+  panel.style.display = "flex";
 
-const panel = document.getElementById("mobileResultPanel");
-const list = document.getElementById("mobileResultList");
+  list.innerHTML = "";
 
-panel.style.display = "flex";
+  items.forEach(item=>{
 
-list.innerHTML = "";
+    const dist = Math.round(
+      calcDistance(userLat,userLng,item.위도,item.경도)
+    );
 
-items.forEach(item=>{
+    const el = document.createElement("div");
 
-let distHtml = "";
+    el.className = "mobile-result-item";
 
-if(userLat && userLng){
-  const dist = Math.round(
-    calcDistance(userLat,userLng,item.위도,item.경도)
-  );
+    el.innerHTML = `
+      <b>${item.구분}</b><br>
+      ${item.시군구} ${item.읍면동}<br>
+      <span class="mobile-result-distance">${dist} m</span>
+    `;
 
-  distHtml = `<span class="mobile-result-distance">${dist} m</span>`;
-}
+    el.onclick = function(){
 
-const el = document.createElement("div");
+      window.mobileLeafletMap.setView(
+        [item.위도,item.경도],16
+      );
 
-el.className = "mobile-result-item";
+    };
 
-el.innerHTML = `
-  <b>${item.구분}</b><br>
-  ${item.시군구} ${item.읍면동}<br>
-  ${distHtml}
-`;
+    list.appendChild(el);
 
-el.onclick = function(){
+  });
 
-  window.mobileLeafletMap.setView(
-    [item.위도,item.경도],16
-  );
-
-};
-
-list.appendChild(el);
-
-});
-
-document.getElementById("mobileResultCount").textContent = items.length;
+  document.getElementById("mobileResultCount").textContent = items.length;
 
 }
 
@@ -1430,7 +1412,7 @@ const data = ALL_DATA_CACHE;
 }
 
 async function loadData(){
-  ROUTE_MODE = false;
+
   clearRoute();   // ⭐ 추가
 
 
@@ -1456,10 +1438,15 @@ async function loadData(){
   categories.forEach(cat => params.append("category", cat));
 
   try{
+    let data;
 
-const res = await fetch("/data?" + params.toString());
-const data = await res.json();
-CURRENT_DATA = data;
+if(!ALL_DATA_CACHE){
+  const res = await fetch("/data");
+  ALL_DATA_CACHE = await res.json();
+}
+
+data = ALL_DATA_CACHE;
+
     
     const bounds = [];
 
@@ -1549,35 +1536,11 @@ if(!isMobile()){
 
 if(isMobile()){
   syncToMobileMap(data);
-  showMobileResults(data,userLat,userLng);
 }
 
-
 // 조회 결과 목록 표시 (최대 10개)
-// 결과 목록 표시 조건
-// 조회 결과 목록 표시 조건
-const panel = document.getElementById("mobileResultPanel");
-
-if(isMobile()){
-
-  if(data.length > 0){
-    showMobileResults(data,userLat,userLng);
-  }else{
-    if(panel){
-      panel.style.display = "none";
-    }
-  }
-
-}else{
-
-  if(data.length > 0){
-    showMobileResults(data,userLat,userLng);
-  }else{
-    if(panel){
-      panel.style.display = "none";
-    }
-  }
-
+if(data.length > 0){
+  showResultList(data, userLat || 0, userLng || 0);
 }
 
   }catch(e){
@@ -1651,19 +1614,26 @@ window.addEventListener("DOMContentLoaded", function(){
     loadAllMarkers();
   });
 
-  document.addEventListener("input", function(e){
+  const destInput = document.getElementById("destInput");
 
-    if(e.target.id === "destInput"){
-      searchPlaceSuggestions(e.target.value,"destInput");
-    }
-
-    if(e.target.id === "startInput"){
-      searchPlaceSuggestions(e.target.value,"startInput");
-    }
-
+if(destInput){
+  destInput.addEventListener("input", function(){
+    searchPlaceSuggestions(this.value, "destInput");
   });
+}
 
-});   // 🔴 이 줄 추가
+const startInput = document.getElementById("startInput");
+
+if(startInput){
+  startInput.addEventListener("input", function(){
+    searchPlaceSuggestions(this.value, "startInput");
+  });
+}
+
+
+});
+
+
 
 function isMobile(){
   return window.innerWidth < 900;
@@ -1722,10 +1692,6 @@ function closeMobileMap(){
 
 
 function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
-
-  if(!window.mobileLeafletMap){
-  openMobileMap();
-}
 
   if(!isMobile()) return;
 
@@ -1860,11 +1826,11 @@ items.forEach(item=>{
 
 
 // 🔵 여기 추가
-  if(items.length <= 1000){
-    showMobileResults(items,userLat,userLng);
-  }
+if(userLat && userLng){
+  showMobileResults(items,userLat,userLng);
+}
 
-}  // ← 이거 추가, syncToMobileMap 종료
+}  
 
 
 async function findNearestToilet(){
@@ -1953,10 +1919,11 @@ async function findNearestDanger(){
 
 async function runNearestSearch(lat,lng,targetType){
 
-if(!ALL_DATA_CACHE){
+  if(!ALL_DATA_CACHE){
   const res = await fetch("/data");
   ALL_DATA_CACHE = await res.json();
 }
+
 const data = ALL_DATA_CACHE;
 
   const radius = 5000;
@@ -1988,7 +1955,6 @@ const data = ALL_DATA_CACHE;
   filtered.splice(10);
 
   if(filtered.length === 0){
-
 
     showMsg("주변에 데이터가 없습니다.");
 
@@ -2100,9 +2066,6 @@ async function findRadius(km){
 
 function showResultList(items, userLat, userLng){
 
-  const currentMap = isMobile() ? window.mobileLeafletMap : map;
-  
-
   const panel = document.getElementById("mobileResultPanel");
   const list = document.getElementById("mobileResultList");
 
@@ -2111,13 +2074,9 @@ function showResultList(items, userLat, userLng){
 
   items.forEach(item=>{
 
-    let dist = "";
-
-    if(userLat && userLng){
-      dist = Math.round(
-        calcDistance(userLat,userLng,item.위도,item.경도)
-      );
-    }
+    const dist = Math.round(
+      calcDistance(userLat,userLng,item.위도,item.경도)
+    );
 
     const el = document.createElement("div");
 
@@ -2126,12 +2085,57 @@ function showResultList(items, userLat, userLng){
     el.innerHTML = `
       <b>${item.구분}</b><br>
       ${item.시군구} ${item.읍면동}<br>
-      ${dist ? `<span class="mobile-result-distance">${dist} m</span>` : ""}
+      <span class="mobile-result-distance">${dist} m</span>
     `;
 
     el.onclick = function(){
-      const currentMap = isMobile() ? window.mobileLeafletMap : map;
-      currentMap.setView([item.위도,item.경도],16);
+
+      map.setView([item.위도,item.경도],16);
+
+      markerGroup.eachLayer(function(layer){
+
+        if(layer.getLatLng){
+
+          const latlng = layer.getLatLng();
+
+          if(
+            Math.abs(latlng.lat - item.위도) < 0.00001 &&
+            Math.abs(latlng.lng - item.경도) < 0.00001
+          ){
+            layer.openPopup();
+          }
+
+        }
+
+      });
+
+      if(window.mobileLeafletMap){
+
+        window.mobileLeafletMap.setView([item.위도,item.경도],16);
+
+        if(window.mobileMarkerGroup){
+
+          window.mobileMarkerGroup.eachLayer(function(layer){
+
+            if(layer.getLatLng){
+
+              const latlng = layer.getLatLng();
+
+              if(
+                Math.abs(latlng.lat - item.위도) < 0.00001 &&
+                Math.abs(latlng.lng - item.경도) < 0.00001
+              ){
+                layer.openPopup();
+              }
+
+            }
+
+          });
+
+        }
+
+      }
+
     };
 
     list.appendChild(el);
@@ -2258,31 +2262,22 @@ err=>{
   }
 
 });
-window.addEventListener("popstate", function(event){
-
-clearRoute();
+window.addEventListener("popstate", function(){
+clearRoute();   // ⭐ 추가
 
 const popup = document.getElementById("mobileMapPopup");
 const result = document.getElementById("mobileResultPanel");
 
-if(result && !event.state?.panel){
-  result.style.display="none";
+if(result){
+  result.style.display = "none";
 }
-if(popup) popup.style.display="none";
 
-const s = document.getElementById("startInput");
-const d = document.getElementById("destInput");
-
-if(s) s.value="";
-if(d) d.value="";
-
-const box = document.getElementById("destSuggestBox");
-if(box){
-  box.style.display="none";
-  box.innerHTML="";
+if(popup){
+  popup.style.display = "none";
 }
 
 });
+
 
 window.addEventListener("DOMContentLoaded", function(){
 
@@ -2358,26 +2353,13 @@ function openRouteSearch(){
 }
 
 function closeRoutePopup(){
-
   document.getElementById("routePopup").style.display="none";
-
-  const s = document.getElementById("startInput");
-  const d = document.getElementById("destInput");
-
-  if(s){
-    s.value = "";
-  }
-
-  if(d){
-    d.value = "";
-  }
 
   const box = document.getElementById("destSuggestBox");
   if(box){
     box.style.display = "none";
     box.innerHTML = "";
   }
-
 }
 
 
@@ -2579,7 +2561,7 @@ function distancePointToRoute(lat, lng, routeLatLngs){
 
 
 async function runRouteSearch(){
-  ROUTE_MODE = true;
+
   clearRoute();   // ⭐ 추가
 
 
@@ -2643,7 +2625,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 150;
+const radius = 120;
 
 const filtered = [];
 
@@ -2661,11 +2643,7 @@ data.forEach(item=>{
 
 });
 
-console.log("경로 주변 검색 결과 개수:", filtered.length);
-
-  if(!isMobile()){
   markerGroup.clearLayers();
-}
 
   filtered.forEach(item=>{
     const icon = buildMarkerIcon(item.마커색상);
@@ -2686,9 +2664,7 @@ console.log("경로 주변 검색 결과 개수:", filtered.length);
     `;
 
     marker.bindPopup(popupHtml,{maxWidth:290});
-    if(!isMobile()){
-  markerGroup.addLayer(marker);
-}
+    markerGroup.addLayer(marker);
   });
 
   if(routeLine){
@@ -2713,47 +2689,33 @@ if(isMobile() && window.mobileLeafletMap){
 
 }
 
-  const bounds = [
-  [startLat, startLng],
-  [endLat, endLng]
-];
-
-filtered.forEach(item => {
-  bounds.push([item.위도, item.경도]);
-});
-
-map.fitBounds(bounds, { padding:[60,60] });
+  map.fitBounds(
+    [
+      [startLat, startLng],
+      [endLat, endLng]
+    ],
+    {padding:[60,60]}
+  );
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
-const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
+  const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
 
-if(isMobile()){
+  if(isMobile()){
   syncToMobileMap(filtered,startLat,startLng);
 }
 
-// 결과 메시지
-showMsg(
-  `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
-);
+  showMsg(
+    `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
+  );
 
-// PC 결과목록
-if(!isMobile()){
-  showResultList(filtered,startLat,startLng);
+  showResultList(filtered, startLat, startLng);
+
+  if(isMobile()){
+  document.getElementById("mobileResultPanel").style.display="flex";
 }
 
-closeRoutePopup();
-} 
-
-window.addEventListener("pageshow", function(){
-
-  const s = document.getElementById("startInput");
-  const d = document.getElementById("destInput");
-
-  if(s) s.value="";
-  if(d) d.value="";
-
-});
-
+  closeRoutePopup();
+}
 
 </script>
 
@@ -2767,10 +2729,10 @@ window.addEventListener("pageshow", function(){
   </div>
 
   <div id="mobileMap" class="mobile-map"></div>
-
   <button id="mobileLocBtn">📍</button>
 
   <div class="map-legend">
+
 
     <div class="map-legend-item">
       <span class="map-legend-dot" style="background:#06b6d4"></span>
@@ -2782,10 +2744,11 @@ window.addEventListener("pageshow", function(){
       공중화장실
     </div>
 
-    <div class="map-legend-item">
-      <span class="map-legend-dot" style="background:#2563eb"></span>
-      내 위치
-    </div>
+<div class="map-legend-item">
+  <span class="map-legend-dot" style="background:#2563eb"></span>
+  내 위치
+</div>
+
 
   </div>
 
@@ -2857,9 +2820,7 @@ width:340px;
 <h3 style="margin-top:0">경로 설정</h3>
 
 <input id="startInput"
-placeholder="출발지 입력 (예: 광주전라제주지역본부)"
-autocomplete="off"
-
+placeholder="출발지 입력 (예: 나주시청)"
 style="
 width:100%;
 height:40px;
@@ -2869,9 +2830,7 @@ border-radius:8px;
 margin-bottom:10px;
 ">
 <input id="destInput"
-placeholder="도착지 입력 (예: 전라남도청)"
-autocomplete="off"
-
+placeholder="도착지 입력 (예: 나주시청)"
 style="
 width:100%;
 height:40px;
@@ -3012,7 +2971,7 @@ def data():
     if categories:
         df = df[df["구분"].isin(categories)]
 
-    records = df.apply(row_to_dict, axis=1).tolist()
+    records = df.head(5000).apply(row_to_dict, axis=1).tolist()
 
     return jsonify(records)
 
@@ -3066,7 +3025,7 @@ def open_preferred_browser(url):
 
 if __name__ == "__main__":
 
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     url = f"http://127.0.0.1:{port}"
 
     # 로컬 실행일 때만 브라우저 자동 열기
