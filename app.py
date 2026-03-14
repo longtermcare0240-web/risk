@@ -2736,17 +2736,6 @@ window.addEventListener("pageshow", function(){
 
 });
 
-map.on("moveend", function(){
-
-  if(isMobile()) return;
-
-  if(ROUTE_MODE){
-    return;
-  }
-
-  if(CURRENT_DATA && CURRENT_DATA.length > 0 && CURRENT_DATA.length <= 1000){
-
-});
 
 </script>
 
