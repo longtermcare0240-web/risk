@@ -1532,18 +1532,14 @@ if(!isMobile()){
 
 if(isMobile()){
   syncToMobileMap(data);
-
-  setTimeout(()=>{
-    showResultList(data, userLat || 0, userLng || 0);
-  },300);
 }
+
 
 // 조회 결과 목록 표시 (최대 10개)
 // 결과 목록 표시 조건
 const panel = document.getElementById("mobileResultPanel");
 
-if(data.length > 0 && data.length <= (isMobile() ? 1000 : 5000)){
-
+if(!isMobile() && data.length > 0 && data.length <= 5000){
   showResultList(data, userLat || 0, userLng || 0);
 
 }else{
@@ -2748,6 +2744,8 @@ window.addEventListener("pageshow", function(){
 
 map.on("moveend", function(){
 
+  if(isMobile()) return;
+
   if(ROUTE_MODE){
     return;
   }
@@ -2759,7 +2757,6 @@ map.on("moveend", function(){
   }
 
 });
-
 
 </script>
 
