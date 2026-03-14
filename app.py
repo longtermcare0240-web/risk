@@ -1975,7 +1975,7 @@ const data = ALL_DATA_CACHE;
   });
 
   filtered.sort((a,b)=>a._dist-b._dist);
-  filtered.splice(10);
+  filtered.splice(100);
 
   if(filtered.length === 0){
 
