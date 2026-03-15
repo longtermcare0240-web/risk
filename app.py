@@ -2128,7 +2128,7 @@ const data = ALL_DATA_CACHE;
   filtered.splice(10);
 
   if(filtered.length === 0){
-
+    closeMsg();   // ⭐ 추가
     showMsg("주변에 데이터가 없습니다.");
 
     return;
@@ -2137,6 +2137,7 @@ const data = ALL_DATA_CACHE;
 
 if(isMobile()){
   syncToMobileMap(filtered,lat,lng,5000);
+  closeMsg();   // ⭐ 이거 추가
   return;
 }
 
@@ -2277,6 +2278,8 @@ async function findRadius(km){
     },
 
     err=>{
+     closeMsg();   // ⭐ 추가
+
       showMsg("위치를 가져올 수 없습니다.");
     },
 
@@ -2587,6 +2590,7 @@ if(window.mobileLeafletMap){
 }},
 
 err=>{
+  closeMsg();
   showMsg("위치를 가져올 수 없습니다.");
 },
 
