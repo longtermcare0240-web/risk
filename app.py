@@ -2000,18 +2000,12 @@ items.forEach(item=>{
 );
     }
 
-    window.mobileLeafletMap.once("moveend", closeMsg);
-
-    // ⭐ moveend 안 발생할 때 대비
-    setTimeout(closeMsg, 800);
   }, 250);
 
 
 // 🔵 여기 추가
 showMobileResults(items,userLat,userLng);
-
-}  
-
+}
 
 async function findNearestToilet(){
 
@@ -2824,6 +2818,8 @@ function distancePointToRoute(lat, lng, routeLatLngs){
 }
 
 async function runRouteSearch(){
+  closeRoutePopup();   // ⭐ 여기 추가
+
 
   clearRoute();
 
@@ -2970,10 +2966,6 @@ if(isMobile() && window.mobileLeafletMap){
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
   const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
 
-  if(isMobile()){
-  syncToMobileMap(filtered,startLat,startLng);
-}
-
   showMsg(
       `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개\n🚗 교통사고위험지역${accidentCount}개`
   );
@@ -2981,10 +2973,17 @@ if(isMobile() && window.mobileLeafletMap){
   showResultList(filtered, startLat, startLng);
 
   if(isMobile()){
+  syncToMobileMap(filtered,startLat,startLng);
+}
+
+
+
+
+
+  if(isMobile()){
   document.getElementById("mobileResultPanel").style.display="flex";
 }
 
-  closeRoutePopup();
 
 }
 
