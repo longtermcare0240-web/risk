@@ -1267,17 +1267,21 @@ function showMobileResults(items, userLat, userLng){
       }
     );
 
-    if(window.mobileMarkerGroup){
+    window.mobileLeafletMap.once("moveend", function(){
 
-      window.mobileMarkerGroup.eachLayer(function(layer){
+      if(window.mobileMarkerGroup){
 
-        if(layer.itemData && layer.itemData.순번 === item.순번){
-          layer.openPopup();
-        }
+        window.mobileMarkerGroup.eachLayer(function(layer){
 
-      });
+          if(layer.itemData && layer.itemData.순번 === item.순번){
+            layer.openPopup();
+          }
 
-    }
+        });
+
+      }
+
+    });
 
   }
 
@@ -1477,23 +1481,62 @@ const data = ALL_DATA_CACHE;
     const marker = L.marker([item.위도,item.경도],{icon});
     marker.itemData = item;
     const popupHtml = `
-    <div class="popup-wrap">
+<div class="popup-wrap">
 
-    <img class="popup-img" src="${item.사진URL}">
+<img class="popup-img" src="${item.사진URL}">
 
-    <div class="popup-title">${escapeHtml(item.구분)}</div>
+<div class="popup-title">${escapeHtml(item.구분)}</div>
 
-    <div class="popup-meta">
-    ${escapeHtml(item.시군구)} ${escapeHtml(item.읍면동)}<br>
-    ${escapeHtml(item.주소)}
-    </div>
+<div class="popup-meta">
+시군구: ${escapeHtml(item.시군구)}<br>
+읍면동: ${escapeHtml(item.읍면동)}<br>
+주소: ${escapeHtml(item.주소)}
+</div>
 
-    <div class="popup-desc">
-    ${escapeHtml(item.사고설명)}
-    </div>
+<div class="popup-desc">
+${escapeHtml(item.사고설명)}
+</div>
 
-    </div>
-    `;
+<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+
+<a 
+href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#03C75A;
+color:#ffffff;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+네이버 길찾기
+</a>
+
+<a 
+href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#FEE500;
+color:#191919;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+카카오 길찾기
+</a>
+
+</div>
+
+</div>
+`;
 
     marker.bindPopup(popupHtml,{maxWidth:290});
 
@@ -2139,20 +2182,60 @@ const popupHtml = `
 
 <div class="popup-wrap">
 
-<img class="popup-img" src="${item.사진URL}"><div class="popup-title">${item.구분}</div>
+<img class="popup-img" src="${item.사진URL}">
+
+<div class="popup-title">${item.구분}</div>
 
 <div class="popup-meta">
-${item.시군구} ${item.읍면동}<br>
-${item.주소}
+시군구: ${item.시군구}<br>
+읍면동: ${item.읍면동}<br>
+주소: ${item.주소}
 </div>
 
 <div class="popup-desc">
 ${item.사고설명}
 </div>
 
+<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+
+<a 
+href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#03C75A;
+color:#ffffff;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+네이버 길찾기
+</a>
+
+<a 
+href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#FEE500;
+color:#191919;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+카카오 길찾기
+</a>
+
+</div>
+
 </div>
 `;
-
 
 marker.bindPopup(popupHtml,{maxWidth:290});
 
@@ -2236,42 +2319,51 @@ function showResultList(items, userLat, userLng){
     `;
     el.onclick = function(){
 
-      map.flyTo([item.위도,item.경도],16);
+  map.flyTo([item.위도,item.경도],16);
 
-      markerGroup.eachLayer(function(layer){
+  map.once("moveend", function(){
 
-  if(layer.itemData && layer.itemData.순번 === item.순번){
-    layer.openPopup();
-  }
+    markerGroup.eachLayer(function(layer){
 
-});
+      if(layer.itemData && layer.itemData.순번 === item.순번){
+        layer.openPopup();
+      }
 
-      if(window.mobileLeafletMap){
+    });
 
-        window.mobileLeafletMap.flyTo(
-  [item.위도,item.경도],
-  16,
-  {
-    duration:1.2,
-    easeLinearity:0.25
-  }
-);
+  });
 
-        if(window.mobileMarkerGroup){
+  if(window.mobileLeafletMap){
 
-          window.mobileMarkerGroup.eachLayer(function(layer){
+    window.mobileLeafletMap.flyTo(
+      [item.위도,item.경도],
+      16,
+      {
+        duration:1.2,
+        easeLinearity:0.25
+      }
+    );
 
-  if(layer.itemData && layer.itemData.순번 === item.순번){
-    layer.openPopup();
-  }
+    window.mobileLeafletMap.once("moveend", function(){
 
-});
+      if(window.mobileMarkerGroup){
 
-        }
+        window.mobileMarkerGroup.eachLayer(function(layer){
+
+          if(layer.itemData && layer.itemData.순번 === item.순번){
+            layer.openPopup();
+          }
+
+        });
 
       }
 
-    };
+    });
+
+  }
+
+};
+
 
     list.appendChild(el);
 
