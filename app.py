@@ -561,14 +561,6 @@ display:none;
   background:#f1f5f9;
 }
 
-@media (max-width:900px){
-
-.leaflet-popup-content-wrapper{
-  transform: scale(0.85);
-  transform-origin: center;
-}
-
-}
 .popup-title{
   font-size:16px;
   font-weight:900;
