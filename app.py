@@ -75,11 +75,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_PATH = "mapdata_geocoded.xlsx"
 DATA_CACHE = None
 
-TYPE_COLORS = {
-    "상습결빙지역": "#06b6d4",
-    "공중화장실": "#f59e0b",
-    "교통사고위험지역": "#ef4444"   # 추가
-}
 
 TYPE_COLORS = {
     "상습결빙지역": "#06b6d4",
@@ -305,11 +300,34 @@ html,body{
   flex-shrink:0;
 }
 
+@media (max-width:900px){
+  #locBtn{
+    display:none !important;
+  }
+}
 
 @media (max-width:900px){
   .ci-logo{
     height:44px;
   }
+}
+
+@media (max-width:900px){
+  .top-badge{
+    display:none;
+  }
+}
+
+@media (max-width:900px){
+
+  #locBtn{
+    display:none !important;
+  }
+
+  .top-badge{
+    display:none !important;
+  }
+
 }
 
 .logo{
@@ -443,12 +461,11 @@ gap:10px;
 
 @media (max-width:900px){
 
-.legend{
+.map-legend{
 display:none;
 }
 
 }
-
 .legend-item{
   display:flex;
   align-items:center;
@@ -485,16 +502,15 @@ display:none;
 
 .map-legend{
   position:absolute;
-  top:70px;
-  right:14px;
-  z-index:999;
-  background:rgba(255,255,255,.96);
-  border:1px solid #e5e7eb;
-  border-radius:12px;
+  top:20px;
+  right:20px;
+  bottom:auto;
+  background:white;
   padding:10px 12px;
-  font-size:12px;
-  line-height:1.6;
-  box-shadow:0 8px 24px rgba(15,23,42,.08);
+  border-radius:12px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.18);
+  font-size:13px;
+  z-index:999;
 }
 
 .map-legend-item{
@@ -511,6 +527,7 @@ display:none;
   flex-shrink:0;
   display:inline-block;
 }
+
 .loading{
   position:absolute;
   left:50%;
@@ -575,14 +592,19 @@ display:none;
   }
 
   .map-wrap{
+    display:block;
+    position:static;
+    width:100%;
+    height:0;
+    overflow:visible;
+  }
+
+  #map{
     display:none;
   }
 
-  .legend{
-    grid-template-columns:1fr;
-  }
+  
 }
-
 
 .mobile-map-popup{
   position:fixed;
@@ -793,6 +815,12 @@ cursor:pointer;
   flex-direction:column;
 }
 
+@media (max-width:900px){
+  .mobile-result-panel{
+    position:fixed;
+  }
+}
+
 .mobile-result-header{
   padding:10px 14px;
   font-weight:700;
@@ -981,47 +1009,44 @@ margin-top:4px;
   </aside>
 
   <main class="map-wrap">
-    <div id="map"></div>
-<div class="mobile-result-panel" id="mobileResultPanel">
-  <div class="mobile-result-header">
-    검색 결과 <span id="mobileResultCount">0</span>건
-  </div>
-  <div class="mobile-result-list" id="mobileResultList"></div>
-</div>
-    <button id="locBtn">📍</button>
-    <div class="top-badge">모바일 / PC 지원</div>
+  <div id="map"></div>
 
-<div class="map-legend">
-
-
-
-  <div class="map-legend-item">
-    <span class="map-legend-dot" style="background:#06b6d4"></span>
-    상습결빙지역
+  <div class="mobile-result-panel" id="mobileResultPanel">
+    <div class="mobile-result-header">
+      검색 결과 <span id="mobileResultCount">0</span>건
+    </div>
+    <div class="mobile-result-list" id="mobileResultList"></div>
   </div>
 
-  <div class="map-legend-item">
-    <span class="map-legend-dot" style="background:#f59e0b"></span>
-    공중화장실
-  </div>
-
-<div class="map-legend-item">
-  <span class="map-legend-dot" style="background:#ef4444"></span>
-  교통사고위험지역
-</div>
-
-<div class="map-legend-item">
-  <span class="map-legend-dot" style="background:#2563eb"></span>
-내 위치
-</div>
-
-</div>
-
-
-    <div class="loading" id="loadingBox">데이터를 불러오는 중입니다...</div>
   </main>
-</div>
 
+  <button id="locBtn">📍</button>
+  <div class="top-badge">모바일 / PC 지원</div>
+  <div class="map-legend">
+  
+    <div class="map-legend-item">
+      <span class="map-legend-dot" style="background:#06b6d4"></span>
+      상습결빙지역
+    </div>
+
+    <div class="map-legend-item">
+      <span class="map-legend-dot" style="background:#f59e0b"></span>
+      공중화장실
+    </div>
+
+    <div class="map-legend-item">
+      <span class="map-legend-dot" style="background:#ef4444"></span>
+      교통사고위험지역
+    </div>
+
+    <div class="map-legend-item">
+      <span class="map-legend-dot" style="background:#2563eb"></span>
+      내 위치
+    </div>
+  </div>
+
+  <div class="loading" id="loadingBox">데이터를 불러오는 중입니다...</div>
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
@@ -1203,46 +1228,45 @@ function closeMsg(){
 }
 
 function showMobileResults(items, userLat, userLng){
-history.pushState({mobileResult:true}, "");
+  history.pushState({mobileResult:true}, "");
+
   const panel = document.getElementById("mobileResultPanel");
   const list = document.getElementById("mobileResultList");
 
-  panel.style.display = "flex";
+  if(!panel || !list) return;
 
+  panel.style.display = "flex";
   list.innerHTML = "";
 
-  items.forEach(item=>{
+  items.forEach(item => {
+    let distText = "";
 
-    const dist = Math.round(
-      calcDistance(userLat,userLng,item.위도,item.경도)
-    );
+    if(userLat !== null && userLng !== null){
+      const dist = Math.round(
+        calcDistance(userLat, userLng, item.위도, item.경도)
+      );
+      distText = `<span class="mobile-result-distance">${dist} m</span>`;
+    }
 
     const el = document.createElement("div");
-
     el.className = "mobile-result-item";
-
     el.innerHTML = `
       <b>${item.구분}</b><br>
       ${item.시군구} ${item.읍면동}<br>
-      <span class="mobile-result-distance">${dist} m</span>
+      ${distText}
     `;
 
     el.onclick = function(){
-
-      window.mobileLeafletMap.setView(
-        [item.위도,item.경도],16
-      );
-
+      if(window.mobileLeafletMap){
+        window.mobileLeafletMap.setView([item.위도, item.경도], 16);
+      }
     };
 
     list.appendChild(el);
-
   });
 
   document.getElementById("mobileResultCount").textContent = items.length;
-
 }
-
 
 function createCategoryChecks(){
   const box = document.getElementById("categoryBox");
@@ -1554,12 +1578,16 @@ if(isMobile()){
 
 // 조회 결과 목록 표시 (최대 10개)
 // 결과가 5000개 미만일 때만 목록 표시
-if(total < 5000){
-  showResultList(data, userLat || 0, userLng || 0);
-}else{
-  const panel = document.getElementById("mobileResultPanel");
-  if(panel){
-    panel.style.display = "none";
+// 조회 결과 목록 표시 (5000개 미만일 때만)
+// 조회 결과 목록 표시 (5000개 미만일 때만)
+if(!isMobile()){
+  if(total < 5000){
+    showResultList(data, userLat, userLng);
+  }else{
+    const panel = document.getElementById("mobileResultPanel");
+    if(panel){
+      panel.style.display = "none";
+    }
   }
 }  }catch(e){
     showMsg("데이터를 불러오는 중 오류가 발생했습니다.");
@@ -1850,9 +1878,7 @@ items.forEach(item=>{
 
 
 // 🔵 여기 추가
-if(userLat && userLng){
-  showMobileResults(items,userLat,userLng);
-}
+showMobileResults(items,userLat,userLng);
 
 }  
 
@@ -2099,9 +2125,14 @@ function showResultList(items, userLat, userLng){
 
   items.forEach(item=>{
 
-    const dist = Math.round(
-      calcDistance(userLat,userLng,item.위도,item.경도)
-    );
+    let distText = "";
+
+    if(userLat && userLng){
+      const dist = Math.round(
+        calcDistance(userLat,userLng,item.위도,item.경도)
+      );
+      distText = dist + " m";
+    }
 
     const el = document.createElement("div");
 
@@ -2110,9 +2141,8 @@ function showResultList(items, userLat, userLng){
     el.innerHTML = `
       <b>${item.구분}</b><br>
       ${item.시군구} ${item.읍면동}<br>
-      <span class="mobile-result-distance">${dist} m</span>
+      <span class="mobile-result-distance">${distText}</span>
     `;
-
     el.onclick = function(){
 
       map.setView([item.위도,item.경도],16);
