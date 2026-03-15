@@ -77,13 +77,15 @@ DATA_CACHE = None
 
 TYPE_COLORS = {
     "상습결빙지역": "#06b6d4",
-    "공중화장실": "#f59e0b"
+    "공중화장실": "#f59e0b",
+    "교통사고위험지역": "#ef4444"   # 추가
 }
 
-TYPE_ORDER = [
-    "상습결빙지역",
-    "공중화장실"
-]
+TYPE_COLORS = {
+    "상습결빙지역": "#06b6d4",
+    "공중화장실": "#f59e0b",
+    "교통사고위험지역": "#ef4444"   # 추가
+}
 
 DEFAULT_CENTER = [34.85, 126.90]
 DEFAULT_ZOOM = 9
@@ -118,17 +120,21 @@ def sample_desc(category, city, town, address):
     if category == "공중화장실":
         return f"{city} {town} 인근 공중화장실 위치입니다."
 
-    return f"{city} {town} 위치 정보입니다."
+    if category == "교통사고위험지역":
+        return f"{city} {town} 일대는 교통사고 발생률이 높은 구간입니다."
 
+    return f"{city} {town} 위치 정보입니다."
 
 def sample_date(category):
 
     m = {
         "상습결빙지역": "2025-12-28",
-        "공중화장실": "2025-01-01"
+        "공중화장실": "2025-01-01",
+        "교통사고위험지역": "2025-01-01"   # 추가
     }
 
     return m.get(category, "2025-01-01")
+ 
 
 def build_photo_url(row):
 
@@ -140,8 +146,10 @@ def build_photo_url(row):
     if category == "상습결빙지역":
         return "/photo/222"
 
-    return "/photo/111"
+    if category == "교통사고위험지역":
+        return "/photo/333"
 
+    return "/photo/111"
 
 def load_df():
 
@@ -997,7 +1005,10 @@ margin-top:4px;
     공중화장실
   </div>
 
-
+<div class="map-legend-item">
+  <span class="map-legend-dot" style="background:#ef4444"></span>
+  교통사고위험지역
+</div>
 
 <div class="map-legend-item">
   <span class="map-legend-dot" style="background:#2563eb"></span>
@@ -1020,13 +1031,16 @@ let ALL_DATA_CACHE = null;
 
 const CATEGORY_COLORS = {
   "상습결빙지역": "#06b6d4",
-  "공중화장실": "#f59e0b"
+  "공중화장실": "#f59e0b",
+  "교통사고위험지역": "#ef4444"
 };
 
 const CATEGORY_LIST = [
   "상습결빙지역",
-  "공중화장실"
+  "공중화장실",
+  "교통사고위험지역"
 ];
+
 
 const map = L.map("map", { zoomControl:true }).setView([34.85, 126.90], 9);
 
@@ -2639,7 +2653,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 120;
+const radius = 150;
 
 const filtered = [];
 
@@ -2650,7 +2664,7 @@ data.forEach(item=>{
     item.경도,
     routeLatLngs
   );
-
+  
   if(dist <= radius){
     filtered.push(item);
   }
@@ -2713,13 +2727,14 @@ if(isMobile() && window.mobileLeafletMap){
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
+  const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
 
   if(isMobile()){
   syncToMobileMap(filtered,startLat,startLng);
 }
 
   showMsg(
-    `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개`
+      `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개\n🚗 교통사고위험지역${accidentCount}개`
   );
 
   showResultList(filtered, startLat, startLng);
@@ -2774,6 +2789,11 @@ function debounce(fn, delay){
       <span class="map-legend-dot" style="background:#f59e0b"></span>
       공중화장실
     </div>
+
+<div class="map-legend-item">
+  <span class="map-legend-dot" style="background:#ef4444"></span>
+  교통사고위험지역
+</div>
 
 <div class="map-legend-item">
   <span class="map-legend-dot" style="background:#2563eb"></span>
@@ -2918,6 +2938,10 @@ def photo_toilet():
 def photo_ice():
     return send_file("222.png", mimetype="image/png")
 
+@app.route("/photo/333")
+def photo_accident():
+    return send_file("333.png", mimetype="image/png")
+
 @app.route("/")
 def index():
 
@@ -3004,7 +3028,7 @@ def data():
 
     total_count = len(df)
 
-    records = df.head(5000).apply(row_to_dict, axis=1).tolist()
+    records = df.apply(row_to_dict, axis=1).tolist()
 
     return jsonify({
         "total": total_count,
