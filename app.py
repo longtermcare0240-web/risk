@@ -1126,6 +1126,13 @@ function showLoadingLocation(){
   <img src="/char_right" class="char">
 
   </div>
+<div style="
+margin-top:10px;
+font-size:13px;
+color:#64748b;
+">
+※ 최초 검색 시 위치 정보를 찾는데 시간이 조금 걸릴 수 있습니다.
+</div>
   `;
 
   if(btn){
@@ -2956,8 +2963,8 @@ if(isMobile() && window.mobileLeafletMap){
     {padding:[60,60]}
   );
 
-  map.once("moveend", closeMsg);
-  setTimeout(closeMsg,800);
+  // map.once("moveend", closeMsg);
+  // setTimeout(closeMsg,800);
 
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
