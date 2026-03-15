@@ -1076,6 +1076,15 @@ setTimeout(()=>{
 let userLat = null;
 let userLng = null;
 
+function mobileMapHome(){
+
+  if(window.mobileLeafletMap){
+
+    window.mobileLeafletMap.setView([34.85,126.90],9);
+
+  }
+
+}
 
 function showMsg(text){
 
@@ -1454,7 +1463,7 @@ const data = ALL_DATA_CACHE;
     const icon = buildMarkerIcon(item.마커색상);
 
     const marker = L.marker([item.위도,item.경도],{icon});
-
+    marker.itemData = item;
     const popupHtml = `
     <div class="popup-wrap">
 
@@ -1502,9 +1511,7 @@ map.once("moveend", () => {
   setLoading(false);
 });
 
-  if(!isMobile()){
     markerGroup.clearLayers();
-  }
 
   const province = document.getElementById("province").value;
   const city = document.getElementById("city").value;
@@ -1528,11 +1535,10 @@ map.once("moveend", () => {
 
     data.forEach(item => {
 
-  if(!isMobile()){
-
+  
     const icon = buildMarkerIcon(item.마커색상);
     const marker = L.marker([item.위도, item.경도], { icon });
-
+    marker.itemData = item;
       const popupHtml = `
         <div class="popup-wrap">
 
@@ -1595,11 +1601,8 @@ font-size:13px;
       markerGroup.addLayer(marker);
 bounds.push([item.위도, item.경도]);
 
-}
-
 });
 
-if(!isMobile()){
 
   if(bounds.length > 0){
     map.fitBounds(bounds, { padding:[40,40] });
@@ -1609,7 +1612,6 @@ if(!isMobile()){
     showMsg("조건에 맞는 데이터가 없습니다.");
   }
 
-}
 
 if(isMobile()){
   syncToMobileMap(data);
@@ -1850,6 +1852,7 @@ items.forEach(item=>{
   const icon = buildMarkerIcon(item.마커색상);
 
   const marker = L.marker([item.위도,item.경도],{icon});
+  marker.itemData = item;
 
   const popupHtml = `
   <div class="popup-wrap">
@@ -2073,7 +2076,17 @@ if(isMobile()){
   return;
 }
 
-map.flyTo([lat,lng],15);
+const bounds = [];
+
+bounds.push([lat,lng]);
+
+filtered.forEach(item=>{
+  bounds.push([item.위도,item.경도]);
+});
+
+map.fitBounds(bounds,{
+  padding:[60,60]
+});
 
 map.once("moveend", closeMsg);
 
@@ -2082,7 +2095,7 @@ setTimeout(closeMsg, 800);
 
 markerGroup.clearLayers();
 
-drawPcUserLocation(lat, lng);
+drawUserLocation(lat, lng);
 L.circle(
   [lat,lng],
   {
@@ -2101,6 +2114,7 @@ const marker = L.marker(
   [item.위도,item.경도],
   {icon}
 );
+marker.itemData = item;
 
 const popupHtml = `
 
@@ -2207,20 +2221,11 @@ function showResultList(items, userLat, userLng){
 
       markerGroup.eachLayer(function(layer){
 
-        if(layer.getLatLng){
+  if(layer.itemData && layer.itemData.순번 === item.순번){
+    layer.openPopup();
+  }
 
-          const latlng = layer.getLatLng();
-
-          if(
-            Math.abs(latlng.lat - item.위도) < 0.00001 &&
-            Math.abs(latlng.lng - item.경도) < 0.00001
-          ){
-            layer.openPopup();
-          }
-
-        }
-
-      });
+});
 
       if(window.mobileLeafletMap){
 
@@ -2230,20 +2235,11 @@ function showResultList(items, userLat, userLng){
 
           window.mobileMarkerGroup.eachLayer(function(layer){
 
-            if(layer.getLatLng){
+  if(layer.itemData && layer.itemData.순번 === item.순번){
+    layer.openPopup();
+  }
 
-              const latlng = layer.getLatLng();
-
-              if(
-                Math.abs(latlng.lat - item.위도) < 0.00001 &&
-                Math.abs(latlng.lng - item.경도) < 0.00001
-              ){
-                layer.openPopup();
-              }
-
-            }
-
-          });
+});
 
         }
 
@@ -2777,6 +2773,7 @@ data.forEach(item=>{
   filtered.forEach(item=>{
     const icon = buildMarkerIcon(item.마커색상);
     const marker = L.marker([item.위도, item.경도], {icon});
+    marker.itemData = item;
 
     const popupHtml = `
     <div class="popup-wrap">
@@ -2875,9 +2872,28 @@ function debounce(fn, delay){
 <div class="mobile-map-popup" id="mobileMapPopup">
 
   <div class="mobile-map-header">
-    지도 보기
-    <button class="mobile-map-close" onclick="closeMobileMap()">닫기</button>
+  지도 보기
+
+  <div style="display:flex; gap:6px;">
+
+    <button onclick="mobileMapHome()" style="
+      border:none;
+      background:#2563eb;
+      color:white;
+      padding:6px 10px;
+      border-radius:6px;
+      font-weight:700;
+    ">
+    홈
+    </button>
+
+    <button class="mobile-map-close" onclick="closeMobileMap()">
+    닫기
+    </button>
+
   </div>
+
+</div>
 
   <div id="mobileMap" class="mobile-map"></div>
   <button id="mobileLocBtn">📍</button>
