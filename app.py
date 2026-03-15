@@ -1075,17 +1075,6 @@ setTimeout(()=>{
 
 let userLat = null;
 let userLng = null;
-
-function mobileMapHome(){
-
-  if(window.mobileLeafletMap){
-
-    window.mobileLeafletMap.setView([34.85,126.90],9);
-
-  }
-
-}
-
 function showMsg(text){
 
   const modal = document.getElementById("msgModal");
@@ -1266,10 +1255,33 @@ function showMobileResults(items, userLat, userLng){
     `;
 
     el.onclick = function(){
-      if(window.mobileLeafletMap){
-        window.mobileLeafletMap.setView([item.위도, item.경도], 16);
+
+  if(window.mobileLeafletMap){
+
+    window.mobileLeafletMap.flyTo(
+      [item.위도,item.경도],
+      16,
+      {
+        duration:1.2,
+        easeLinearity:0.25
       }
-    };
+    );
+
+    if(window.mobileMarkerGroup){
+
+      window.mobileMarkerGroup.eachLayer(function(layer){
+
+        if(layer.itemData && layer.itemData.순번 === item.순번){
+          layer.openPopup();
+        }
+
+      });
+
+    }
+
+  }
+
+};
 
     list.appendChild(el);
   });
@@ -1927,7 +1939,14 @@ items.forEach(item=>{
     if(bounds.length > 0){
       window.mobileLeafletMap.fitBounds(bounds, { padding:[40,40] });
     }else{
-      window.mobileLeafletMap.setView([34.85, 126.90], 9);
+      window.mobileLeafletMap.flyTo(
+  [34.85,126.90],
+  9,
+  {
+    duration:1.2,
+    easeLinearity:0.25
+  }
+);
     }
 
     window.mobileLeafletMap.once("moveend", closeMsg);
@@ -2229,7 +2248,14 @@ function showResultList(items, userLat, userLng){
 
       if(window.mobileLeafletMap){
 
-        window.mobileLeafletMap.setView([item.위도,item.경도],16);
+        window.mobileLeafletMap.flyTo(
+  [item.위도,item.경도],
+  16,
+  {
+    duration:1.2,
+    easeLinearity:0.25
+  }
+);
 
         if(window.mobileMarkerGroup){
 
@@ -2339,7 +2365,14 @@ map.flyTo([lat, lng], 17);
 drawUserLocation(lat,lng);
 
 if(window.mobileLeafletMap){
-  window.mobileLeafletMap.setView([lat,lng],17);
+  window.mobileLeafletMap.flyTo(
+  [lat,lng],
+  17,
+  {
+    duration:1.2,
+    easeLinearity:0.25
+  }
+);
 }
 
 if(window.mobileMarkerGroup){
@@ -2425,7 +2458,14 @@ console.log("모바일 위치 버튼:", lat, lng, "정확도:", pos.coords.accur
 
 if(window.mobileLeafletMap){
 
-  window.mobileLeafletMap.setView([lat,lng],17);
+  window.mobileLeafletMap.flyTo(
+  [lat,lng],
+  17,
+  {
+    duration:1.2,
+    easeLinearity:0.25
+  }
+);
 
   if(window.mobileMarkerGroup){
   window.mobileMarkerGroup.clearLayers();
@@ -2876,17 +2916,7 @@ function debounce(fn, delay){
 
   <div style="display:flex; gap:6px;">
 
-    <button onclick="mobileMapHome()" style="
-      border:none;
-      background:#2563eb;
-      color:white;
-      padding:6px 10px;
-      border-radius:6px;
-      font-weight:700;
-    ">
-    홈
-    </button>
-
+    
     <button class="mobile-map-close" onclick="closeMobileMap()">
     닫기
     </button>
