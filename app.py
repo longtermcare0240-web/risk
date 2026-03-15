@@ -1358,6 +1358,40 @@ function buildUserIcon(){
   });
 }
 
+function drawUserLocation(lat,lng){
+
+  // 기존 위치 마커 제거
+  if(window.userCircle){
+    map.removeLayer(window.userCircle);
+  }
+
+  if(window.userMarker){
+    map.removeLayer(window.userMarker);
+  }
+
+  // 내 위치 원 (크게)
+  window.userCircle = L.circle(
+    [lat,lng],
+    {
+      radius:180,        // ⭐ 크기 (미터)
+      color:"#22c55e",
+      fillColor:"#22c55e",
+      fillOpacity:0.25,
+      weight:2
+    }
+  ).addTo(map);
+
+  // 내 위치 점
+  window.userMarker = L.marker(
+    [lat,lng],
+    { icon: buildUserIcon() }
+  ).addTo(map);
+
+}
+
+
+
+
 function escapeHtml(text){
   if(text === null || text === undefined) return "";
   return String(text)
@@ -1464,6 +1498,10 @@ async function loadData(){
 
   setLoading(true);
 
+map.once("moveend", () => {
+  setLoading(false);
+});
+
   if(!isMobile()){
     markerGroup.clearLayers();
   }
@@ -1565,6 +1603,7 @@ if(!isMobile()){
 
   if(bounds.length > 0){
     map.fitBounds(bounds, { padding:[40,40] });
+    map.once("moveend", closeMsg);
   }else{
     map.setView([34.85, 126.90], 9);
     showMsg("조건에 맞는 데이터가 없습니다.");
@@ -1595,7 +1634,6 @@ if(!isMobile()){
 
 
   }finally{
-    setLoading(false);
   }
 }
 
@@ -1771,27 +1809,41 @@ function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
   const bounds = [];
 
   if(userLat !== null && userLng !== null){
-    const userMarker = L.marker(
-  [userLat, userLng],
-  { icon: buildUserIcon() }
-);
 
-window.mobileMarkerGroup.addLayer(userMarker);
-    bounds.push([userLat, userLng]);
-
-    if(radiusMeter){
-      const circle = L.circle(
-        [userLat, userLng],
-        {
-          radius: radiusMeter,
-          color:"#2563eb",
-          fillColor:"#2563eb",
-          fillOpacity:0.08
-        }
-      );
-      window.mobileMarkerGroup.addLayer(circle);
+  const userCircle = L.circle(
+    [userLat, userLng],
+    {
+      radius: 160,
+      color:"#22c55e",
+      fillColor:"#22c55e",
+      fillOpacity:0.28,
+      weight:3
     }
+  );
+
+  const userMarker = L.marker(
+    [userLat, userLng],
+    { icon: buildUserIcon() }
+  );
+
+  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileMarkerGroup.addLayer(userMarker);
+
+  bounds.push([userLat, userLng]);
+
+  if(radiusMeter){
+    const circle = L.circle(
+      [userLat, userLng],
+      {
+        radius: radiusMeter,
+        color:"#2563eb",
+        fillColor:"#2563eb",
+        fillOpacity:0.08
+      }
+    );
+    window.mobileMarkerGroup.addLayer(circle);
   }
+}
 
 items.forEach(item=>{
 
@@ -1874,6 +1926,11 @@ items.forEach(item=>{
     }else{
       window.mobileLeafletMap.setView([34.85, 126.90], 9);
     }
+
+    window.mobileLeafletMap.once("moveend", closeMsg);
+
+    // ⭐ moveend 안 발생할 때 대비
+    setTimeout(closeMsg, 800);
   }, 250);
 
 
@@ -1898,7 +1955,6 @@ async function findNearestToilet(){
 
     pos=>{
 
-      closeLoadingAfterMinTime();
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
 
@@ -1940,7 +1996,6 @@ async function findNearestDanger(){
   navigator.geolocation.getCurrentPosition(
 
     pos=>{
-      closeLoadingAfterMinTime();
 
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
@@ -2018,15 +2073,16 @@ if(isMobile()){
   return;
 }
 
-map.setView([lat,lng],15);
+map.flyTo([lat,lng],15);
+
+map.once("moveend", closeMsg);
+
+// ⭐ moveend 안 생길 경우 대비
+setTimeout(closeMsg, 800);
 
 markerGroup.clearLayers();
 
-L.marker(
-  [lat,lng],
-  { icon: buildUserIcon() }
-).addTo(markerGroup);
-
+drawPcUserLocation(lat, lng);
 L.circle(
   [lat,lng],
   {
@@ -2073,7 +2129,9 @@ markerGroup.addLayer(marker);
 });
 
 showResultList(filtered,lat,lng);
+
 }
+
 
 
 async function findRadius(km){
@@ -2145,7 +2203,7 @@ function showResultList(items, userLat, userLng){
     `;
     el.onclick = function(){
 
-      map.setView([item.위도,item.경도],16);
+      map.flyTo([item.위도,item.경도],16);
 
       markerGroup.eachLayer(function(layer){
 
@@ -2215,10 +2273,7 @@ const data = ALL_DATA_CACHE;
 
   const radiusMeter = km * 1000;
 
-  L.marker(
-    [lat,lng],
-    { icon: buildUserIcon() }
-  ).addTo(markerGroup);
+  drawUserLocation(lat,lng);
 
   L.circle(
     [lat,lng],
@@ -2282,12 +2337,10 @@ console.log("내 위치 버튼:", lat, lng, "정확도:", pos.coords.accuracy);
 
 markerGroup.clearLayers();
 
-map.setView([lat, lng], 17);
+map.flyTo([lat, lng], 17);
 
-L.marker(
-  [lat, lng],
-  { icon: buildUserIcon() }
-).addTo(markerGroup);
+// ⭐ 내 위치 표시
+drawUserLocation(lat,lng);
 
 if(window.mobileLeafletMap){
   window.mobileLeafletMap.setView([lat,lng],17);
@@ -2296,10 +2349,25 @@ if(window.mobileLeafletMap){
 if(window.mobileMarkerGroup){
   window.mobileMarkerGroup.clearLayers();
 
-  L.marker([lat,lng],{icon:buildUserIcon()})
-  .addTo(window.mobileMarkerGroup);
-}
+  const userCircle = L.circle(
+    [lat, lng],
+    {
+      radius:180,
+      color:"#22c55e",
+      fillColor:"#22c55e",
+      fillOpacity:0.28,
+      weight:3
+    }
+  );
 
+  const userMarker = L.marker(
+    [lat, lng],
+    { icon: buildUserIcon() }
+  );
+
+  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileMarkerGroup.addLayer(userMarker);
+}
 },
 
 err=>{
@@ -2364,11 +2432,27 @@ if(window.mobileLeafletMap){
   window.mobileLeafletMap.setView([lat,lng],17);
 
   if(window.mobileMarkerGroup){
-    window.mobileMarkerGroup.clearLayers();
+  window.mobileMarkerGroup.clearLayers();
 
-    L.marker([lat,lng],{icon:buildUserIcon()})
-    .addTo(window.mobileMarkerGroup);
-  }
+  const userCircle = L.circle(
+    [lat, lng],
+    {
+      radius: 160,
+      color:"#22c55e",
+      fillColor:"#22c55e",
+      fillOpacity:0.28,
+      weight:3
+    }
+  );
+
+  const userMarker = L.marker(
+    [lat, lng],
+    { icon: buildUserIcon() }
+  );
+
+  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileMarkerGroup.addLayer(userMarker);
+}
 
 }},
 
@@ -2390,19 +2474,6 @@ err=>{
 });
 
 let loadingStartTime = 0;
-
-function closeLoadingAfterMinTime(){
-
-  const elapsed = Date.now() - loadingStartTime;
-  const minTime = 3000;   // 최소 3초
-
-  if(elapsed >= minTime){
-    closeMsg();
-  }else{
-    setTimeout(closeMsg, minTime - elapsed);
-  }
-
-}
 
 function openRouteSearch(){
   document.getElementById("routePopup").style.display="flex";
@@ -2683,7 +2754,7 @@ if(road){
 
 const data = ALL_DATA_CACHE;
 
-const radius = 150;
+const radius = 50;
 
 const filtered = [];
 
@@ -2755,6 +2826,9 @@ if(isMobile() && window.mobileLeafletMap){
     {padding:[60,60]}
   );
 
+  map.once("moveend", closeMsg);
+  setTimeout(closeMsg,800);
+
   const toiletCount = filtered.filter(x=>x.구분==="공중화장실").length;
   const iceCount = filtered.filter(x=>x.구분==="상습결빙지역").length;
   const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
@@ -2774,6 +2848,7 @@ if(isMobile() && window.mobileLeafletMap){
 }
 
   closeRoutePopup();
+
 }
 
 
