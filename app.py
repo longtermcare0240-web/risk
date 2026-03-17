@@ -2822,6 +2822,8 @@ function distancePointToRoute(lat, lng, routeLatLngs){
 }
 
 async function runRouteSearch(){
+  showLoadingLocation();   // ⭐ 추가
+
   closeRoutePopup();   // ⭐ 여기 추가
 
 
@@ -2916,18 +2918,61 @@ data.forEach(item=>{
     marker.itemData = item;
 
     const popupHtml = `
-    <div class="popup-wrap">
-      <img class="popup-img" src="${item.사진URL}">
-      <div class="popup-title">${item.구분}</div>
-      <div class="popup-meta">
-        ${item.시군구} ${item.읍면동}<br>
-        ${item.주소}
-      </div>
-      <div class="popup-desc">
-        ${item.사고설명}
-      </div>
-    </div>
-    `;
+<div class="popup-wrap">
+
+<img class="popup-img" src="${item.사진URL}">
+
+<div class="popup-title">${item.구분}</div>
+
+<div class="popup-meta">
+${item.시군구} ${item.읍면동}<br>
+${item.주소}
+</div>
+
+<div class="popup-desc">
+${item.사고설명}
+</div>
+
+<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+
+<a 
+href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#03C75A;
+color:#ffffff;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+네이버 길찾기
+</a>
+
+<a 
+href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
+target="_blank"
+style="
+display:block;
+text-align:center;
+background:#FEE500;
+color:#191919;
+font-weight:700;
+padding:8px;
+border-radius:8px;
+text-decoration:none;
+font-size:13px;
+">
+카카오 길찾기
+</a>
+
+</div>
+
+</div>
+`;
 
     marker.bindPopup(popupHtml,{maxWidth:290});
     markerGroup.addLayer(marker);
