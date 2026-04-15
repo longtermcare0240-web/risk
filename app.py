@@ -1818,7 +1818,6 @@ function isMobile(){
   return window.innerWidth < 900;
 }
 
-function openSexOffenderApp(){
 
 function openSexOffenderApp(){
 
