@@ -1833,18 +1833,19 @@ function openSexOffenderApp(){
     return;
   }
 
-  if(isAndroid){
+if(isAndroid){
 
-    const intentUrl =
-      "intent://#Intent;"
-      + "scheme=sexoffender;"
-      + "package=com.mogef_android1.app;"
-      + "S.browser_fallback_url=" + encodeURIComponent(playStoreUrl) + ";"
-      + "end";
+  // 1️⃣ 앱 실행 시도 (스킴)
+  window.location.href = "sexoffender://";
 
-    window.location.href = intentUrl;
-    return;
-  }
+  // 2️⃣ 실패하면 스토어 이동
+  setTimeout(function(){
+    window.location.href = playStoreUrl;
+  }, 1500);
+
+  return;
+}
+
 
   if(isIOS){
     window.location.href = appStoreUrl;
