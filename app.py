@@ -875,6 +875,25 @@ box-shadow:0 6px 16px rgba(0,0,0,0.25);
 cursor:pointer;
 }
 
+.sexoffender-btn{
+display:block;
+background:#ffffff;
+color:#111827;
+}
+
+@media (max-width:900px){
+.sexoffender-btn{
+display:block;
+}
+}
+
+@media (min-width:901px){
+.sexoffender-btn{
+display:block;
+}
+}
+
+
 .sidebar .btn{
 height:46px;
 font-size:14px;
@@ -987,6 +1006,11 @@ margin-top:4px;
 <button class="btn secondary" onclick="findNearestDanger()">
 내 주변 위험지역 찾기
 </button>
+
+<button class="btn secondary sexoffender-btn" onclick="openSexOffenderApp()">
+성범죄자 알림e
+</button>
+
 
 </div>
 
@@ -1793,6 +1817,41 @@ if(startInput){
 function isMobile(){
   return window.innerWidth < 900;
 }
+
+function openSexOffenderApp(){
+
+  const ua = navigator.userAgent || "";
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  const pcUrl = "https://www.sexoffender.go.kr";
+  const playStoreUrl = "https://play.google.com/store/apps/details?id=com.mogef_android1.app";
+  const appStoreUrl = "https://apps.apple.com/kr/app/%EC%84%B1%EB%B2%94%EC%A3%84%EC%9E%90-%EC%95%8C%EB%A6%BCe/id896534884";
+
+  if(!isAndroid && !isIOS){
+    window.open(pcUrl, "_blank");
+    return;
+  }
+
+  if(isAndroid){
+
+    const intentUrl =
+      "intent://#Intent;"
+      + "scheme=sexoffender;"
+      + "package=com.mogef_android1.app;"
+      + "S.browser_fallback_url=" + encodeURIComponent(playStoreUrl) + ";"
+      + "end";
+
+    window.location.href = intentUrl;
+    return;
+  }
+
+  if(isIOS){
+    window.location.href = appStoreUrl;
+    return;
+  }
+}
+
 
 function openMobileMap(){
 
