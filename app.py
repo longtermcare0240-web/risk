@@ -1820,18 +1820,50 @@ function isMobile(){
 
 function openSexOffenderApp(){
 
+function openSexOffenderApp(){
+
   const ua = navigator.userAgent || "";
   const isAndroid = /Android/i.test(ua);
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
 
   const pcUrl = "https://www.sexoffender.go.kr";
-  const playStoreUrl = "https://play.google.com/store/apps/details?id=com.mogef_android1.app";
+  const androidStoreSearchUrl = "market://search?q=성범죄자 알림e";
+  const androidStoreDetailUrl = "market://details?id=com.mogef_android1.app";
+  const androidWebStoreUrl = "https://play.google.com/store/search?q=%EC%84%B1%EB%B2%94%EC%A3%84%EC%9E%90%20%EC%95%8C%EB%A6%BCe&c=apps";
   const appStoreUrl = "https://apps.apple.com/kr/app/%EC%84%B1%EB%B2%94%EC%A3%84%EC%9E%90-%EC%95%8C%EB%A6%BCe/id896534884";
 
   if(!isAndroid && !isIOS){
     window.open(pcUrl, "_blank");
     return;
   }
+
+  if(isAndroid){
+
+    // 앱 실행 시도
+    window.location.href = "intent://#Intent;package=com.mogef_android1.app;end";
+
+    // 앱이 안 열리면 플레이스토어 앱 검색으로 이동
+    setTimeout(function(){
+      try{
+        window.location.href = androidStoreSearchUrl;
+      }catch(e){
+        window.location.href = androidStoreDetailUrl;
+      }
+    }, 1200);
+
+    // 그래도 안 되면 웹 플레이스토어 검색
+    setTimeout(function(){
+      window.location.href = androidWebStoreUrl;
+    }, 2200);
+
+    return;
+  }
+
+  if(isIOS){
+    window.location.href = appStoreUrl;
+    return;
+  }
+}
 
 if(isAndroid){
 
