@@ -17,73 +17,94 @@ from datetime import date, datetime
 def update_visitors():
 
     if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Supabase 환경변수 없음")
         return {
             "total": 0,
             "today_count": 0
         }
 
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
-    }
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
 
-    url = f"{SUPABASE_URL}/rest/v1/visit_stats?id=eq.1"
+        url = f"{SUPABASE_URL}/rest/v1/visit_stats?id=eq.1"
 
-    r = requests.get(url, headers=headers)
+        r = requests.get(url, headers=headers)
+        print("Supabase visit_stats 조회 상태:", r.status_code, r.text)
 
-    rows = r.json()
+        if r.status_code >= 400:
+            return {
+                "total": 0,
+                "today_count": 0
+            }
 
-    if not rows:
+        rows = r.json()
+
+        if not rows or not isinstance(rows, list):
+            return {
+                "total": 0,
+                "today_count": 0
+            }
+
+        row = rows[0]
+
+        total = int(row.get("total_count", 0))
+        today = str(row.get("today_date", date.today()))
+        today_count = int(row.get("today_count", 0))
+
+        now_day = str(date.today())
+
+        total += 1
+
+        if today == now_day:
+            today_count += 1
+        else:
+            today = now_day
+            today_count = 1
+
+        update_data = {
+            "total_count": total,
+            "today_date": today,
+            "today_count": today_count,
+            "updated_at": datetime.now().isoformat()
+        }
+
+        r2 = requests.patch(
+            url,
+            headers=headers,
+            json=update_data
+        )
+
+        print("Supabase visit_stats 업데이트 상태:", r2.status_code, r2.text)
+
+        r3 = requests.post(
+            f"{SUPABASE_URL}/rest/v1/visit_logs",
+            headers=headers,
+            json={
+                "ip": request.headers.get(
+                    "X-Forwarded-For",
+                    request.remote_addr
+                )
+            }
+        )
+
+        print("Supabase visit_logs 저장 상태:", r3.status_code, r3.text)
+
+        return {
+            "total": total,
+            "today_count": today_count
+        }
+
+    except Exception as e:
+        print("방문자 Supabase 처리 오류:", e)
         return {
             "total": 0,
             "today_count": 0
         }
-
-    row = rows[0]
-
-    total = row["total_count"]
-    today = row["today_date"]
-    today_count = row["today_count"]
-
-    now_day = str(date.today())
-
-    total += 1
-
-    if today == now_day:
-        today_count += 1
-    else:
-        today = now_day
-        today_count = 1
-
-    update_data = {
-        "total_count": total,
-        "today_date": today,
-        "today_count": today_count
-    }
-
-    requests.patch(
-        url,
-        headers=headers,
-        json=update_data
-    )
-
-    return {
-        "total": total,
-        "today_count": today_count
-    }
-
-    requests.post(
-        f"{SUPABASE_URL}/rest/v1/visit_logs",
-        headers=headers,
-        json={
-            "ip": request.headers.get(
-                "X-Forwarded-For",
-                request.remote_addr
-            )
-        }
-    )
-
 
 def save_search_log(data):
 
@@ -91,34 +112,38 @@ def save_search_log(data):
         print("Supabase 환경변수 없음")
         return
 
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-    }
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
 
-    payload = {
-        "province": data.get("province", ""),
-        "city": data.get("city", ""),
-        "town": data.get("town", ""),
-        "categories": data.get("categories", []),
-        "result_count": data.get("result_count", 0),
-        "ip": request.headers.get(
-            "X-Forwarded-For",
-            request.remote_addr
+        payload = {
+            "province": data.get("province", ""),
+            "city": data.get("city", ""),
+            "town": data.get("town", ""),
+            "categories": data.get("categories", []),
+            "result_count": data.get("result_count", 0),
+            "ip": request.headers.get(
+                "X-Forwarded-For",
+                request.remote_addr
+            )
+        }
+
+        print("Supabase 저장 payload:", payload)
+
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/search_logs",
+            headers=headers,
+            json=payload
         )
-    }
 
-    print("Supabase 저장 payload:", payload)
+        print("Supabase search_logs 저장 상태:", r.status_code, r.text)
 
-    r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/search_logs",
-        headers=headers,
-        json=payload
-    )
-
-    print("Supabase search_logs 저장 상태:", r.status_code, r.text)
+    except Exception as e:
+        print("검색로그 Supabase 처리 오류:", e)
 
 
 app = Flask(__name__)
