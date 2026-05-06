@@ -88,12 +88,14 @@ def update_visitors():
 def save_search_log(data):
 
     if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Supabase 환경변수 없음")
         return
 
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
     }
 
     payload = {
@@ -108,12 +110,15 @@ def save_search_log(data):
         )
     }
 
-    requests.post(
+    print("Supabase 저장 payload:", payload)
+
+    r = requests.post(
         f"{SUPABASE_URL}/rest/v1/search_logs",
         headers=headers,
         json=payload
     )
 
+    print("Supabase search_logs 저장 상태:", r.status_code, r.text)
 
 
 app = Flask(__name__)
