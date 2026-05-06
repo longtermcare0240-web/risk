@@ -6,68 +6,114 @@ import re
 import time
 import threading
 import requests
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 import webbrowser
 from urllib.parse import quote
 import json
 from datetime import date, datetime
 
-VISITOR_FILE = "visitors.json"
-SEARCH_LOG_FILE = "search_logs.json"
-
 
 def update_visitors():
 
-    if not os.path.exists(VISITOR_FILE):
-
-        data = {
-            "total":0,
-            "today":str(date.today()),
-            "today_count":0
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {
+            "total": 0,
+            "today_count": 0
         }
 
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    url = f"{SUPABASE_URL}/rest/v1/visit_stats?id=eq.1"
+
+    r = requests.get(url, headers=headers)
+
+    rows = r.json()
+
+    if not rows:
+        return {
+            "total": 0,
+            "today_count": 0
+        }
+
+    row = rows[0]
+
+    total = row["total_count"]
+    today = row["today_date"]
+    today_count = row["today_count"]
+
+    now_day = str(date.today())
+
+    total += 1
+
+    if today == now_day:
+        today_count += 1
     else:
-        with open(VISITOR_FILE,"r",encoding="utf-8") as f:
-            data=json.load(f)
+        today = now_day
+        today_count = 1
 
-    today=str(date.today())
+    update_data = {
+        "total_count": total,
+        "today_date": today,
+        "today_count": today_count
+    }
 
-    data["total"] += 1
+    requests.patch(
+        url,
+        headers=headers,
+        json=update_data
+    )
 
-    if data["today"] == today:
-        data["today_count"] += 1
-    else:
-        data["today"]=today
-        data["today_count"]=1
+    return {
+        "total": total,
+        "today_count": today_count
+    }
 
-    with open(VISITOR_FILE,"w",encoding="utf-8") as f:
-        json.dump(data,f,ensure_ascii=False,indent=2)
+    requests.post(
+        f"{SUPABASE_URL}/rest/v1/visit_logs",
+        headers=headers,
+        json={
+            "ip": request.headers.get(
+                "X-Forwarded-For",
+                request.remote_addr
+            )
+        }
+    )
 
-    return data
 
 def save_search_log(data):
 
-    logs = []
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
 
-    if os.path.exists(SEARCH_LOG_FILE):
-        try:
-            with open(SEARCH_LOG_FILE, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        except Exception:
-            logs = []
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    logs.append({
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "day": str(date.today()),
+    payload = {
         "province": data.get("province", ""),
         "city": data.get("city", ""),
         "town": data.get("town", ""),
         "categories": data.get("categories", []),
         "result_count": data.get("result_count", 0),
-        "ip": request.headers.get("X-Forwarded-For", request.remote_addr)
-    })
+        "ip": request.headers.get(
+            "X-Forwarded-For",
+            request.remote_addr
+        )
+    }
 
-    with open(SEARCH_LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
+    requests.post(
+        f"{SUPABASE_URL}/rest/v1/search_logs",
+        headers=headers,
+        json=payload
+    )
+
 
 
 app = Flask(__name__)
@@ -1863,21 +1909,53 @@ if(startInput){
 
 function openAdminStats(){
 
-  const pw = prompt("관리자 암호를 입력하세요.");
+  const modal = document.getElementById("adminPwModal");
+  const input = document.getElementById("adminPwInput");
+  const msg = document.getElementById("adminPwMsg");
 
-  if(pw === null){
+  if(!modal || !input){
     return;
   }
 
-  if(pw !== "1234"){
-    alert("암호가 틀렸습니다.");
+  input.value = "";
+  msg.textContent = "";
+  modal.style.display = "flex";
+
+  setTimeout(()=>{
+    input.focus();
+  },100);
+
+}
+function closeAdminPwModal(){
+
+  const modal = document.getElementById("adminPwModal");
+
+  if(modal){
+    modal.style.display = "none";
+  }
+
+}
+
+function submitAdminPw(){
+
+  const input = document.getElementById("adminPwInput");
+  const msg = document.getElementById("adminPwMsg");
+
+  if(!input){
+    return;
+  }
+
+  if(input.value !== "1234"){
+    if(msg){
+      msg.textContent = "암호가 틀렸습니다.";
+    }
+    input.focus();
     return;
   }
 
   window.location.href = "/stats";
 
 }
-
 
 function isMobile(){
   return window.innerWidth < 900;
@@ -3336,6 +3414,90 @@ box-shadow:0 4px 14px rgba(0,0,0,0.08);
 </div>
 </div>
 
+<div id="adminPwModal" style="
+display:none;
+position:fixed;
+inset:0;
+background:rgba(15,23,42,0.45);
+z-index:5000;
+align-items:center;
+justify-content:center;
+padding:20px;
+">
+  <div style="
+  width:100%;
+  max-width:360px;
+  background:#ffffff;
+  border-radius:18px;
+  padding:22px;
+  box-shadow:0 18px 45px rgba(0,0,0,0.25);
+  ">
+    <div style="
+    font-size:18px;
+    font-weight:900;
+    margin-bottom:8px;
+    color:#111827;
+    ">
+    관리자 통계
+    </div>
+
+    <div style="
+    font-size:13px;
+    color:#64748b;
+    margin-bottom:14px;
+    ">
+    관리자 암호를 입력하세요.
+    </div>
+
+    <input id="adminPwInput" type="password" onkeydown="if(event.key==='Enter'){submitAdminPw();}" style="
+    width:100%;
+    height:44px;
+    border:1px solid #cbd5e1;
+    border-radius:12px;
+    padding:0 12px;
+    font-size:16px;
+    outline:none;
+    ">
+
+    <div id="adminPwMsg" style="
+    min-height:20px;
+    margin-top:8px;
+    font-size:13px;
+    color:#ef4444;
+    "></div>
+
+    <div style="
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:14px;
+    ">
+      <button onclick="closeAdminPwModal()" style="
+      height:42px;
+      border:1px solid #cbd5e1;
+      border-radius:12px;
+      background:#ffffff;
+      font-weight:800;
+      cursor:pointer;
+      ">
+      취소
+      </button>
+
+      <button onclick="submitAdminPw()" style="
+      height:42px;
+      border:none;
+      border-radius:12px;
+      background:#2563eb;
+      color:#ffffff;
+      font-weight:800;
+      cursor:pointer;
+      ">
+      확인
+      </button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
 """
@@ -3389,21 +3551,35 @@ def log_search():
 @app.route("/stats")
 def stats():
 
-    logs = []
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return """
+        <h2>조회 통계</h2>
+        <p>로컬 실행 중이라 Supabase 통계를 불러오지 않습니다.</p>
+        <p><a href="/">돌아가기</a></p>
+        """
 
-    if os.path.exists(SEARCH_LOG_FILE):
-        with open(SEARCH_LOG_FILE, "r", encoding="utf-8") as f:
-            logs = json.load(f)
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+
+    res = requests.get(
+        f"{SUPABASE_URL}/rest/v1/search_logs?select=*&order=created_at.desc&limit=10000",
+        headers=headers
+    )
+
+    logs = res.json()
 
     df = pd.DataFrame(logs)
 
     if df.empty:
-        html = """
+        return """
         <h2>조회 통계</h2>
         <p>아직 조회 기록이 없습니다.</p>
         <p><a href="/">돌아가기</a></p>
         """
-        return html
+
+    df["day"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
 
     region_stats = (
         df.groupby(["day", "province", "city", "town"], dropna=False)
@@ -3412,13 +3588,7 @@ def stats():
         .sort_values(["day", "조회수"], ascending=[False, False])
     )
 
-    region_stats.columns = [
-        "날짜",
-        "시도",
-        "시군구",
-        "읍면동",
-        "조회수"
-    ]
+    region_stats.columns = ["날짜", "시도", "시군구", "읍면동", "조회수"]
 
     category_rows = []
 
@@ -3442,18 +3612,13 @@ def stats():
     category_df = pd.DataFrame(category_rows)
 
     category_stats = (
-        category_df.groupby(["day", "category"], dropna=False)
-        ["search_count"]
+        category_df.groupby(["day", "category"], dropna=False)["search_count"]
         .sum()
         .reset_index()
         .sort_values(["day", "search_count"], ascending=[False, False])
     )
 
-    category_stats.columns = [
-        "날짜",
-        "위험지역 구분",
-        "체크 수"
-    ]
+    category_stats.columns = ["날짜", "위험지역 구분", "체크 수"]
 
     return render_template_string("""
     <!DOCTYPE html>
@@ -3462,44 +3627,15 @@ def stats():
     <meta charset="UTF-8">
     <title>조회 통계</title>
     <style>
-    body{
-      font-family:Malgun Gothic, sans-serif;
-      padding:24px;
-      background:#f8fafc;
-    }
-    h2{
-      margin-top:0;
-    }
-    table{
-      border-collapse:collapse;
-      width:100%;
-      background:white;
-      margin-bottom:30px;
-    }
-    th,td{
-      border:1px solid #ddd;
-      padding:8px;
-      font-size:14px;
-      text-align:left;
-    }
-    th{
-      background:#e5e7eb;
-    }
-    .btn{
-      display:inline-block;
-      padding:10px 14px;
-      background:#2563eb;
-      color:white;
-      text-decoration:none;
-      border-radius:8px;
-      margin-bottom:18px;
-    }
+    body{font-family:Malgun Gothic,sans-serif;padding:24px;background:#f8fafc;}
+    table{border-collapse:collapse;width:100%;background:white;margin-bottom:30px;}
+    th,td{border:1px solid #ddd;padding:8px;font-size:14px;text-align:left;}
+    th{background:#e5e7eb;}
+    .btn{display:inline-block;padding:10px 14px;background:#2563eb;color:white;text-decoration:none;border-radius:8px;margin-bottom:18px;}
     </style>
     </head>
     <body>
-
     <h2>조회 통계</h2>
-
     <a class="btn" href="/">돌아가기</a>
 
     <h3>날짜별·지역별 조회 수</h3>
@@ -3507,7 +3643,6 @@ def stats():
 
     <h3>날짜별·위험지역 체크 수</h3>
     {{ category_table|safe }}
-
     </body>
     </html>
     """,
