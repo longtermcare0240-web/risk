@@ -9,9 +9,10 @@ import requests
 import webbrowser
 from urllib.parse import quote
 import json
-from datetime import date
+from datetime import date, datetime
 
 VISITOR_FILE = "visitors.json"
+SEARCH_LOG_FILE = "search_logs.json"
 
 
 def update_visitors():
@@ -42,6 +43,31 @@ def update_visitors():
         json.dump(data,f,ensure_ascii=False,indent=2)
 
     return data
+
+def save_search_log(data):
+
+    logs = []
+
+    if os.path.exists(SEARCH_LOG_FILE):
+        try:
+            with open(SEARCH_LOG_FILE, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        except Exception:
+            logs = []
+
+    logs.append({
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "day": str(date.today()),
+        "province": data.get("province", ""),
+        "city": data.get("city", ""),
+        "town": data.get("town", ""),
+        "categories": data.get("categories", []),
+        "result_count": data.get("result_count", 0),
+        "ip": request.headers.get("X-Forwarded-For", request.remote_addr)
+    })
+
+    with open(SEARCH_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
 
 
 app = Flask(__name__)
@@ -229,7 +255,7 @@ HTML = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>위험지역 찾기</title>
+<title>안전지도</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
@@ -439,9 +465,13 @@ margin-bottom:6px;
 .summary{
 display:grid;
 grid-template-columns:1fr 1fr;
-grid-auto-rows:1fr;
 gap:10px;
 }
+
+.admin-btn{
+grid-column:1 / -1;
+}
+
 .summary-box{
   background:#fff;
   border:1px solid #e2e8f0;
@@ -958,7 +988,7 @@ margin-top:4px;
 
   <div class="brand-left">
     <div class="brand-title">
-      <span>위험지역 찾기</span>
+      <span>안전지도</span>
       <img src="/ci" class="ci-logo">
     </div>
 
@@ -1026,6 +1056,11 @@ margin-top:4px;
 <div class="num">{{today_visit}}</div>
 <div class="txt">오늘 방문자</div>
 </div>
+
+
+<button class="btn secondary admin-btn" onclick="openAdminStats()">
+관리자 통계
+</button>
 
 </div>
 </div>
@@ -1617,6 +1652,20 @@ map.once("moveend", () => {
     const data = result.data;
     const total = result.total;
 
+fetch("/log_search", {
+  method:"POST",
+  headers:{
+    "Content-Type":"application/json"
+  },
+  body:JSON.stringify({
+    province:province,
+    city:city,
+    town:town,
+    categories:categories,
+    result_count:total
+  })
+});
+
     const bounds = [];
 
     data.forEach(item => {
@@ -1811,6 +1860,23 @@ if(startInput){
 
 });
 
+
+function openAdminStats(){
+
+  const pw = prompt("관리자 암호를 입력하세요.");
+
+  if(pw === null){
+    return;
+  }
+
+  if(pw !== "1234"){
+    alert("암호가 틀렸습니다.");
+    return;
+  }
+
+  window.location.href = "/stats";
+
+}
 
 
 function isMobile(){
@@ -3310,6 +3376,144 @@ def index():
     )
 
 
+@app.route("/log_search", methods=["POST"])
+def log_search():
+
+    data = request.get_json() or {}
+
+    save_search_log(data)
+
+    return jsonify({"ok": True})
+
+
+@app.route("/stats")
+def stats():
+
+    logs = []
+
+    if os.path.exists(SEARCH_LOG_FILE):
+        with open(SEARCH_LOG_FILE, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+
+    df = pd.DataFrame(logs)
+
+    if df.empty:
+        html = """
+        <h2>조회 통계</h2>
+        <p>아직 조회 기록이 없습니다.</p>
+        <p><a href="/">돌아가기</a></p>
+        """
+        return html
+
+    region_stats = (
+        df.groupby(["day", "province", "city", "town"], dropna=False)
+        .size()
+        .reset_index(name="조회수")
+        .sort_values(["day", "조회수"], ascending=[False, False])
+    )
+
+    region_stats.columns = [
+        "날짜",
+        "시도",
+        "시군구",
+        "읍면동",
+        "조회수"
+    ]
+
+    category_rows = []
+
+    for _, row in df.iterrows():
+        categories = row.get("categories", [])
+
+        if not categories:
+            category_rows.append({
+                "day": row.get("day", ""),
+                "category": "전체",
+                "search_count": 1
+            })
+        else:
+            for cat in categories:
+                category_rows.append({
+                    "day": row.get("day", ""),
+                    "category": cat,
+                    "search_count": 1
+                })
+
+    category_df = pd.DataFrame(category_rows)
+
+    category_stats = (
+        category_df.groupby(["day", "category"], dropna=False)
+        ["search_count"]
+        .sum()
+        .reset_index()
+        .sort_values(["day", "search_count"], ascending=[False, False])
+    )
+
+    category_stats.columns = [
+        "날짜",
+        "위험지역 구분",
+        "체크 수"
+    ]
+
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+    <meta charset="UTF-8">
+    <title>조회 통계</title>
+    <style>
+    body{
+      font-family:Malgun Gothic, sans-serif;
+      padding:24px;
+      background:#f8fafc;
+    }
+    h2{
+      margin-top:0;
+    }
+    table{
+      border-collapse:collapse;
+      width:100%;
+      background:white;
+      margin-bottom:30px;
+    }
+    th,td{
+      border:1px solid #ddd;
+      padding:8px;
+      font-size:14px;
+      text-align:left;
+    }
+    th{
+      background:#e5e7eb;
+    }
+    .btn{
+      display:inline-block;
+      padding:10px 14px;
+      background:#2563eb;
+      color:white;
+      text-decoration:none;
+      border-radius:8px;
+      margin-bottom:18px;
+    }
+    </style>
+    </head>
+    <body>
+
+    <h2>조회 통계</h2>
+
+    <a class="btn" href="/">돌아가기</a>
+
+    <h3>날짜별·지역별 조회 수</h3>
+    {{ region_table|safe }}
+
+    <h3>날짜별·위험지역 체크 수</h3>
+    {{ category_table|safe }}
+
+    </body>
+    </html>
+    """,
+    region_table=region_stats.to_html(index=False),
+    category_table=category_stats.to_html(index=False)
+    )
 
 @app.route("/meta")
 def meta():
