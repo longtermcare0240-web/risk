@@ -3581,104 +3581,186 @@ def log_search():
 @app.route("/stats")
 def stats():
 
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return """
-        <h2>조회 통계</h2>
-        <p>로컬 실행 중이라 Supabase 통계를 불러오지 않습니다.</p>
-        <p><a href="/">돌아가기</a></p>
-        """
+    try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return """
+            <h2>조회 통계</h2>
+            <p>Supabase 환경변수가 없습니다.</p>
+            <p><a href="/">돌아가기</a></p>
+            """
 
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
-    }
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
 
-    res = requests.get(
-        f"{SUPABASE_URL}/rest/v1/search_logs?select=*&order=created_at.desc&limit=10000",
-        headers=headers
-    )
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/search_logs?select=*&order=created_at.desc&limit=10000",
+            headers=headers
+        )
 
-    logs = res.json()
+        print("Supabase 관리자페이지 조회 상태:", res.status_code, res.text)
 
-    df = pd.DataFrame(logs)
+        if res.status_code >= 400:
+            return f"""
+            <h2>조회 통계 오류</h2>
+            <p>Supabase 조회 실패</p>
+            <pre>{res.status_code}</pre>
+            <pre>{res.text}</pre>
+            <p><a href="/">돌아가기</a></p>
+            """
 
-    if df.empty:
-        return """
-        <h2>조회 통계</h2>
-        <p>아직 조회 기록이 없습니다.</p>
-        <p><a href="/">돌아가기</a></p>
-        """
+        logs = res.json()
 
-    df["day"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
+        if not isinstance(logs, list) or len(logs) == 0:
+            return """
+            <h2>조회 통계</h2>
+            <p>아직 조회 기록이 없습니다.</p>
+            <p><a href="/">돌아가기</a></p>
+            """
 
-    region_stats = (
-        df.groupby(["day", "province", "city", "town"], dropna=False)
-        .size()
-        .reset_index(name="조회수")
-        .sort_values(["day", "조회수"], ascending=[False, False])
-    )
+        df = pd.DataFrame(logs)
 
-    region_stats.columns = ["날짜", "시도", "시군구", "읍면동", "조회수"]
+        if df.empty or "created_at" not in df.columns:
+            return """
+            <h2>조회 통계</h2>
+            <p>조회 기록 형식이 올바르지 않습니다.</p>
+            <p><a href="/">돌아가기</a></p>
+            """
 
-    category_rows = []
+        for col in ["province", "city", "town", "categories", "result_count"]:
+            if col not in df.columns:
+                df[col] = ""
 
-    for _, row in df.iterrows():
-        categories = row.get("categories", [])
+        df["day"] = pd.to_datetime(
+            df["created_at"],
+            errors="coerce"
+        ).dt.strftime("%Y-%m-%d")
 
-        if not categories:
-            category_rows.append({
-                "day": row.get("day", ""),
-                "category": "전체",
-                "search_count": 1
-            })
-        else:
-            for cat in categories:
+        df["day"] = df["day"].fillna("날짜없음")
+
+        region_stats = (
+            df.groupby(["day", "province", "city", "town"], dropna=False)
+            .size()
+            .reset_index(name="조회수")
+            .sort_values(["day", "조회수"], ascending=[False, False])
+        )
+
+        region_stats.columns = ["날짜", "시도", "시군구", "읍면동", "조회수"]
+
+        category_rows = []
+
+        for _, row in df.iterrows():
+            categories = row.get("categories", [])
+
+            if isinstance(categories, str):
+                try:
+                    categories = json.loads(categories)
+                except Exception:
+                    categories = [categories] if categories else []
+
+            if not categories:
                 category_rows.append({
                     "day": row.get("day", ""),
-                    "category": cat,
+                    "category": "전체",
                     "search_count": 1
                 })
+            else:
+                for cat in categories:
+                    category_rows.append({
+                        "day": row.get("day", ""),
+                        "category": cat,
+                        "search_count": 1
+                    })
 
-    category_df = pd.DataFrame(category_rows)
+        category_df = pd.DataFrame(category_rows)
 
-    category_stats = (
-        category_df.groupby(["day", "category"], dropna=False)["search_count"]
-        .sum()
-        .reset_index()
-        .sort_values(["day", "search_count"], ascending=[False, False])
-    )
+        if category_df.empty:
+            category_stats = pd.DataFrame(
+                columns=["날짜", "위험지역 구분", "체크 수"]
+            )
+        else:
+            category_stats = (
+                category_df.groupby(["day", "category"], dropna=False)["search_count"]
+                .sum()
+                .reset_index()
+                .sort_values(["day", "search_count"], ascending=[False, False])
+            )
 
-    category_stats.columns = ["날짜", "위험지역 구분", "체크 수"]
+            category_stats.columns = ["날짜", "위험지역 구분", "체크 수"]
 
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="ko">
-    <head>
-    <meta charset="UTF-8">
-    <title>조회 통계</title>
-    <style>
-    body{font-family:Malgun Gothic,sans-serif;padding:24px;background:#f8fafc;}
-    table{border-collapse:collapse;width:100%;background:white;margin-bottom:30px;}
-    th,td{border:1px solid #ddd;padding:8px;font-size:14px;text-align:left;}
-    th{background:#e5e7eb;}
-    .btn{display:inline-block;padding:10px 14px;background:#2563eb;color:white;text-decoration:none;border-radius:8px;margin-bottom:18px;}
-    </style>
-    </head>
-    <body>
-    <h2>조회 통계</h2>
-    <a class="btn" href="/">돌아가기</a>
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html lang="ko">
+        <head>
+        <meta charset="UTF-8">
+        <title>조회 통계</title>
+        <style>
+        body{
+          font-family:Malgun Gothic, sans-serif;
+          padding:24px;
+          background:#f8fafc;
+        }
+        table{
+          border-collapse:collapse;
+          width:100%;
+          background:white;
+          margin-bottom:30px;
+        }
+        th,td{
+          border:1px solid #ddd;
+          padding:8px;
+          font-size:14px;
+          text-align:left;
+        }
+        th{
+          background:#e5e7eb;
+        }
+        .btn{
+          display:inline-block;
+          padding:10px 14px;
+          background:#2563eb;
+          color:white;
+          text-decoration:none;
+          border-radius:8px;
+          margin-bottom:18px;
+        }
+        pre{
+          white-space:pre-wrap;
+          background:#111827;
+          color:#f9fafb;
+          padding:12px;
+          border-radius:8px;
+        }
+        </style>
+        </head>
+        <body>
 
-    <h3>날짜별·지역별 조회 수</h3>
-    {{ region_table|safe }}
+        <h2>조회 통계</h2>
 
-    <h3>날짜별·위험지역 체크 수</h3>
-    {{ category_table|safe }}
-    </body>
-    </html>
-    """,
-    region_table=region_stats.to_html(index=False),
-    category_table=category_stats.to_html(index=False)
-    )
+        <a class="btn" href="/">돌아가기</a>
+
+        <h3>날짜별·지역별 조회 수</h3>
+        {{ region_table|safe }}
+
+        <h3>날짜별·위험지역 체크 수</h3>
+        {{ category_table|safe }}
+
+        </body>
+        </html>
+        """,
+        region_table=region_stats.to_html(index=False),
+        category_table=category_stats.to_html(index=False)
+        )
+
+    except Exception as e:
+        return f"""
+        <h2>조회 통계 오류</h2>
+        <p>관리자페이지 처리 중 오류가 발생했습니다.</p>
+        <pre>{str(e)}</pre>
+        <p><a href="/">돌아가기</a></p>
+        """
 
 @app.route("/meta")
 def meta():
