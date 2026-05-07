@@ -12,6 +12,7 @@ import webbrowser
 from urllib.parse import quote
 import json
 from datetime import date, datetime
+from io import BytesIO
 
 
 def update_visitors():
@@ -3740,6 +3741,7 @@ def stats():
         <h2>조회 통계</h2>
 
         <a class="btn" href="/">돌아가기</a>
+        <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
         <h3>날짜별·지역별 조회 수</h3>
         {{ region_table|safe }}
@@ -3761,6 +3763,149 @@ def stats():
         <pre>{str(e)}</pre>
         <p><a href="/">돌아가기</a></p>
         """
+
+@app.route("/stats_excel")
+def stats_excel():
+
+    try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            return "Supabase 환경변수가 없습니다.", 500
+
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/search_logs?select=*&order=created_at.desc&limit=10000",
+            headers=headers
+        )
+
+        if res.status_code >= 400:
+            return f"Supabase 조회 실패: {res.status_code} / {res.text}", 500
+
+        logs = res.json()
+
+        if not isinstance(logs, list) or len(logs) == 0:
+            return "다운로드할 조회 기록이 없습니다.", 404
+
+        df = pd.DataFrame(logs)
+
+        for col in ["created_at", "province", "city", "town", "categories", "result_count", "ip"]:
+            if col not in df.columns:
+                df[col] = ""
+
+        df["날짜"] = pd.to_datetime(
+            df["created_at"],
+            errors="coerce"
+        ).dt.strftime("%Y-%m-%d")
+
+        df["조회일시"] = pd.to_datetime(
+            df["created_at"],
+            errors="coerce"
+        ).dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        def category_text(v):
+            if isinstance(v, list):
+                return ", ".join([str(x) for x in v])
+            if isinstance(v, str):
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        return ", ".join([str(x) for x in parsed])
+                except Exception:
+                    return v
+            return ""
+
+        df["위험지역 구분"] = df["categories"].apply(category_text)
+
+        raw_df = df[[
+            "조회일시",
+            "날짜",
+            "province",
+            "city",
+            "town",
+            "위험지역 구분",
+            "result_count",
+            "ip"
+        ]].copy()
+
+        raw_df.columns = [
+            "조회일시",
+            "날짜",
+            "시도",
+            "시군구",
+            "읍면동",
+            "위험지역 구분",
+            "조회결과수",
+            "IP"
+        ]
+
+        region_stats = (
+            raw_df.groupby(["날짜", "시도", "시군구", "읍면동"], dropna=False)
+            .size()
+            .reset_index(name="조회수")
+            .sort_values(["날짜", "조회수"], ascending=[False, False])
+        )
+
+        category_rows = []
+
+        for _, row in df.iterrows():
+            categories = row.get("categories", [])
+
+            if isinstance(categories, str):
+                try:
+                    categories = json.loads(categories)
+                except Exception:
+                    categories = [categories] if categories else []
+
+            if not categories:
+                category_rows.append({
+                    "날짜": row.get("날짜", ""),
+                    "위험지역 구분": "전체",
+                    "체크 수": 1
+                })
+            else:
+                for cat in categories:
+                    category_rows.append({
+                        "날짜": row.get("날짜", ""),
+                        "위험지역 구분": cat,
+                        "체크 수": 1
+                    })
+
+        category_df = pd.DataFrame(category_rows)
+
+        if category_df.empty:
+            category_stats = pd.DataFrame(columns=["날짜", "위험지역 구분", "체크 수"])
+        else:
+            category_stats = (
+                category_df.groupby(["날짜", "위험지역 구분"], dropna=False)["체크 수"]
+                .sum()
+                .reset_index()
+                .sort_values(["날짜", "체크 수"], ascending=[False, False])
+            )
+
+        output = BytesIO()
+
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            raw_df.to_excel(writer, index=False, sheet_name="전체 조회기록")
+            region_stats.to_excel(writer, index=False, sheet_name="지역별 통계")
+            category_stats.to_excel(writer, index=False, sheet_name="구분별 통계")
+
+        output.seek(0)
+
+        filename = "safety_map_stats_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".xlsx"
+
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except Exception as e:
+        return f"엑셀 생성 오류: {str(e)}", 500
 
 @app.route("/meta")
 def meta():
