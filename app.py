@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string, Response, send_file
+from flask import Flask, request, jsonify, render_template_string, Response, send_file, session
 import pandas as pd
 from flask_compress import Compress
 import os
@@ -57,6 +57,17 @@ def update_visitors():
         today = str(row.get("today_date", date.today()))
         today_count = int(row.get("today_count", 0))
 
+        now_time = time.time()
+        last_counted_at = session.get("last_visit_counted_at", 0)
+
+        # 같은 브라우저에서 1시간 안에 다시 접속하면 카운트 증가 안 함
+        if last_counted_at and now_time - float(last_counted_at) < 3600:
+            print("1시간 이내 재방문: 방문자 수 증가 안 함")
+            return {
+                "total": total,
+                "today_count": today_count
+            }
+
         now_day = str(date.today())
 
         total += 1
@@ -95,6 +106,8 @@ def update_visitors():
 
         print("Supabase visit_logs 저장 상태:", r3.status_code, r3.text)
 
+        session["last_visit_counted_at"] = now_time
+
         return {
             "total": total,
             "today_count": today_count
@@ -106,6 +119,7 @@ def update_visitors():
             "total": 0,
             "today_count": 0
         }
+
 
 def save_search_log(data):
 
@@ -148,7 +162,9 @@ def save_search_log(data):
 
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "safe-map-secret-key")
 Compress(app)
+
 
 app.json.ensure_ascii = False
 
