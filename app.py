@@ -399,6 +399,7 @@ html,body{
   align-items:center;
   justify-content:space-between;
   width:100%;
+  cursor:pointer;
 
   font-size:22px;
   font-weight:900;
@@ -1080,10 +1081,11 @@ margin-top:4px;
 <div class="brand">
 
   <div class="brand-left">
-    <div class="brand-title">
+    <div class="brand-title" onclick="goHome()">
       <span>안전지도</span>
       <img src="/ci" class="ci-logo">
     </div>
+
 
     <div class="brand-sub">자료제공: 행정안전부(생활안전지도)</div>
   </div>
@@ -1953,6 +1955,11 @@ if(startInput){
 
 });
 
+function goHome(){
+
+  window.location.href = "/";
+
+}
 
 function openAdminStats(){
 
