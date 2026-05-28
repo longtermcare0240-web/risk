@@ -403,7 +403,7 @@ html,body{
   background:#ffffff;
   flex-shrink:0;
 }
-.brand-accent{width:3px;height:36px;background:#6366f1;border-radius:2px;flex-shrink:0;}
+.brand-accent{width:3px;height:36px;background:#3b82f6;border-radius:2px;flex-shrink:0;}
 .brand-left{display:flex;flex-direction:column;gap:2px;flex:1;}
 .brand-title{
   font-size:15px;font-weight:900;
@@ -423,10 +423,16 @@ html,body{
   box-shadow:0 1px 4px rgba(0,0,0,.07);
 }
 .s-card-label{
-  font-size:10px;font-weight:700;
-  color:#6366f1;letter-spacing:.08em;text-transform:uppercase;
-  margin-bottom:10px;
-  display:flex;align-items:center;justify-content:space-between;
+  font-size:13px;
+  font-weight:900;
+  color:#1e3a5f;
+  letter-spacing:-0.2px;
+  margin-bottom:12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding-bottom:8px;
+  border-bottom:2px solid #dbeafe;
 }
 
 /* ══ 폼 요소 ══ */
@@ -450,7 +456,7 @@ html,body{
   background-repeat:no-repeat;background-position:right 9px center;
   cursor:pointer;transition:border-color .15s;
 }
-.form-select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,.15);}
+.form-select:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.15);}
 
 .town-multi-wrap{
   max-height:120px;overflow-y:auto;
@@ -463,7 +469,7 @@ html,body{
   cursor:pointer;border-radius:5px;transition:background .1s;
 }
 .town-check-item:hover{background:#f3f4f6;}
-.town-check-item input{accent-color:#6366f1;width:13px;height:13px;flex-shrink:0;}
+.town-check-item input{accent-color:#3b82f6;width:13px;height:13px;flex-shrink:0;}
 
 /* ══ 카테고리 체크박스 ══ */
 .check-grid{display:flex;flex-direction:column;gap:5px;}
@@ -474,18 +480,18 @@ html,body{
   border-radius:9px;font-size:13px;color:#374151;
   cursor:pointer;transition:border-color .15s,background .15s;
 }
-.check-item:has(input:checked){border-color:#6366f1;background:#eef2ff;}
+.check-item:has(input:checked){border-color:#3b82f6;background:#eff6ff;}
 .dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px;}
 
 /* ══ 버튼 ══ */
 .btn-main{
   width:100%;height:44px;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  background:linear-gradient(135deg,#2563eb,#3b82f6);
   color:#fff;border:none;border-radius:11px;
   font-size:15px;font-weight:800;
   cursor:pointer;margin-top:12px;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 14px rgba(99,102,241,.3);
+  box-shadow:0 4px 14px rgba(37,99,235,.35);
   transition:opacity .15s,transform .1s;
   letter-spacing:-0.2px;
 }
@@ -493,12 +499,22 @@ html,body{
 .btn-main:active{transform:scale(.98);}
 
 .btn-reset{
-  background:none;border:none;
-  color:#a5b4fc;font-size:11px;font-weight:600;
-  cursor:pointer;padding:2px 6px;border-radius:5px;
-  transition:color .15s,background .15s;
+  height:26px;
+  padding:0 12px;
+  border:1.5px solid #3b82f6;
+  border-radius:999px;
+  background:#fff;
+  color:#2563eb;
+  font-size:11px;
+  font-weight:800;
+  cursor:pointer;
+  box-shadow:0 1px 4px rgba(59,130,246,.15);
+  transition:background .15s,color .15s;
 }
-.btn-reset:hover{color:#6366f1;background:#eef2ff;}
+.btn-reset:hover{
+  background:#3b82f6;
+  color:#ffffff;
+}
 
 /* 2열 버튼 그리드 */
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:0;}
@@ -513,7 +529,7 @@ html,body{
   display:flex;align-items:center;justify-content:center;
   transition:border-color .15s,background .15s,color .15s;
 }
-.btn-action:hover{border-color:#c7d2fe;background:#eef2ff;color:#4338ca;}
+.btn-action:hover{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8;}
 .btn-action:active{transform:scale(.98);}
 
 .btn-kakao{
@@ -530,11 +546,11 @@ html,body{
 /* ══ 방문자 ══ */
 .visitor-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
 .visitor-box{
-  background:#eef2ff;border-radius:10px;padding:10px;
-  text-align:center;border:1px solid #e0e7ff;
+  background:#eff6ff;border-radius:10px;padding:10px;
+  text-align:center;border:1px solid #dbeafe;
 }
-.visitor-num{font-size:22px;font-weight:900;color:#6366f1;line-height:1;margin-bottom:3px;}
-.visitor-lbl{font-size:10px;font-weight:600;color:#a5b4fc;text-transform:uppercase;letter-spacing:.05em;}
+.visitor-num{font-size:22px;font-weight:900;color:#3b82f6;line-height:1;margin-bottom:3px;}
+.visitor-lbl{font-size:10px;font-weight:600;color:#93c5fd;text-transform:uppercase;letter-spacing:.05em;}
 
 /* ══ 푸터 ══ */
 .sidebar-footer{
@@ -582,12 +598,12 @@ html,body{
 .user-marker-pulse{
   position:absolute;left:50%;top:50%;width:28px;height:28px;
   transform:translate(-50%,-50%);border-radius:50%;
-  background:rgba(99,102,241,.22);animation:userPulse 1.8s ease-out infinite;
+  background:rgba(59,130,246,.22);animation:userPulse 1.8s ease-out infinite;
 }
 .user-marker-dot{
   position:absolute;left:50%;top:50%;width:13px;height:13px;
   transform:translate(-50%,-50%);border-radius:50%;
-  background:#6366f1;border:2.5px solid #fff;
+  background:#3b82f6;border:2.5px solid #fff;
   box-shadow:0 2px 6px rgba(0,0,0,.25);
 }
 @keyframes userPulse{
@@ -603,7 +619,7 @@ html,body{
   display:flex;align-items:center;justify-content:center;
   box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;transition:box-shadow .15s;
 }
-#locBtn:hover{box-shadow:0 6px 20px rgba(99,102,241,.25);}
+#locBtn:hover{box-shadow:0 6px 20px rgba(59,130,246,.25);}
 @media(max-width:900px){#locBtn{display:none!important;}}
 
 /* ══ Leaflet 팝업 ══ */
@@ -622,7 +638,7 @@ html,body{
   padding:0 14px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;
 }
 .mobile-map-close{
-  border:none;background:#6366f1;color:#fff;
+  border:none;background:#3b82f6;color:#fff;
   padding:7px 14px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;
 }
 .mobile-map{flex:1;}
@@ -642,15 +658,15 @@ html,body{
 .mobile-result-list{overflow:auto;flex:1;}
 .mobile-result-item{padding:10px 14px;border-bottom:1px solid #f8fafc;font-size:13px;cursor:pointer;}
 .mobile-result-item:hover{background:#f8fafc;}
-.mobile-result-distance{font-size:12px;color:#6366f1;font-weight:600;}
+.mobile-result-distance{font-size:12px;color:#3b82f6;font-weight:600;}
 
 /* ══ mobileLocBtn ══ */
 #mobileLocBtn{
   position:absolute;bottom:200px;right:12px;z-index:4500;
   width:48px;height:48px;border-radius:50%;border:none;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  background:linear-gradient(135deg,#3b82f6,#60a5fa);
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 16px rgba(99,102,241,.4);cursor:pointer;
+  box-shadow:0 4px 16px rgba(59,130,246,.4);cursor:pointer;
 }
 
 /* ══ 알약 필터 바 ══ */
@@ -2525,18 +2541,25 @@ async function searchPlaceSuggestions(query, inputId){
 
       // 3번: 도로명주소(신주소)와 지번주소(구주소) 모두 표시
       const roadAddr = place.road_address_name || "";
-      const jibunAddr = place.address_name || "";
-      const addrHtml = roadAddr
-        ? `<div style="color:#1e293b;font-size:12px;font-weight:600;">${escapeHtml(roadAddr)}</div>
-           <div style="color:#94a3b8;font-size:11px;">(${escapeHtml(jibunAddr)})</div>`
-        : `<div style="color:#64748b;font-size:12px;">${escapeHtml(jibunAddr)}</div>`;
+const jibunAddr = place.address_name || "";
 
-      item.innerHTML=`
-        <div style="font-weight:700;color:#111827;">
-          ${escapeHtml(place.place_name || "")}
-        </div>
-        ${addrHtml}
-      `;
+const addrLineHtml = roadAddr
+  ? `<div style="margin-top:3px;color:#64748b;font-size:11px;font-weight:600;">
+       도로명 ${escapeHtml(roadAddr)}
+     </div>
+     <div style="margin-top:1px;color:#94a3b8;font-size:10.5px;">
+       지번 ${escapeHtml(jibunAddr)}
+     </div>`
+  : `<div style="margin-top:3px;color:#64748b;font-size:11px;">
+       지번 ${escapeHtml(jibunAddr)}
+     </div>`;
+
+item.innerHTML = `
+  <div style="font-size:14px;font-weight:900;color:#0f172a;margin-bottom:2px;">
+    ${escapeHtml(place.place_name || "")}
+  </div>
+  ${addrLineHtml}
+`;
 
       item.onclick=function(){
         const input=document.getElementById(inputId);
@@ -2875,13 +2898,28 @@ async function searchAddrSuggestions(query){
     data.documents.slice(0,5).forEach(place=>{
       const d = document.createElement("div");
       d.style.cssText="padding:9px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:13px;";
+      
       const roadA = place.road_address_name || "";
-      const jibunA = place.address_name || "";
-      const addrLineHtml = roadA
-        ? `<div style="color:#1e293b;font-size:12px;font-weight:600;">${escapeHtml(roadA)}</div>
-           <div style="color:#94a3b8;font-size:11px;">(${escapeHtml(jibunA)})</div>`
-        : `<div style="color:#64748b;font-size:12px;">${escapeHtml(jibunA)}</div>`;
-      d.innerHTML=`<div style="font-weight:700;color:#111827;margin-bottom:2px;">${escapeHtml(place.place_name||"")}</div>${addrLineHtml}`;
+const jibunA = place.address_name || "";
+
+const addrLineHtml = roadA
+  ? `<div style="margin-top:3px;color:#64748b;font-size:11px;font-weight:600;">
+       도로명 ${escapeHtml(roadA)}
+     </div>
+     <div style="margin-top:1px;color:#94a3b8;font-size:10.5px;">
+       지번 ${escapeHtml(jibunA)}
+     </div>`
+  : `<div style="margin-top:3px;color:#64748b;font-size:11px;">
+       지번 ${escapeHtml(jibunA)}
+     </div>`;
+
+d.innerHTML = `
+  <div style="font-size:14px;font-weight:900;color:#0f172a;margin-bottom:2px;">
+    ${escapeHtml(place.place_name || "")}
+  </div>
+  ${addrLineHtml}
+`;
+
       d.onclick=function(){
         const inp=document.getElementById("addrSearchInput");
         inp.value=place.place_name||"";
@@ -3499,7 +3537,7 @@ overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
         background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
       <button type="button" onclick="runRouteSearch()" style="
         height:42px;border:none;border-radius:10px;
-        background:linear-gradient(135deg,#3b82f6,#6366f1);
+        background:linear-gradient(135deg,#3b82f6,#2563eb);
         color:#fff;font-weight:800;font-size:14px;cursor:pointer;">조회</button>
     </div>
   </div>
@@ -3615,7 +3653,7 @@ backdrop-filter:blur(4px);">
         background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
       <button type="button" onclick="runAddressSearch()" style="
         height:42px;border:none;border-radius:10px;
-        background:linear-gradient(135deg,#3b82f6,#6366f1);
+        background:linear-gradient(135deg,#3b82f6,#2563eb);
         color:#fff;font-weight:800;font-size:14px;cursor:pointer;">조회</button>
     </div>
   </div>
@@ -4206,7 +4244,7 @@ def stats():
             const res = await fetch('/api/spot_location?spot_id=' + encodeURIComponent(spotId));
             const d = await res.json();
             if(d.lat && d.lng){
-              window.open('/?goto_spot=' + encodeURIComponent(spotId) + '&lat=' + d.lat + '&lng=' + d.lng, '_blank');
+              window.location.href = '/?goto_spot=' + encodeURIComponent(spotId) + '&lat=' + d.lat + '&lng=' + d.lng;
             } else {
               alert('해당 지점의 좌표를 찾을 수 없습니다. (지점번호: ' + spotId + ')');
             }
