@@ -774,7 +774,7 @@ html,body{
       <div class="s-card">
         <div class="s-card-label"><span>빠른 찾기</span></div>
         <div class="btn-grid" style="margin-bottom:6px;">
-          <button class="btn-action btn-kakao" onclick="openRouteSearch()">경로 주변찾기</button>
+          <button class="btn-action btn-kakao" onclick="openRouteSearch()">경로주변 찾기</button>
           <button class="btn-action btn-kakao" onclick="openAddressSearch()">주소로 찾기</button>
           <button class="btn-action" onclick="findNearestToilet()">내 주변 화장실</button>
           <button class="btn-action" onclick="findNearestDanger()">내 주변 위험지역</button>
