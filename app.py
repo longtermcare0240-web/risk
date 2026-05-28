@@ -793,10 +793,13 @@ html,body{
         <button id="apkDownloadBtn" class="btn-action btn-green" style="display:none;" onclick="downloadApk()">안전로드 앱 다운로드 (Android)</button>
         {% raw %}<script>
         (function(){
-          if(/Android/i.test(navigator.userAgent||"")){
-            document.getElementById("apkDownloadBtn").style.display="flex";
-          }
-        })();
+  const params = new URLSearchParams(window.location.search);
+  const fromApp = params.get("from_app") === "1";
+
+  if(!fromApp && /Android/i.test(navigator.userAgent || "")){
+    document.getElementById("apkDownloadBtn").style.display = "flex";
+  }
+})();
         function downloadApk(){
           window.location.href="/download-apk";
         }
