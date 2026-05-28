@@ -423,16 +423,24 @@ html,body{
   box-shadow:0 1px 4px rgba(0,0,0,.07);
 }
 .s-card-label{
-  font-size:13px;
+  font-size:14px;
   font-weight:900;
-  color:#1e3a5f;
+  color:#1a2f5a;
   letter-spacing:-0.2px;
   margin-bottom:12px;
   display:flex;
   align-items:center;
   justify-content:space-between;
   padding-bottom:8px;
-  border-bottom:2px solid #dbeafe;
+  border-bottom:2.5px solid #93c5fd;
+}
+.s-card-label > span:first-child{
+  display:flex;align-items:center;gap:6px;
+}
+.s-card-label > span:first-child::before{
+  content:'';display:inline-block;
+  width:3px;height:14px;
+  background:#2563eb;border-radius:2px;flex-shrink:0;
 }
 
 /* ══ 폼 요소 ══ */
@@ -501,19 +509,19 @@ html,body{
 .btn-reset{
   height:26px;
   padding:0 12px;
-  border:1.5px solid #3b82f6;
+  border:1.5px solid #d1d5db;
   border-radius:999px;
   background:#fff;
-  color:#2563eb;
+  color:#374151;
   font-size:11px;
-  font-weight:800;
+  font-weight:400;
   cursor:pointer;
-  box-shadow:0 1px 4px rgba(59,130,246,.15);
+  box-shadow:0 1px 4px rgba(0,0,0,.08);
   transition:background .15s,color .15s;
 }
 .btn-reset:hover{
-  background:#3b82f6;
-  color:#ffffff;
+  background:#f3f4f6;
+  color:#111827;
 }
 
 /* 2열 버튼 그리드 */
@@ -538,19 +546,19 @@ html,body{
 .btn-kakao:hover{background:#f5dc00;color:#191919;}
 
 .btn-green{
-  background:linear-gradient(135deg,#16a34a,#15803d);
-  color:#fff;border:none;
-  box-shadow:0 2px 8px rgba(22,163,74,.2);
+  background:#f9fafb;
+  color:#374151;
+  border:1.5px solid #e5e7eb;
 }
 
 /* ══ 방문자 ══ */
 .visitor-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
 .visitor-box{
-  background:#eff6ff;border-radius:10px;padding:10px;
-  text-align:center;border:1px solid #dbeafe;
+  background:#f9fafb;border-radius:10px;padding:10px;
+  text-align:center;border:1px solid #e5e7eb;
 }
-.visitor-num{font-size:22px;font-weight:900;color:#3b82f6;line-height:1;margin-bottom:3px;}
-.visitor-lbl{font-size:10px;font-weight:600;color:#93c5fd;text-transform:uppercase;letter-spacing:.05em;}
+.visitor-num{font-size:22px;font-weight:900;color:#374151;line-height:1;margin-bottom:3px;}
+.visitor-lbl{font-size:10px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;}
 
 /* ══ 푸터 ══ */
 .sidebar-footer{
@@ -780,7 +788,7 @@ html,body{
           }
         })();
         function downloadApk(){
-          window.location.href="https://raw.githubusercontent.com/limstep/longtermcare0240-web/main/risk/static/safeload.apk";
+          window.location.href="https://limstep.github.io/longtermcare0240-web/risk/static/safeload.apk";
         }
         </script>{% endraw %}
       </div>
