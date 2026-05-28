@@ -4284,14 +4284,13 @@ def stats():
             area.innerHTML='<p style="color:#94a3b8;">등록된 별점이 없습니다.</p>';
             return;
           }
-          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>IP</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
+          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
           d.ratings.forEach(r=>{
             const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
             html += `<tr>
               <td>${r.id}</td>
               <td>${r.spot_id}</td>
               <td style="color:#f59e0b;font-weight:700;letter-spacing:1px;">${stars} (${r.score}점)</td>
-              <td style="font-size:12px;color:#94a3b8;">${r.ip||'-'}</td>
               <td>${r.created_at ? r.created_at.slice(0,16).replace('T',' ') : ''}</td>
               <td style="white-space:nowrap;">
                 <button class="btn-del" onclick="deleteRating(${r.id}, this)">삭제</button>
