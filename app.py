@@ -6,6 +6,11 @@ import re
 import time
 import threading
 import requests
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 import webbrowser
@@ -169,6 +174,7 @@ Compress(app)
 app.json.ensure_ascii = False
 
 KAKAO_KEY = os.environ.get("KAKAO_KEY")
+KAKAO_JS_KEY = os.environ.get("KAKAO_JS_KEY", os.environ.get("KAKAO_KEY", ""))
 
 @app.route("/search_place")
 def search_place():
@@ -348,11 +354,14 @@ HTML = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>안전지도</title>
+<title>장기요양 안전로드</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<!-- 로드뷰용 카카오맵 SDK (JS키 사용) -->
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{kakao_js_key}}&libraries=services,roadview"></script>
+
 
 <style>
 *{box-sizing:border-box}
@@ -752,10 +761,11 @@ display:none;
 
 .mobile-map-close{
   border:none;
-  background:#ef4444;
+  background:#2563eb;
   color:#ffffff;
-  padding:6px 10px;
+  padding:6px 14px;
   border-radius:6px;
+  font-weight:700;
 }
 
 @media (min-width:901px){
@@ -1047,10 +1057,34 @@ animation:dots 1.4s steps(3,end) infinite;
 100%{content:"...";}
 }
 
-.visitor-box{
-display:flex;
-gap:15px;
-margin-top:15px;
+.town-multi-wrap{
+  max-height:160px;
+  overflow-y:auto;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#fff;
+  padding:6px 8px;
+}
+
+.town-check-item{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:5px 4px;
+  font-size:13px;
+  cursor:pointer;
+  border-radius:6px;
+}
+
+.town-check-item:hover{
+  background:#f1f5f9;
+}
+
+.town-check-item input{
+  accent-color:#2563eb;
+  width:15px;
+  height:15px;
+  flex-shrink:0;
 }
 
 .visitor-card{
@@ -1072,6 +1106,71 @@ font-weight:700;
 margin-top:4px;
 }
 
+.mobile-map-popup .map-copyright{
+  bottom:10px;
+}
+
+/* 11번: 나침반/회전 리셋 버튼 */
+.map-compass-btn{
+  position:absolute;
+  bottom:72px;
+  right:20px;
+  z-index:1000;
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  border:none;
+  background:#ffffff;
+  font-size:20px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 4px 12px rgba(0,0,0,0.20);
+  cursor:pointer;
+  transition:transform 0.3s;
+}
+
+.map-compass-btn:hover{
+  background:#f1f5f9;
+}
+.mobile-pill-bar{
+  position:absolute;
+  top:64px;
+  left:0;
+  right:0;
+  z-index:3500;
+  display:flex;
+  gap:8px;
+  padding:0 12px;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.mobile-pill-bar::-webkit-scrollbar{ display:none; }
+
+.mobile-pill{
+  flex-shrink:0;
+  height:34px;
+  padding:0 14px;
+  border-radius:999px;
+  border:2px solid #e2e8f0;
+  background:#ffffff;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+  white-space:nowrap;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.10);
+  transition:all 0.15s;
+}
+
+.mobile-pill.active{
+  color:#fff;
+  border-color:transparent;
+}
+
 </style>
 </head>
 <body>
@@ -1082,7 +1181,7 @@ margin-top:4px;
 
   <div class="brand-left">
     <div class="brand-title" onclick="goHome()">
-      <span>안전지도</span>
+      <span>장기요양 안전로드</span>
       <img src="/ci" class="ci-logo">
     </div>
 
@@ -1105,10 +1204,10 @@ margin-top:4px;
         <option value="">전체</option>
       </select>
 
-      <label class="label">읍면동</label>
-      <select id="town" class="select">
-        <option value="">전체</option>
-      </select>
+      <label class="label">읍면동 <span style="font-weight:400;color:#94a3b8;font-size:11px;">(복수선택 가능)</span></label>
+      <div class="town-multi-wrap" id="townMultiWrap">
+        <div class="town-check-item" style="color:#94a3b8;font-size:12px;">시군구를 먼저 선택하세요</div>
+      </div>
 
       <label class="label">구분</label>
       <div class="check-grid" id="categoryBox"></div>
@@ -1122,6 +1221,9 @@ margin-top:4px;
 경로 주변 위험지역 찾기
 </button>
 
+<button class="btn" onclick="openAddressSearch()" style="background:#16a34a;color:#fff;border:none;">
+주소로 근처 위험지역 찾기
+</button>
 
 <button class="btn secondary" onclick="findNearestToilet()">
 내 주변 화장실 찾기
@@ -1160,6 +1262,10 @@ margin-top:4px;
 </div>
 </div>
 
+<div style="padding:10px 4px 6px;text-align:center;font-size:11px;color:#94a3b8;line-height:1.6;border-top:1px solid #f1f5f9;margin-top:4px;">
+  © 국민건강보험공단<br>광주전라제주지역본부 요양운영부
+</div>
+
   </aside>
 
   <main class="map-wrap">
@@ -1175,6 +1281,8 @@ margin-top:4px;
   </main>
 
   <button id="locBtn">📍</button>
+  <!-- 11번: 나침반 버튼 (PC 지도용, 모바일에서는 숨김) -->
+  <button class="map-compass-btn" id="compassBtn" title="북쪽으로 초기화" onclick="resetMapBearing()" style="display:none;">🧭</button>
   <div class="top-badge">모바일 / PC 지원</div>
   <div class="map-legend">
   
@@ -1504,16 +1612,23 @@ function fillCities(cities){
 }
 
 function fillTowns(towns){
-  const select = document.getElementById("town");
-  const current = select.value;
-  select.innerHTML = '<option value="">전체</option>';
+  const wrap = document.getElementById("townMultiWrap");
+  if(!wrap) return;
+  wrap.innerHTML = "";
+  if(!towns || towns.length === 0){
+    wrap.innerHTML = '<div class="town-check-item" style="color:#94a3b8;font-size:12px;">읍면동 없음</div>';
+    return;
+  }
   towns.forEach(town => {
-    const op = document.createElement("option");
-    op.value = town;
-    op.textContent = town;
-    select.appendChild(op);
+    const lbl = document.createElement("label");
+    lbl.className = "town-check-item";
+    lbl.innerHTML = `<input type="checkbox" class="town-check" value="${escapeHtml(town)}"><span>${escapeHtml(town)}</span>`;
+    wrap.appendChild(lbl);
   });
-  if(towns.includes(current)) select.value = current;
+}
+
+function getSelectedTowns(){
+  return Array.from(document.querySelectorAll(".town-check:checked")).map(el => el.value);
 }
 
 function getCheckedCategories(){
@@ -1528,6 +1643,107 @@ function buildMarkerIcon(color){
     iconAnchor: [9, 9],
     popupAnchor: [0, -8]
   });
+}
+
+// 7번: 팝업 HTML 빌더 (모바일은 티맵 포함, PC는 카카오+네이버만)
+function buildPopupHtml(item){
+  const addr = encodeURIComponent(item.주소);
+  const tmapBtn = isMobile() ? `
+  <a href="tmap://search?name=${addr}" target="_blank"
+  style="display:block;text-align:center;background:#FF6600;color:#fff;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
+  티맵 길찾기
+  </a>` : "";
+  const gridCols = isMobile() ? "1fr 1fr 1fr" : "1fr 1fr";
+  const sid = escapeHtml(item.순번);
+  const rvId = "rv_" + sid;
+  return `
+  <div class="popup-wrap">
+
+  <!-- 로드뷰 컨테이너 -->
+  <div id="${rvId}" style="width:100%;height:150px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:10px;background:#f1f5f9;overflow:hidden;position:relative;">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#94a3b8;" id="${rvId}_msg">🗺 로드뷰 불러오는 중...</div>
+  </div>
+
+  <div class="popup-title">${escapeHtml(item.구분)}</div>
+  <div class="popup-meta">
+  시군구: ${escapeHtml(item.시군구)}<br>
+  읍면동: ${escapeHtml(item.읍면동)}<br>
+  주소: ${escapeHtml(item.주소)}
+  </div>
+  <div class="popup-desc">${escapeHtml(item.사고설명)}</div>
+
+  <!-- 5번: 별점 UI -->
+  <div id="rating_wrap_${sid}" style="margin-top:10px;">
+    <div style="font-size:12px;color:#64748b;margin-bottom:4px;">이 지점 평가</div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span id="stars_${sid}" style="font-size:22px;cursor:pointer;letter-spacing:2px;">
+        ${[1,2,3,4,5].map(n=>`<span onclick="setRating('${sid}',${n})" style="cursor:pointer" data-star="${n}">☆</span>`).join("")}
+      </span>
+      <span id="avg_${sid}" style="font-size:12px;color:#f59e0b;font-weight:700;"></span>
+    </div>
+  </div>
+
+  <!-- 5번: 코멘트 버튼 -->
+  <button onclick="openComments('${sid}')" style="
+    margin-top:8px;width:100%;height:34px;border:1px solid #e2e8f0;
+    border-radius:8px;background:#f8fafc;font-size:13px;cursor:pointer;font-weight:600;color:#374151;">
+    💬 코멘트 보기 / 작성
+  </button>
+
+  <div style="margin-top:10px;display:grid;grid-template-columns:${gridCols};gap:6px;">
+  <a href="https://map.naver.com/v5/search/${addr}" target="_blank"
+  style="display:block;text-align:center;background:#03C75A;color:#fff;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
+  네이버 길찾기
+  </a>
+  <a href="https://map.kakao.com/link/search/${addr}" target="_blank"
+  style="display:block;text-align:center;background:#FEE500;color:#191919;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
+  카카오 길찾기
+  </a>
+  ${tmapBtn}
+  </div>
+  </div>`;
+}
+
+// 로드뷰 초기화 함수 (팝업 열릴 때 호출)
+function initRoadview(containerId, lat, lng){
+  const msg = document.getElementById(containerId + "_msg");
+
+  function doInit(){
+    const container = document.getElementById(containerId);
+    if(!container) return;
+    try{
+      const rvClient = new kakao.maps.RoadviewClient();
+      const roadview = new kakao.maps.Roadview(container);
+      const position = new kakao.maps.LatLng(lat, lng);
+      rvClient.getNearestPanoId(position, 100, function(panoId){
+        if(panoId === null){
+          if(msg) msg.textContent = "📷 이 위치는 로드뷰가 없습니다.";
+        } else {
+          if(msg) msg.style.display = "none";
+          roadview.setPanoId(panoId, position);
+        }
+      });
+    }catch(e){
+      if(msg) msg.textContent = "📷 로드뷰를 불러올 수 없습니다.";
+    }
+  }
+
+  // kakao SDK 로드 대기
+  if(window.kakao && window.kakao.maps && window.kakao.maps.RoadviewClient){
+    doInit();
+  } else {
+    let tries = 0;
+    const timer = setInterval(function(){
+      tries++;
+      if(window.kakao && window.kakao.maps && window.kakao.maps.RoadviewClient){
+        clearInterval(timer);
+        doInit();
+      } else if(tries > 20){
+        clearInterval(timer);
+        if(msg) msg.textContent = "📷 카카오 SDK 로드 실패";
+      }
+    }, 300);
+  }
 }
 
 function buildUserIcon(){
@@ -1592,30 +1808,47 @@ async function loadMeta(){
   const res = await fetch("/meta");
   const data = await res.json();
   fillProvinces(data.provinces || []);
-  fillCities(data.cities || []);
-  fillTowns(data.towns || []);
+  fillCities([]);   // 초기엔 비움
+  fillTowns([]);    // 초기엔 비움
+
+  // 10번: 저장된 값 복원
+  const savedProvince = sessionStorage.getItem("sel_province") || "";
+  const savedCity = sessionStorage.getItem("sel_city") || "";
+
+  if(savedProvince){
+    document.getElementById("province").value = savedProvince;
+    const r2 = await fetch("/cities?province=" + encodeURIComponent(savedProvince));
+    const d2 = await r2.json();
+    fillCities(d2.cities || []);
+    if(savedCity){
+      document.getElementById("city").value = savedCity;
+      const r3 = await fetch(`/towns?province=${encodeURIComponent(savedProvince)}&city=${encodeURIComponent(savedCity)}`);
+      const d3 = await r3.json();
+      fillTowns(d3.towns || []);
+    }
+  }
 }
 
 async function updateCities(){
-
   const province = document.getElementById("province").value;
-
-  const res = await fetch(
-    "/cities?province=" + encodeURIComponent(province)
-  );
-
+  if(!province){
+    fillCities([]);
+    fillTowns([]);
+    return;
+  }
+  const res = await fetch("/cities?province=" + encodeURIComponent(province));
   const data = await res.json();
-
   fillCities(data.cities || []);
-
-  // 시군구 바뀌면 읍면동도 다시 로드
-  updateTowns();
-
+  fillTowns([]);  // 시도 바뀌면 읍면동 초기화
 }
 
 async function updateTowns(){
   const province = document.getElementById("province").value;
   const city = document.getElementById("city").value;
+  if(!city){
+    fillTowns([]);
+    return;
+  }
   const res = await fetch(`/towns?province=${encodeURIComponent(province)}&city=${encodeURIComponent(city)}`);
   const data = await res.json();
   fillTowns(data.towns || []);
@@ -1641,63 +1874,7 @@ const data = ALL_DATA_CACHE;
 
     const marker = L.marker([item.위도,item.경도],{icon});
     marker.itemData = item;
-    const popupHtml = `
-<div class="popup-wrap">
-
-<img class="popup-img" src="${item.사진URL}">
-
-<div class="popup-title">${escapeHtml(item.구분)}</div>
-
-<div class="popup-meta">
-시군구: ${escapeHtml(item.시군구)}<br>
-읍면동: ${escapeHtml(item.읍면동)}<br>
-주소: ${escapeHtml(item.주소)}
-</div>
-
-<div class="popup-desc">
-${escapeHtml(item.사고설명)}
-</div>
-
-<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-
-<a 
-href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#03C75A;
-color:#ffffff;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-네이버 길찾기
-</a>
-
-<a 
-href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#FEE500;
-color:#191919;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-카카오 길찾기
-</a>
-
-</div>
-
-</div>
-`;
+    const popupHtml = buildPopupHtml(item);
 
     marker.bindPopup(popupHtml,{maxWidth:290});
 
@@ -1731,13 +1908,18 @@ map.once("moveend", () => {
 
   const province = document.getElementById("province").value;
   const city = document.getElementById("city").value;
-  const town = document.getElementById("town").value;
+  const towns = getSelectedTowns();
   const categories = getCheckedCategories();
+
+  // 10번: 선택값 세션에 저장
+  sessionStorage.setItem("sel_province", province);
+  sessionStorage.setItem("sel_city", city);
+  sessionStorage.setItem("sel_town", "");
 
   const params = new URLSearchParams();
   if(province) params.append("province", province);
   if(city) params.append("city", city);
-  if(town) params.append("town", town);
+  towns.forEach(t => params.append("town", t));
   categories.forEach(cat => params.append("category", cat));
 
   try{
@@ -1755,7 +1937,7 @@ fetch("/log_search", {
   body:JSON.stringify({
     province:province,
     city:city,
-    town:town,
+    town:towns.join(","),
     categories:categories,
     result_count:total
   })
@@ -1769,63 +1951,7 @@ fetch("/log_search", {
     const icon = buildMarkerIcon(item.마커색상);
     const marker = L.marker([item.위도, item.경도], { icon });
     marker.itemData = item;
-      const popupHtml = `
-        <div class="popup-wrap">
-
-          <img class="popup-img" src="${item.사진URL}">
-
-          <div class="popup-title">${escapeHtml(item.구분)}</div>
-
-          <div class="popup-meta">
-            시군구: ${escapeHtml(item.시군구)}<br>
-            읍면동: ${escapeHtml(item.읍면동)}<br>
-            주소: ${escapeHtml(item.주소)}
-          </div>
-
-          <div class="popup-desc">
-            ${escapeHtml(item.사고설명)}
-          </div>
-
-          
-<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-
-<a 
-href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#03C75A;
-color:#ffffff;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-네이버 길찾기
-</a>
-
-<a 
-href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#FEE500;
-color:#191919;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-카카오 길찾기
-</a>
-
-</div>
-                  </div>
-      `;
+    const popupHtml = buildPopupHtml(item);
 
       marker.bindPopup(popupHtml, { maxWidth: 290 });
       markerGroup.addLayer(marker);
@@ -1835,7 +1961,13 @@ bounds.push([item.위도, item.경도]);
 
 
   if(bounds.length > 0){
-    map.fitBounds(bounds, { padding:[40,40] });
+    // 2번: 내 위치가 있으면 bounds에 포함해서 함께 보이도록
+    const allBounds = [...bounds];
+    if(userLat !== null && userLng !== null){
+      allBounds.push([userLat, userLng]);
+      drawUserLocation(userLat, userLng);
+    }
+    map.fitBounds(allBounds, { padding:[40,40] });
     map.once("moveend", closeMsg);
   }else{
     map.setView([34.85, 126.90], 9);
@@ -1874,8 +2006,9 @@ function resetFilters(){
   // 시군구 초기화
   document.getElementById("city").value = "";
 
-  // 읍면동 초기화
-  document.getElementById("town").value = "";
+  // 읍면동 체크박스 해제
+  document.querySelectorAll(".town-check")
+  .forEach(el => el.checked = false);
 
   // 구분 체크 해제
   document.querySelectorAll(".category-check")
@@ -2081,6 +2214,9 @@ function openMobileMap(){
     });
 
     window.mobileLeafletMap.addLayer(window.mobileMarkerGroup);
+
+    // 5번: 모바일 팝업 열릴 때 별점 + 로드뷰 로드
+    window.mobileLeafletMap.on("popupopen", onPopupOpen);
   }
 
   setTimeout(()=>{
@@ -2172,63 +2308,7 @@ items.forEach(item=>{
   const marker = L.marker([item.위도,item.경도],{icon});
   marker.itemData = item;
 
-  const popupHtml = `
-  <div class="popup-wrap">
-
-  <img class="popup-img" src="${item.사진URL}">
-
-  <div class="popup-title">${escapeHtml(item.구분)}</div>
-
-  <div class="popup-meta">
-  시군구: ${escapeHtml(item.시군구)}<br>
-  읍면동: ${escapeHtml(item.읍면동)}<br>
-  주소: ${escapeHtml(item.주소)}
-  </div>
-
-  <div class="popup-desc">
-  ${escapeHtml(item.사고설명)}
-  </div>
-
-  <div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-
-  <a 
-  href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
-  target="_blank"
-  style="
-  display:block;
-  text-align:center;
-  background:#03C75A;
-  color:#ffffff;
-  font-weight:700;
-  padding:8px;
-  border-radius:8px;
-  text-decoration:none;
-  font-size:13px;
-  ">
-  네이버 길찾기
-  </a>
-
-  <a 
-  href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
-  target="_blank"
-  style="
-  display:block;
-  text-align:center;
-  background:#FEE500;
-  color:#191919;
-  font-weight:700;
-  padding:8px;
-  border-radius:8px;
-  text-decoration:none;
-  font-size:13px;
-  ">
-  카카오 길찾기
-  </a>
-
-  </div>
-
-  </div>
-  `;
+  const popupHtml = buildPopupHtml(item);
 
   marker.bindPopup(popupHtml,{maxWidth:290});
 
@@ -2436,64 +2516,7 @@ const marker = L.marker(
 );
 marker.itemData = item;
 
-const popupHtml = `
-
-<div class="popup-wrap">
-
-<img class="popup-img" src="${item.사진URL}">
-
-<div class="popup-title">${item.구분}</div>
-
-<div class="popup-meta">
-시군구: ${item.시군구}<br>
-읍면동: ${item.읍면동}<br>
-주소: ${item.주소}
-</div>
-
-<div class="popup-desc">
-${item.사고설명}
-</div>
-
-<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-
-<a 
-href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#03C75A;
-color:#ffffff;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-네이버 길찾기
-</a>
-
-<a 
-href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#FEE500;
-color:#191919;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-카카오 길찾기
-</a>
-
-</div>
-
-</div>
-`;
+const popupHtml = buildPopupHtml(item);
 
 marker.bindPopup(popupHtml,{maxWidth:290});
 
@@ -2939,23 +2962,30 @@ async function searchPlaceSuggestions(query, inputId){
       item.style.fontSize="13px";
       item.style.lineHeight="1.45";
 
+      // 3번: 도로명주소(신주소)와 지번주소(구주소) 모두 표시
+      const roadAddr = place.road_address_name || "";
+      const jibunAddr = place.address_name || "";
+      const addrHtml = roadAddr
+        ? `<div style="color:#374151;font-size:12px;">🛣 ${escapeHtml(roadAddr)}</div>
+           <div style="color:#94a3b8;font-size:11px;">📍 ${escapeHtml(jibunAddr)}</div>`
+        : `<div style="color:#64748b;font-size:12px;">📍 ${escapeHtml(jibunAddr)}</div>`;
+
       item.innerHTML=`
         <div style="font-weight:700;color:#111827;">
           ${escapeHtml(place.place_name || "")}
         </div>
-        <div style="color:#64748b;font-size:12px;">
-          ${escapeHtml(place.address_name || "")}
-        </div>
+        ${addrHtml}
       `;
 
       item.onclick=function(){
-
         const input=document.getElementById(inputId);
-
         if(input){
           input.value=place.place_name || "";
+          // 4번: 좌표를 data 속성에 저장해서 정확한 위치 사용
+          input.dataset.lat = place.y || "";
+          input.dataset.lng = place.x || "";
+          input.dataset.addr = jibunAddr;
         }
-
         box.style.display="none";
         box.innerHTML="";
       };
@@ -2976,12 +3006,23 @@ async function searchPlaceSuggestions(query, inputId){
 
 }
 
-async function geocodeAddress(query){
+async function geocodeAddress(query, inputId){
 
   query = query.trim();
 
   if(!query){
     return null;
+  }
+
+  // 4번: 자동완성으로 선택한 경우 저장된 좌표를 우선 사용 (다른 지역 혼동 방지)
+  if(inputId){
+    const el = document.getElementById(inputId);
+    if(el && el.dataset.lat && el.dataset.lng && el.value === query){
+      return {
+        lat: parseFloat(el.dataset.lat),
+        lng: parseFloat(el.dataset.lng)
+      };
+    }
   }
 
   const res = await fetch("/search_place?q=" + encodeURIComponent(query));
@@ -3101,7 +3142,7 @@ async function runRouteSearch(){
   let startLng = userLng;
 
   if(start){
-    const startGeo = await geocodeAddress(start);
+    const startGeo = await geocodeAddress(start, "startInput");
 
     if(!startGeo){
       showMsg("출발지를 찾을 수 없습니다.");
@@ -3117,7 +3158,7 @@ async function runRouteSearch(){
     }
   }
 
-  const endGeo = await geocodeAddress(dest);
+  const endGeo = await geocodeAddress(dest, "destInput");
 
   if(!endGeo){
     showMsg("도착지를 찾을 수 없습니다.");
@@ -3171,64 +3212,7 @@ data.forEach(item=>{
     const icon = buildMarkerIcon(item.마커색상);
     const marker = L.marker([item.위도, item.경도], {icon});
     marker.itemData = item;
-
-    const popupHtml = `
-<div class="popup-wrap">
-
-<img class="popup-img" src="${item.사진URL}">
-
-<div class="popup-title">${item.구분}</div>
-
-<div class="popup-meta">
-${item.시군구} ${item.읍면동}<br>
-${item.주소}
-</div>
-
-<div class="popup-desc">
-${item.사고설명}
-</div>
-
-<div style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-
-<a 
-href="https://map.naver.com/v5/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#03C75A;
-color:#ffffff;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-네이버 길찾기
-</a>
-
-<a 
-href="https://map.kakao.com/link/search/${encodeURIComponent(item.주소)}"
-target="_blank"
-style="
-display:block;
-text-align:center;
-background:#FEE500;
-color:#191919;
-font-weight:700;
-padding:8px;
-border-radius:8px;
-text-decoration:none;
-font-size:13px;
-">
-카카오 길찾기
-</a>
-
-</div>
-
-</div>
-`;
-
+    const popupHtml = buildPopupHtml(item);
     marker.bindPopup(popupHtml,{maxWidth:290});
     markerGroup.addLayer(marker);
   });
@@ -3292,6 +3276,369 @@ if(isMobile() && window.mobileLeafletMap){
 }
 
 
+// 9번: 주소로 근처 위험지역 검색
+function openAddressSearch(){
+  document.getElementById("addrSearchPopup").style.display="flex";
+  document.getElementById("addrSearchInput").value="";
+  document.getElementById("addrSuggestBox").style.display="none";
+  document.getElementById("addrSuggestBox").innerHTML="";
+  setTimeout(()=>document.getElementById("addrSearchInput").focus(),100);
+}
+
+function closeAddressSearch(){
+  document.getElementById("addrSearchPopup").style.display="none";
+}
+
+window.addEventListener("DOMContentLoaded", function(){
+  const addrInput = document.getElementById("addrSearchInput");
+  if(addrInput){
+    addrInput.addEventListener("input", debounce(function(){
+      searchAddrSuggestions(this.value);
+    }, 400));
+  }
+});
+
+async function searchAddrSuggestions(query){
+  const box = document.getElementById("addrSuggestBox");
+  if(!box) return;
+  query = query.trim();
+  if(query.length < 2){ box.style.display="none"; box.innerHTML=""; return; }
+  try{
+    const res = await fetch("/search_place?q=" + encodeURIComponent(query));
+    const data = await res.json();
+    box.innerHTML="";
+    if(!data.documents || data.documents.length===0){
+      box.innerHTML='<div style="padding:10px;font-size:13px;color:#94a3b8;">결과 없음</div>';
+      box.style.display="block"; return;
+    }
+    data.documents.slice(0,5).forEach(place=>{
+      const d = document.createElement("div");
+      d.style.cssText="padding:9px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:13px;";
+      d.innerHTML=`<div style="font-weight:700;">${escapeHtml(place.place_name||"")}</div>
+        <div style="color:#64748b;font-size:12px;">${escapeHtml(place.address_name||"")}</div>`;
+      d.onclick=function(){
+        const inp=document.getElementById("addrSearchInput");
+        inp.value=place.place_name||"";
+        inp.dataset.lat=place.y||"";
+        inp.dataset.lng=place.x||"";
+        box.style.display="none"; box.innerHTML="";
+      };
+      box.appendChild(d);
+    });
+    box.style.display="block";
+  }catch(e){ box.style.display="none"; }
+}
+
+async function runAddressSearch(){
+  const inp = document.getElementById("addrSearchInput");
+  const query = inp.value.trim();
+  if(!query){ showMsg("주소를 입력하세요."); return; }
+
+  closeAddressSearch();
+  showLoadingLocation();
+
+  let lat, lng;
+  if(inp.dataset.lat && inp.dataset.lng){
+    lat = parseFloat(inp.dataset.lat);
+    lng = parseFloat(inp.dataset.lng);
+  } else {
+    const geo = await geocodeAddress(query);
+    if(!geo){ showMsg("주소를 찾을 수 없습니다."); return; }
+    lat = geo.lat; lng = geo.lng;
+  }
+
+  if(!ALL_DATA_CACHE){
+    const res = await fetch("/data");
+    const result = await res.json();
+    ALL_DATA_CACHE = result.data;
+  }
+  const data = ALL_DATA_CACHE;
+  const radius = 5000;
+  const filtered = data.filter(item => {
+    return calcDistance(lat, lng, item.위도, item.경도) <= radius;
+  }).sort((a,b) =>
+    calcDistance(lat,lng,a.위도,a.경도) - calcDistance(lat,lng,b.위도,b.경도)
+  );
+
+  if(filtered.length===0){
+    closeMsg(); showMsg("5km 이내에 위험지역이 없습니다."); return;
+  }
+
+  if(isMobile()){
+    syncToMobileMap(filtered, lat, lng, radius);
+    closeMsg(); return;
+  }
+
+  markerGroup.clearLayers();
+  // 주소 기준점 마커 (파란 원)
+  L.circle([lat,lng],{radius:radius,color:"#2563eb",fillColor:"#2563eb",fillOpacity:0.07}).addTo(markerGroup);
+  L.marker([lat,lng],{icon:L.divIcon({className:"",html:'<div style="width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(markerGroup);
+
+  const bounds = [[lat,lng]];
+  filtered.forEach(item=>{
+    const icon = buildMarkerIcon(item.마커색상);
+    const marker = L.marker([item.위도,item.경도],{icon});
+    marker.itemData = item;
+    marker.bindPopup(buildPopupHtml(item),{maxWidth:290});
+    markerGroup.addLayer(marker);
+    bounds.push([item.위도,item.경도]);
+  });
+  map.fitBounds(bounds,{padding:[50,50]});
+  map.once("moveend", closeMsg);
+  setTimeout(closeMsg,800);
+  showResultList(filtered, lat, lng);
+}
+
+// 1번 알약 필터 JS 끝
+let mobilePillActive = "전체";
+const PILL_COLORS = {
+  "상습결빙지역": "#06b6d4",
+  "공중화장실": "#f59e0b",
+  "교통사고위험지역": "#ef4444",
+  "전체": "#475569"
+};
+const PILL_IDS = {
+  "전체": "pill_all",
+  "상습결빙지역": "pill_ice",
+  "공중화장실": "pill_toilet",
+  "교통사고위험지역": "pill_accident"
+};
+
+function mobilePillFilter(cat){
+  mobilePillActive = cat;
+  // 알약 활성화 스타일
+  Object.keys(PILL_IDS).forEach(k => {
+    const el = document.getElementById(PILL_IDS[k]);
+    if(!el) return;
+    if(k === cat){
+      el.classList.add("active");
+      el.style.background = PILL_COLORS[k];
+      el.style.borderColor = PILL_COLORS[k];
+      el.style.color = "#fff";
+    } else {
+      el.classList.remove("active");
+      el.style.background = "#fff";
+      el.style.borderColor = "#e2e8f0";
+      el.style.color = PILL_COLORS[k] || "#374151";
+    }
+  });
+
+  // 마커 필터링
+  if(window.mobileMarkerGroup && window.mobileLeafletMap){
+    window.mobileMarkerGroup.eachLayer(function(layer){
+      if(!layer.itemData) return;
+      if(cat === "전체"){
+        if(layer._icon) layer._icon.style.display="";
+      } else {
+        if(layer.itemData.구분 === cat){
+          layer._icon && (layer._icon.style.display="");
+        } else {
+          layer._icon && (layer._icon.style.display="none");
+        }
+      }
+    });
+  }
+
+  // 2번: 결과 목록도 필터링
+  const list = document.getElementById("mobileResultList");
+  if(!list) return;
+  const items = list.querySelectorAll(".mobile-result-item");
+  items.forEach(el => {
+    if(cat === "전체"){
+      el.style.display = "";
+    } else {
+      const title = el.querySelector("b");
+      if(title && title.textContent === cat){
+        el.style.display = "";
+      } else {
+        el.style.display = "none";
+      }
+    }
+  });
+
+  // 결과 건수 업데이트
+  const visible = cat === "전체"
+    ? items.length
+    : [...items].filter(el => el.style.display !== "none").length;
+  const countEl = document.getElementById("mobileResultCount");
+  if(countEl) countEl.textContent = visible;
+}
+
+// ===== 5번: 별점 + 코멘트 =====
+
+// 팝업 열릴 때 별점 + 로드뷰 자동 초기화
+function onPopupOpen(e){
+  const popup = e.popup;
+  const marker = popup._source;
+  const item = marker && marker.itemData;
+  if(!item) return;
+  const sid = String(item.순번);
+  loadRating(sid);
+  // 로드뷰: 약간 딜레이 후 DOM 안정되면 초기화
+  setTimeout(()=> initRoadview("rv_" + sid, item.위도, item.경도), 200);
+}
+
+map.on("popupopen", onPopupOpen);
+
+// 별점 렌더 함수
+function renderStars(sid, myScore, avgScore, count){
+  const wrap = document.getElementById("stars_"+sid);
+  if(!wrap) return;
+  wrap.innerHTML = [1,2,3,4,5].map(n=>`
+    <span onclick="setRating('${sid}',${n})" data-star="${n}"
+      style="cursor:pointer;font-size:22px;color:${n<=myScore?'#f59e0b':'#cbd5e1'};">★</span>
+  `).join("");
+  const avg = document.getElementById("avg_"+sid);
+  if(avg && count>0) avg.textContent = `${avgScore.toFixed(1)}점 (${count}명)`;
+  else if(avg) avg.textContent = "아직 평가없음";
+}
+
+async function loadRating(sid){
+  try{
+    const res = await fetch("/api/rating?spot_id="+encodeURIComponent(sid));
+    const d = await res.json();
+    // 내가 저장한 별점은 localStorage로 간단 관리
+    const myScore = parseInt(localStorage.getItem("rating_"+sid)||"0");
+    renderStars(sid, myScore, d.avg||0, d.count||0);
+  }catch(e){}
+}
+
+async function setRating(sid, score){
+  localStorage.setItem("rating_"+sid, score);
+  try{
+    await fetch("/api/rating", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({spot_id: sid, score: score})
+    });
+    loadRating(sid);
+  }catch(e){
+    renderStars(sid, score, score, 1);
+  }
+}
+
+// 코멘트 모달
+function openComments(sid){
+  const modal = document.getElementById("commentModal");
+  if(!modal) return;
+  modal.dataset.sid = sid;
+  modal.style.display = "flex";
+  loadComments(sid);
+}
+
+function closeComments(){
+  const modal = document.getElementById("commentModal");
+  if(modal) modal.style.display = "none";
+}
+
+async function loadComments(sid){
+  const list = document.getElementById("commentList");
+  if(!list) return;
+  list.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:10px;">불러오는 중...</div>';
+  try{
+    const res = await fetch("/api/comments?spot_id="+encodeURIComponent(sid));
+    const d = await res.json();
+    if(!d.comments || d.comments.length===0){
+      list.innerHTML='<div style="color:#94a3b8;font-size:13px;padding:10px;">아직 코멘트가 없습니다.</div>';
+      return;
+    }
+    list.innerHTML = d.comments.map(c=>`
+      <div style="padding:10px 0;border-bottom:1px solid #f1f5f9;">
+        <div style="font-size:13px;color:#1e293b;">${escapeHtml(c.content)}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:3px;">${c.created_at ? c.created_at.slice(0,16).replace("T"," ") : ""}</div>
+      </div>
+    `).join("");
+  }catch(e){
+    list.innerHTML='<div style="color:#ef4444;font-size:13px;padding:10px;">로드 실패</div>';
+  }
+}
+
+async function submitComment(){
+  const modal = document.getElementById("commentModal");
+  const input = document.getElementById("commentInput");
+  if(!modal||!input) return;
+  const sid = modal.dataset.sid;
+  const content = input.value.trim();
+  if(!content){ alert("내용을 입력하세요."); return; }
+  try{
+    await fetch("/api/comments", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({spot_id: sid, content: content})
+    });
+    input.value = "";
+    loadComments(sid);
+  }catch(e){ alert("저장 실패"); }
+}
+
+// ===== 11번: 지도 회전 (CSS transform 방식, 플러그인 불필요) =====
+let mapRotation = 0;
+
+function resetMapBearing(){
+  mapRotation = 0;
+  applyMapRotation();
+}
+
+function resetMobileMapBearing(){
+  mapRotation = 0;
+  applyMapRotation();
+}
+
+function applyMapRotation(){
+  // PC 지도
+  const mapPane = document.querySelector("#map .leaflet-map-pane");
+  if(mapPane) mapPane.style.transform = `rotate(${mapRotation}deg)`;
+  const mapEl = document.getElementById("map");
+  if(mapEl) mapEl.style.transform = `rotate(0deg)`; // 외부는 고정
+
+  // 나침반 버튼 반대 회전 표시
+  const btn = document.getElementById("compassBtn");
+  if(btn) btn.style.transform = `rotate(${-mapRotation}deg)`;
+  const mBtn = document.getElementById("mobileCompassBtn");
+  if(mBtn) mBtn.style.transform = `rotate(${-mapRotation}deg)`;
+
+  // 모바일 지도
+  const mMapPane = document.querySelector("#mobileMap .leaflet-map-pane");
+  if(mMapPane) mMapPane.style.transform = `rotate(${mapRotation}deg)`;
+}
+
+// 두 손가락 회전 제스처
+(function setupRotateGesture(){
+  let startAngle = null;
+  let startRotation = 0;
+
+  function getAngle(t1, t2){
+    return Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
+  }
+
+  function onTouchStart(e){
+    if(e.touches.length === 2){
+      startAngle = getAngle(e.touches[0], e.touches[1]);
+      startRotation = mapRotation;
+    }
+  }
+
+  function onTouchMove(e){
+    if(e.touches.length === 2 && startAngle !== null){
+      const angle = getAngle(e.touches[0], e.touches[1]);
+      mapRotation = startRotation + (angle - startAngle);
+      applyMapRotation();
+    }
+  }
+
+  function onTouchEnd(e){
+    if(e.touches.length < 2) startAngle = null;
+  }
+
+  ["map","mobileMap"].forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener("touchstart", onTouchStart, {passive:true});
+    el.addEventListener("touchmove",  onTouchMove,  {passive:true});
+    el.addEventListener("touchend",   onTouchEnd,   {passive:true});
+  });
+})();
+
 function debounce(fn, delay){
 
   let timer;
@@ -3315,21 +3662,43 @@ function debounce(fn, delay){
 <div class="mobile-map-popup" id="mobileMapPopup">
 
   <div class="mobile-map-header">
-  지도 보기
-
-  <div style="display:flex; gap:6px;">
-
-    
-    <button class="mobile-map-close" onclick="closeMobileMap()">
-    닫기
-    </button>
-
-  </div>
-
+  <button class="mobile-map-close" onclick="goHome()">
+  🏠 홈으로
+  </button>
+  <span style="font-size:15px;font-weight:700;">지도 보기</span>
+  <div style="width:70px;"></div>
 </div>
 
   <div id="mobileMap" class="mobile-map"></div>
   <button id="mobileLocBtn">📍</button>
+  <!-- 11번: 모바일 나침반 버튼 (GPS 버튼 왼쪽) -->
+  <button class="map-compass-btn" id="mobileCompassBtn" style="bottom:20px;right:80px;" title="북쪽으로 초기화" onclick="resetMobileMapBearing()">🧭</button>
+  <div class="map-copyright">© 국민건강보험공단 광주전라제주지역본부 요양운영부</div>
+
+  <!-- 1번: 알약형 카테고리 필터 -->
+  <div class="mobile-pill-bar" id="mobilePillBar">
+    <button class="mobile-pill active" id="pill_all"
+      style="background:#475569;border-color:#475569;color:#fff;"
+      onclick="mobilePillFilter('전체')">전체</button>
+    <button class="mobile-pill" id="pill_ice"
+      style="color:#06b6d4;"
+      onclick="mobilePillFilter('상습결빙지역')">
+      <span style="width:10px;height:10px;border-radius:50%;background:#06b6d4;display:inline-block;"></span>
+      상습결빙지역
+    </button>
+    <button class="mobile-pill" id="pill_toilet"
+      style="color:#f59e0b;"
+      onclick="mobilePillFilter('공중화장실')">
+      <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+      공중화장실
+    </button>
+    <button class="mobile-pill" id="pill_accident"
+      style="color:#ef4444;"
+      onclick="mobilePillFilter('교통사고위험지역')">
+      <span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+      교통사고위험지역
+    </button>
+  </div>
 
   <div class="map-legend">
 
@@ -3552,6 +3921,43 @@ padding:20px;
   </div>
 </div>
 
+<!-- 9번: 주소로 근처 위험지역 검색 팝업 -->
+<div id="addrSearchPopup" style="
+position:fixed;inset:0;background:rgba(0,0,0,.4);
+display:none;align-items:center;justify-content:center;z-index:6000;">
+<div style="background:white;padding:20px;border-radius:14px;width:340px;max-width:94vw;">
+  <h3 style="margin-top:0;">📌 주소로 근처 위험지역 찾기</h3>
+  <p style="font-size:13px;color:#64748b;margin-top:-8px;">입력한 주소 기준 5km 이내 위험지역을 가까운 순으로 표시합니다.</p>
+  <input id="addrSearchInput"
+    placeholder="주소 입력 (예: 광주시 서구 치평동)"
+    style="width:100%;height:40px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:8px;font-size:14px;">
+  <div id="addrSuggestBox" style="
+    display:none;width:100%;max-height:160px;overflow-y:auto;
+    border:1px solid #e5e7eb;border-radius:10px;background:#fff;
+    margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,0.08);"></div>
+  <button type="button" class="btn primary" onclick="runAddressSearch()">조회</button>
+  <button class="btn secondary" onclick="closeAddressSearch()" style="margin-top:6px;">닫기</button>
+</div>
+</div>
+
+<!-- 5번: 코멘트 모달 -->
+<div id="commentModal" style="
+position:fixed;inset:0;background:rgba(0,0,0,.45);
+display:none;align-items:center;justify-content:center;z-index:7000;">
+<div style="background:white;border-radius:18px;padding:22px;width:360px;max-width:94vw;max-height:80vh;display:flex;flex-direction:column;">
+  <div style="font-size:17px;font-weight:900;margin-bottom:14px;">💬 코멘트 게시판</div>
+  <div id="commentList" style="flex:1;overflow-y:auto;max-height:260px;margin-bottom:14px;border:1px solid #f1f5f9;border-radius:10px;padding:8px 10px;"></div>
+  <textarea id="commentInput" placeholder="이 지점에 대한 의견을 남겨주세요..." style="
+    width:100%;height:72px;border:1px solid #cbd5e1;border-radius:10px;
+    padding:10px;font-size:13px;resize:none;margin-bottom:10px;
+    font-family:inherit;"></textarea>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+    <button onclick="closeComments()" style="height:42px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font-weight:700;cursor:pointer;">닫기</button>
+    <button onclick="submitComment()" style="height:42px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">등록</button>
+  </div>
+</div>
+</div>
+
 </body>
 </html>
 """
@@ -3588,7 +3994,9 @@ def index():
     return render_template_string(
         HTML,
         total_visit=visitor["total"],
-        today_visit=visitor["today_count"]
+        today_visit=visitor["today_count"],
+        kakao_key=KAKAO_KEY or "",
+        kakao_js_key=KAKAO_JS_KEY or ""
     )
 
 
@@ -3600,6 +4008,147 @@ def log_search():
     save_search_log(data)
 
     return jsonify({"ok": True})
+
+
+# ===== 5번: 별점 API =====
+@app.route("/api/rating", methods=["GET"])
+def get_rating():
+    spot_id = request.args.get("spot_id", "")
+    if not spot_id or not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"avg": 0, "count": 0})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/spot_ratings?spot_id=eq.{quote(spot_id)}&select=score",
+            headers=headers
+        )
+        rows = r.json()
+        if not rows or not isinstance(rows, list) or len(rows) == 0:
+            return jsonify({"avg": 0, "count": 0})
+        scores = [int(row["score"]) for row in rows if "score" in row]
+        avg = round(sum(scores) / len(scores), 1) if scores else 0
+        return jsonify({"avg": avg, "count": len(scores)})
+    except Exception as e:
+        return jsonify({"avg": 0, "count": 0})
+
+
+@app.route("/api/rating", methods=["POST"])
+def post_rating():
+    data = request.get_json() or {}
+    spot_id = str(data.get("spot_id", ""))
+    score = int(data.get("score", 0))
+    if not spot_id or score < 1 or score > 5 or not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"ok": False})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/spot_ratings",
+            headers=headers,
+            json={"spot_id": spot_id, "score": score}
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False})
+
+
+# ===== 5번: 코멘트 API =====
+@app.route("/api/comments", methods=["GET"])
+def get_comments():
+    spot_id = request.args.get("spot_id", "")
+    if not spot_id or not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"comments": []})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/spot_comments?spot_id=eq.{quote(spot_id)}&order=created_at.desc&limit=50",
+            headers=headers
+        )
+        rows = r.json()
+        if not isinstance(rows, list):
+            return jsonify({"comments": []})
+        return jsonify({"comments": rows})
+    except Exception as e:
+        return jsonify({"comments": []})
+
+
+@app.route("/api/comments", methods=["POST"])
+def post_comment():
+    data = request.get_json() or {}
+    spot_id = str(data.get("spot_id", ""))
+    content = str(data.get("content", "")).strip()
+    if not spot_id or not content or not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"ok": False})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/spot_comments",
+            headers=headers,
+            json={"spot_id": spot_id, "content": content}
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False})
+
+
+# ===== 관리자: 코멘트 전체 조회 =====
+@app.route("/api/admin/comments", methods=["GET"])
+def admin_get_comments():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"comments": []})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/spot_comments?order=created_at.desc&limit=1000",
+            headers=headers
+        )
+        rows = r.json()
+        if not isinstance(rows, list):
+            return jsonify({"comments": []})
+        return jsonify({"comments": rows})
+    except Exception as e:
+        return jsonify({"comments": []})
+
+
+# ===== 관리자: 코멘트 삭제 =====
+@app.route("/api/admin/comments/<int:comment_id>", methods=["DELETE"])
+def admin_delete_comment(comment_id):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"ok": False})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/spot_comments?id=eq.{comment_id}",
+            headers=headers
+        )
+        return jsonify({"ok": r.status_code < 300})
+    except Exception as e:
+        return jsonify({"ok": False})
 
 
 @app.route("/stats")
@@ -3750,6 +4299,15 @@ def stats():
           border-radius:8px;
           margin-bottom:18px;
         }
+        .btn-del{
+          padding:4px 10px;
+          background:#ef4444;
+          color:white;
+          border:none;
+          border-radius:6px;
+          cursor:pointer;
+          font-size:13px;
+        }
         pre{
           white-space:pre-wrap;
           background:#111827;
@@ -3771,6 +4329,50 @@ def stats():
 
         <h3>날짜별·위험지역 체크 수</h3>
         {{ category_table|safe }}
+
+        <h3>💬 코멘트 관리</h3>
+        <div id="commentAdminArea">불러오는 중...</div>
+
+        <script>
+        async function loadAdminComments(){
+          const res = await fetch('/api/admin/comments');
+          const d = await res.json();
+          const area = document.getElementById('commentAdminArea');
+          if(!d.comments || d.comments.length===0){
+            area.innerHTML='<p style="color:#94a3b8;">등록된 코멘트가 없습니다.</p>';
+            return;
+          }
+          let html = '<table><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제</th></tr></thead><tbody>';
+          d.comments.forEach(c=>{
+            html += `<tr>
+              <td>${c.id}</td>
+              <td>${c.spot_id}</td>
+              <td style="max-width:300px;word-break:break-all;">${c.content}</td>
+              <td>${c.created_at ? c.created_at.slice(0,16).replace('T',' ') : ''}</td>
+              <td><button class="btn-del" onclick="deleteComment(${c.id}, this)">삭제</button></td>
+            </tr>`;
+          });
+          html += '</tbody></table>';
+          area.innerHTML = html;
+        }
+
+        async function deleteComment(id, btn){
+          if(!confirm('이 코멘트를 삭제하시겠습니까?')) return;
+          btn.disabled = true;
+          btn.textContent = '삭제중...';
+          const res = await fetch('/api/admin/comments/' + id, {method:'DELETE'});
+          const d = await res.json();
+          if(d.ok){
+            btn.closest('tr').remove();
+          } else {
+            btn.disabled = false;
+            btn.textContent = '삭제';
+            alert('삭제 실패');
+          }
+        }
+
+        loadAdminComments();
+        </script>
 
         </body>
         </html>
@@ -3850,8 +4452,7 @@ def stats_excel():
             "city",
             "town",
             "위험지역 구분",
-            "result_count",
-            "ip"
+            "result_count"
         ]].copy()
 
         raw_df.columns = [
@@ -3861,8 +4462,7 @@ def stats_excel():
             "시군구",
             "읍면동",
             "위험지역 구분",
-            "조회결과수",
-            "IP"
+            "조회결과수"
         ]
 
         region_stats = (
@@ -3984,7 +4584,7 @@ def data():
 
     province = safe_str(request.args.get("province",""))
     city = safe_str(request.args.get("city",""))
-    town = safe_str(request.args.get("town",""))
+    towns = request.args.getlist("town")
     categories = request.args.getlist("category")
 
     df = load_df()
@@ -3995,8 +4595,8 @@ def data():
     if city:
         df = df[df["시군구"] == city]
 
-    if town:
-        df = df[df["읍면동"] == town]
+    if towns:
+        df = df[df["읍면동"].isin(towns)]
 
     if categories:
         df = df[df["구분"].isin(categories)]
