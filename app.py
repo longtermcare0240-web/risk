@@ -788,7 +788,7 @@ html,body{
           }
         })();
         function downloadApk(){
-          window.location.href="https://limstep.github.io/longtermcare0240-web/risk/static/safeload.apk";
+          window.location.href="/download-apk";
         }
         </script>{% endraw %}
       </div>
@@ -3734,6 +3734,13 @@ def photo_ice():
 @app.route("/photo/333")
 def photo_accident():
     return send_file("333.png", mimetype="image/png")
+
+@app.route("/download-apk")
+def download_apk():
+    apk_path = os.path.join(BASE_DIR, "safeload.apk")
+    if not os.path.exists(apk_path):
+        return "APK 파일 없음 - safeload.apk를 app.py와 같은 폴더에 넣어주세요.", 404
+    return send_file(apk_path, as_attachment=True, download_name="safeload.apk", mimetype="application/vnd.android.package-archive")
 
 @app.route("/")
 def index():
