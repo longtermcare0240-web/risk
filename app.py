@@ -363,913 +363,454 @@ HTML = r"""
 <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{kakao_js_key}}&libraries=services,roadview"></script>
 
 
-<style>
-*{box-sizing:border-box}
+{% raw %}<style>
+/* ══ 리셋 ══ */
+*{box-sizing:border-box;margin:0;padding:0;}
 html,body{
-  margin:0;
-  padding:0;
-  width:100%;
-  height:100%;
+  width:100%;height:100%;
   font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
-  background:#f8fafc;
-  color:#0f172a;
-}
-.page{
-  display:flex;
-  flex-direction:row;
-  width:100%;
-  height:100vh;
-  overflow:hidden;
+  font-size:14px;
+  background:#f4f5f7;
+  color:#1a202c;
+  -webkit-font-smoothing:antialiased;
 }
 
+/* ══ 레이아웃 ══ */
+.page{display:flex;flex-direction:row;width:100%;height:100vh;overflow:hidden;}
+
+/* ══ 사이드바 - 소프트 그레이 + 인디고 ══ */
 .sidebar{
-  width:360px;
-  min-width:360px;
-  background:#fff;
+  width:300px;min-width:300px;
+  background:#f4f5f7;
+  display:flex;flex-direction:column;
+  overflow:hidden;
   border-right:1px solid #e5e7eb;
-  padding:18px 16px;
-  overflow-y:auto;
 }
-.brand{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  margin-bottom:18px;
-}
-
-.brand-left{
-  display:flex;
-  flex-direction:column;
-  width:100%;
-}
-
-.brand-title{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  width:100%;
-  cursor:pointer;
-
-  font-size:22px;
-  font-weight:900;
-  margin:0;
-  line-height:1.2;
-}
-
-.brand-sub{
-  font-size:13px;
-  color:#64748b;
-  margin-top:3px;
-}
-
-.ci-logo{
-  height:48px;
-  object-fit:contain;
-  margin-left:12px;
-  flex-shrink:0;
-}
-
-@media (max-width:900px){
-  #locBtn{
-    display:none !important;
-  }
-}
-
-@media (max-width:900px){
-  .ci-logo{
-    height:44px;
-  }
-}
-
-@media (max-width:900px){
-  .top-badge{
-    display:none;
-  }
-}
-
-@media (max-width:900px){
-
-  #locBtn{
-    display:none !important;
-  }
-
-  .top-badge{
-    display:none !important;
-  }
-
-}
-
-.logo{
-  width:48px;
-  height:48px;
-  border-radius:16px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#fff;
-  font-size:24px;
-  background:linear-gradient(135deg,#2563eb,#7c3aed);
-  box-shadow:0 10px 24px rgba(37,99,235,.25);
-}
-.brand h1{
-  margin:0;
-  font-size:22px;
-  line-height:1.2;
-}
-.brand p{
-  margin:4px 0 0 0;
-  font-size:13px;
-  color:#64748b;
-}
-.card{
-  background:#f8fafc;
-  border:1px solid #e2e8f0;
-  border-radius:18px;
-  padding:15px;
-  margin-bottom:14px;
-}
-.card h3{
-  margin:0 0 12px 0;
-  font-size:15px;
-}
-.label{
-  display:block;
-  margin:10px 0 6px;
-  font-size:13px;
-  font-weight:700;
-  color:#334155;
-}
-.select, .btn{
-  width:100%;
-  min-height:46px;
-  border-radius:12px;
-  border:1px solid #cbd5e1;
-  font-size:15px;
-}
-.select{
-  background:#fff;
-  padding:0 12px;
-}
-.check-grid{
-  display:grid;
-  grid-template-columns:1fr;
-  gap:8px;
-}
-.check-item{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:10px 12px;
-  border:1px solid #e2e8f0;
-  background:#fff;
-  border-radius:12px;
-  font-size:14px;
-}
-.dot{
-  width:12px;
-  height:12px;
-  border-radius:999px;
-  flex:0 0 12px;
-}
-.btn-row{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:14px;
-margin-top:14px;
-margin-bottom:6px;
-}
-
-.sidebar .btn{
-  height:46px;
-  font-size:14px;
-  margin-top:8px;
-}
-
-.btn{
-  cursor:pointer;
-  font-weight:800;
-}
-.btn.primary{
-  background:#2563eb;
-  color:#fff;
-  border:none;
-}
-.btn.secondary{
-  background:#fff;
-  color:#111827;
-}
-
-.btn.kakao{
-  background:#FEE500;
-  color:#191919;
-  border:none;
-}
-
-.summary{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:10px;
-}
-
-.admin-btn{
-grid-column:1 / -1;
-}
-
-.summary-box{
-  background:#fff;
-  border:1px solid #e2e8f0;
-  border-radius:14px;
-  padding:14px;
-}
-.summary-box .num{
-  font-size:24px;
-  font-weight:900;
-  margin-bottom:4px;
-}
-.summary-box .txt{
-  font-size:12px;
-  color:#64748b;
-}
-
-
-@media (max-width:900px){
-
-.map-legend{
-display:none;
-}
-
-}
-.legend-item{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-size:13px;
-}
-.notice{
-  font-size:12px;
-  line-height:1.6;
-  color:#475569;
-}
-.map-wrap{
-  position:relative;
-  flex:1;
-  min-width:0;
-}
-#map{
-  width:100%;
-  height:100vh;
-}
-
-.top-badge{
-  position:absolute;
-  top:14px;
-  right:14px;
-  z-index:999;
-  background:rgba(255,255,255,.96);
-  border:1px solid #e5e7eb;
-  border-radius:14px;
-  padding:10px 12px;
-  font-size:13px;
-  box-shadow:0 8px 24px rgba(15,23,42,.08);
-}
-
-.map-legend{
-  position:absolute;
-  top:20px;
-  right:20px;
-  bottom:auto;
-  background:white;
-  padding:10px 12px;
-  border-radius:12px;
-  box-shadow:0 6px 18px rgba(0,0,0,0.18);
-  font-size:13px;
-  z-index:999;
-}
-
-.map-legend-item{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  margin-bottom:4px;
-}
-
-.map-legend-dot{
-  width:18px;
-  height:18px;
-  border-radius:50%;
-  flex-shrink:0;
-  display:inline-block;
-}
-
-.loading{
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform:translate(-50%,-50%);
-  z-index:1000;
-  background:rgba(15,23,42,.86);
-  color:#fff;
-  padding:12px 16px;
-  border-radius:14px;
-  font-size:14px;
-  display:none;
-}
-.custom-marker{
-  width:18px;
-  height:18px;
-  border-radius:999px;
-  border:3px solid #fff;
-  box-shadow:0 2px 8px rgba(0,0,0,.25);
-}
-.popup-wrap{
-  width:245px;
-}
-.popup-img{
-  width:100%;
-  height:160px;
-  object-fit:contain;
-  border-radius:12px;
-  border:1px solid #e5e7eb;
-  margin-bottom:10px;
-  background:#f1f5f9;
-}
-
-.popup-title{
-  font-size:16px;
-  font-weight:900;
-  margin-bottom:6px;
-  line-height:1.35;
-}
-.popup-meta{
-  font-size:12px;
-  color:#64748b;
-  line-height:1.5;
-  margin-bottom:8px;
-}
-.popup-desc{
-  font-size:13px;
-  line-height:1.55;
-}
-@media (max-width: 900px){
-  .page{
-    display:block;
-    height:auto;
-    min-height:100vh;
-  }
-
-  .sidebar{
-    width:100%;
-    min-width:0;
-    border-right:none;
-    border-bottom:none;
-    padding:15px 14px;
-  }
-
-  .map-wrap{
-    display:block;
-    position:static;
-    width:100%;
-    height:0;
-    overflow:visible;
-  }
-
-  #map{
-    display:none;
-  }
-
-  
-}
-
-.mobile-map-popup{
-  position:fixed;
-  inset:0;
-  background:#ffffff;
-  z-index:2000;
-  display:none;
-  flex-direction:column;
-}
-
-.mobile-map-header{
-  height:56px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 16px;
-  border-bottom:1px solid #e5e7eb;
-  font-weight:700;
-}
-
-.mobile-map-close{
-  border:none;
-  background:#2563eb;
-  color:#ffffff;
-  padding:6px 14px;
-  border-radius:6px;
-  font-weight:700;
-}
-
-@media (min-width:901px){
-
-  .mobile-map-popup{
-    display:none !important;
-  }
-
-}
-
-.mobile-map{
-  flex:1;
-}
-
-@media(min-width:901px){
-  .mobile-map-popup{
-    display:none !important;
-  }
-}
-
-#locBtn{
-position:absolute;
-bottom:20px;
-right:20px;
-z-index:1000;
-
-width:46px;
-height:46px;
-
-border-radius:50%;
-border:none;
-
-background:#ffffff;
-color:#2563eb;
-
-font-size:20px;
-
-display:flex;
-align-items:center;
-justify-content:center;
-
-box-shadow:0 6px 16px rgba(0,0,0,0.25);
-
-cursor:pointer;
-}
-
-
-@media (max-width:900px){
-
-.map-legend{
-  top:auto;
-  bottom:80px;
-  right:10px;
-  font-size:11px;
-  padding:8px;
-}
-
-.map-legend-dot{
-  width:16px;
-  height:16px;
-}
-
-}
-.mobile-map-popup .map-legend{
-  position:absolute;
-  top:70px;
-  right:6px;
-  bottom:auto;
-  z-index:3000;
-}
-
-.user-marker-wrap{
-  position:relative;
-  width:28px;
-  height:28px;
-}
-
-.user-pin{
-  position:relative;
-  width:34px;
-  height:34px;
-}
-
-.user-pin::before{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:50%;
-  width:18px;
-  height:18px;
-  background:#22c55e;
-  border-radius:50%;
-  border:3px solid #ffffff;
-  transform:translate(-50%,-50%);
-  box-shadow:0 4px 12px rgba(0,0,0,.35);
-}
-
-.user-pin::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:50%;
-  width:34px;
-  height:34px;
-  border-radius:50%;
-  background:rgba(34,197,94,0.25);
-  transform:translate(-50%,-50%);
-  animation:userPulse 1.8s infinite;
-}
-
-.user-marker-pulse{
-  position:absolute;
-  left:50%;
-  top:50%;
-  width:28px;
-  height:28px;
-  transform:translate(-50%,-50%);
-  border-radius:50%;
-  background:rgba(37,99,235,0.22);
-  animation:userPulse 1.8s ease-out infinite;
-}
-
-.user-marker-dot{
-  position:absolute;
-  left:50%;
-  top:50%;
-  width:14px;
-  height:14px;
-  transform:translate(-50%,-50%);
-  border-radius:50%;
-  background:#2563eb;
-  border:3px solid #ffffff;
-  box-shadow:0 2px 8px rgba(0,0,0,.25);
-}
-
-@keyframes userPulse{
-  0%{
-    transform:translate(-50%,-50%) scale(0.7);
-    opacity:0.9;
-  }
-  100%{
-    transform:translate(-50%,-50%) scale(1.8);
-    opacity:0;
-  }
-}
-
-.location-box{
-  margin-top:12px;
+.sidebar-scroll{
+  flex:1;overflow-y:auto;
   padding:12px;
-  border:1px solid #e2e8f0;
-  border-radius:16px;
-  background:#f8fafc;
+  scrollbar-width:thin;
+  scrollbar-color:#e5e7eb transparent;
 }
+.sidebar-scroll::-webkit-scrollbar{width:3px;}
+.sidebar-scroll::-webkit-scrollbar-thumb{background:#e5e7eb;border-radius:3px;}
 
-.location-row{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-  margin-top:8px;
-}
-
-.location-box .btn{
+/* ══ 브랜드 헤더 ══ */
+.brand{
+  padding:14px 14px 12px;
+  border-bottom:1px solid #f1f1f1;
+  display:flex;align-items:center;gap:10px;
   background:#ffffff;
-  color:#111827;
-  border:1px solid #cbd5e1;
+  flex-shrink:0;
+}
+.brand-accent{width:3px;height:36px;background:#6366f1;border-radius:2px;flex-shrink:0;}
+.brand-left{display:flex;flex-direction:column;gap:2px;flex:1;}
+.brand-title{
+  font-size:15px;font-weight:900;
+  color:#1a202c;cursor:pointer;
+  letter-spacing:-0.3px;
+}
+.brand-sub{font-size:10px;color:#9ca3af;}
+.ci-logo{height:32px;object-fit:contain;flex-shrink:0;opacity:.95;}
+@media(max-width:900px){.ci-logo{height:28px;}}
+
+/* ══ 섹션 카드 ══ */
+.s-card{
+  background:#ffffff;
+  border-radius:14px;
+  padding:13px;
+  margin-bottom:8px;
+  box-shadow:0 1px 4px rgba(0,0,0,.07);
+}
+.s-card-label{
+  font-size:10px;font-weight:700;
+  color:#6366f1;letter-spacing:.08em;text-transform:uppercase;
+  margin-bottom:10px;
+  display:flex;align-items:center;justify-content:space-between;
 }
 
-.mobile-result-panel{
-  position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
-  width:100%;
-  height:180px;
-  max-height:40%;
-  background:white;
-  border-top-left-radius:16px;
-  border-top-right-radius:16px;
-  box-shadow:0 -6px 20px rgba(0,0,0,.15);
-  z-index:3000;
-  display:none;
-  flex-direction:column;
+/* ══ 폼 요소 ══ */
+.form-label{
+  font-size:11px;font-weight:600;
+  color:#6b7280;
+  margin:8px 0 4px;
+  display:block;
 }
-
-@media (max-width:900px){
-  .mobile-result-panel{
-    position:fixed;
-  }
-}
-
-.mobile-result-header{
-  padding:10px 14px;
-  font-weight:700;
-  border-bottom:1px solid #e5e7eb;
-}
-
-.mobile-result-list{
-  overflow:auto;
-  flex:1;
-}
-
-.mobile-result-item{
-  padding:10px 14px;
-  border-bottom:1px solid #f1f5f9;
+.form-label:first-child{margin-top:0;}
+.form-select{
+  width:100%;height:38px;
+  background:#f9fafb;
+  border:1.5px solid #e5e7eb;
+  border-radius:9px;
+  color:#1f2937;
   font-size:13px;
-  cursor:pointer;
+  padding:0 10px;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center;
+  cursor:pointer;transition:border-color .15s;
 }
-
-.mobile-result-item:hover{
-  background:#f8fafc;
-}
-
-.mobile-result-distance{
-  font-size:12px;
-  color:#2563eb;
-}
-
-#mobileLocBtn{
-position:absolute;
-bottom:20px;
-right:20px;
-z-index:4000;
-
-width:52px;
-height:52px;
-
-border-radius:50%;
-border:none;
-
-background:#2563eb;
-color:white;
-
-font-size:22px;
-
-display:flex;
-align-items:center;
-justify-content:center;
-
-box-shadow:0 6px 16px rgba(0,0,0,0.25);
-
-cursor:pointer;
-}
-
-.sexoffender-btn{
-display:block;
-background:#ffffff;
-color:#111827;
-}
-
-@media (max-width:900px){
-.sexoffender-btn{
-display:block;
-}
-}
-
-@media (min-width:901px){
-.sexoffender-btn{
-display:block;
-}
-}
-
-
-.sidebar .btn{
-height:46px;
-font-size:14px;
-margin-top:8px;
-}
-
-@keyframes floatChar{
-0%{transform:translateY(0);}
-50%{transform:translateY(-6px);}
-100%{transform:translateY(0);}
-}
-
-.char{
-width:80px;
-animation:floatChar 2.2s ease-in-out infinite;
-}
-
-.loading-dots::after{
-content:"";
-animation:dots 1.4s steps(3,end) infinite;
-}
-
-@keyframes dots{
-0%{content:"";}
-33%{content:".";}
-66%{content:"..";}
-100%{content:"...";}
-}
+.form-select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,.15);}
 
 .town-multi-wrap{
-  max-height:160px;
-  overflow-y:auto;
-  border:1px solid #e2e8f0;
-  border-radius:12px;
-  background:#fff;
-  padding:6px 8px;
+  max-height:120px;overflow-y:auto;
+  background:#f9fafb;border:1.5px solid #e5e7eb;
+  border-radius:9px;padding:4px 6px;
 }
-
 .town-check-item{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:5px 4px;
-  font-size:13px;
+  display:flex;align-items:center;gap:7px;
+  padding:5px 5px;font-size:12px;color:#6b7280;
+  cursor:pointer;border-radius:5px;transition:background .1s;
+}
+.town-check-item:hover{background:#f3f4f6;}
+.town-check-item input{accent-color:#6366f1;width:13px;height:13px;flex-shrink:0;}
+
+/* ══ 카테고리 체크박스 ══ */
+.check-grid{display:flex;flex-direction:column;gap:5px;}
+.check-item{
+  display:flex;align-items:center;gap:9px;
+  padding:8px 10px;
+  background:#f9fafb;border:1.5px solid #e5e7eb;
+  border-radius:9px;font-size:13px;color:#374151;
+  cursor:pointer;transition:border-color .15s,background .15s;
+}
+.check-item:has(input:checked){border-color:#6366f1;background:#eef2ff;}
+.dot{width:9px;height:9px;border-radius:50%;flex:0 0 9px;}
+
+/* ══ 버튼 ══ */
+.btn-main{
+  width:100%;height:44px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  color:#fff;border:none;border-radius:11px;
+  font-size:15px;font-weight:800;
+  cursor:pointer;margin-top:12px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(99,102,241,.3);
+  transition:opacity .15s,transform .1s;
+  letter-spacing:-0.2px;
+}
+.btn-main:hover{opacity:.92;}
+.btn-main:active{transform:scale(.98);}
+
+.btn-reset{
+  background:none;border:none;
+  color:#a5b4fc;font-size:11px;font-weight:600;
+  cursor:pointer;padding:2px 6px;border-radius:5px;
+  transition:color .15s,background .15s;
+}
+.btn-reset:hover{color:#6366f1;background:#eef2ff;}
+
+/* 2열 버튼 그리드 */
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:0;}
+.btn-grid .btn-action{height:40px;font-size:12px;}
+
+.btn-action{
+  width:100%;height:40px;
+  border-radius:9px;border:1.5px solid #e5e7eb;
+  background:#f9fafb;color:#374151;
+  font-size:13px;font-weight:700;
   cursor:pointer;
-  border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,background .15s,color .15s;
+}
+.btn-action:hover{border-color:#c7d2fe;background:#eef2ff;color:#4338ca;}
+.btn-action:active{transform:scale(.98);}
+
+.btn-kakao{
+  background:#FEE500;color:#191919;border:none;
+}
+.btn-kakao:hover{background:#f5dc00;color:#191919;}
+
+.btn-green{
+  background:linear-gradient(135deg,#16a34a,#15803d);
+  color:#fff;border:none;
+  box-shadow:0 2px 8px rgba(22,163,74,.2);
 }
 
-.town-check-item:hover{
-  background:#f1f5f9;
+/* ══ 방문자 ══ */
+.visitor-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+.visitor-box{
+  background:#eef2ff;border-radius:10px;padding:10px;
+  text-align:center;border:1px solid #e0e7ff;
+}
+.visitor-num{font-size:22px;font-weight:900;color:#6366f1;line-height:1;margin-bottom:3px;}
+.visitor-lbl{font-size:10px;font-weight:600;color:#a5b4fc;text-transform:uppercase;letter-spacing:.05em;}
+
+/* ══ 푸터 ══ */
+.sidebar-footer{
+  padding:10px 14px;border-top:1px solid #f1f1f1;
+  text-align:center;font-size:10px;color:#9ca3af;
+  line-height:1.6;flex-shrink:0;background:#fff;
 }
 
-.town-check-item input{
-  accent-color:#2563eb;
-  width:15px;
-  height:15px;
-  flex-shrink:0;
+/* ══ 지도 영역 ══ */
+.map-wrap{position:relative;flex:1;min-width:0;}
+#map{width:100%;height:100vh;}
+
+.top-badge{
+  position:absolute;top:14px;right:14px;z-index:999;
+  background:rgba(255,255,255,.96);border:1px solid #e5e7eb;
+  border-radius:12px;padding:8px 12px;font-size:12px;
+  box-shadow:0 4px 14px rgba(0,0,0,.10);
+}
+@media(max-width:900px){.top-badge{display:none!important;}}
+
+.map-legend{
+  position:absolute;top:20px;right:20px;
+  background:rgba(255,255,255,.97);
+  padding:10px 12px;border-radius:12px;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);
+  font-size:12px;z-index:999;
+}
+.map-legend-item{display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.map-legend-item:last-child{margin-bottom:0;}
+.map-legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+@media(max-width:900px){.map-legend{display:none;}}
+
+.loading{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:1000;background:rgba(15,23,42,.9);color:#fff;
+  padding:12px 18px;border-radius:14px;font-size:13px;font-weight:600;display:none;
 }
 
-.visitor-card{
-flex:1;
-background:#f1f5f9;
-border-radius:14px;
-padding:12px;
-text-align:center;
+/* ══ 마커 / 위치 ══ */
+.custom-marker{
+  width:15px;height:15px;border-radius:50%;
+  border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);
+}
+.user-marker-wrap{position:relative;width:28px;height:28px;}
+.user-marker-pulse{
+  position:absolute;left:50%;top:50%;width:28px;height:28px;
+  transform:translate(-50%,-50%);border-radius:50%;
+  background:rgba(99,102,241,.22);animation:userPulse 1.8s ease-out infinite;
+}
+.user-marker-dot{
+  position:absolute;left:50%;top:50%;width:13px;height:13px;
+  transform:translate(-50%,-50%);border-radius:50%;
+  background:#6366f1;border:2.5px solid #fff;
+  box-shadow:0 2px 6px rgba(0,0,0,.25);
+}
+@keyframes userPulse{
+  0%{transform:translate(-50%,-50%) scale(.7);opacity:.9;}
+  100%{transform:translate(-50%,-50%) scale(1.8);opacity:0;}
 }
 
-.visitor-title{
-font-size:13px;
-color:#666;
+/* ══ locBtn ══ */
+#locBtn{
+  position:absolute;bottom:20px;right:20px;z-index:3500;
+  width:44px;height:44px;border-radius:50%;border:none;
+  background:#fff;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer;transition:box-shadow .15s;
+}
+#locBtn:hover{box-shadow:0 6px 20px rgba(99,102,241,.25);}
+@media(max-width:900px){#locBtn{display:none!important;}}
+
+/* ══ Leaflet 팝업 ══ */
+.leaflet-popup-content-wrapper{
+  overflow:visible!important;border-radius:16px!important;
+  box-shadow:0 8px 32px rgba(0,0,0,.15)!important;
+}
+.leaflet-popup-content{overflow:visible!important;margin:14px 16px!important;}
+.popup-title{font-size:15px;font-weight:900;margin-bottom:5px;line-height:1.35;}
+.popup-meta{font-size:12px;color:#64748b;line-height:1.5;margin-bottom:6px;}
+
+/* ══ 모바일 지도 팝업 ══ */
+.mobile-map-popup{position:fixed;inset:0;background:#fff;z-index:2000;display:none;flex-direction:column;}
+.mobile-map-header{
+  height:54px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;
+}
+.mobile-map-close{
+  border:none;background:#6366f1;color:#fff;
+  padding:7px 14px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;
+}
+.mobile-map{flex:1;}
+@media(min-width:901px){.mobile-map-popup{display:none!important;}}
+
+/* ══ 모바일 결과 패널 ══ */
+.mobile-result-panel{
+  position:absolute;left:0;right:0;bottom:0;
+  width:100%;height:180px;max-height:40%;
+  background:#fff;
+  border-top-left-radius:18px;border-top-right-radius:18px;
+  box-shadow:0 -4px 20px rgba(0,0,0,.12);
+  z-index:3000;display:none;flex-direction:column;
+}
+@media(max-width:900px){.mobile-result-panel{position:fixed;}}
+.mobile-result-header{padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid #f1f5f9;}
+.mobile-result-list{overflow:auto;flex:1;}
+.mobile-result-item{padding:10px 14px;border-bottom:1px solid #f8fafc;font-size:13px;cursor:pointer;}
+.mobile-result-item:hover{background:#f8fafc;}
+.mobile-result-distance{font-size:12px;color:#6366f1;font-weight:600;}
+
+/* ══ mobileLocBtn ══ */
+#mobileLocBtn{
+  position:absolute;bottom:200px;right:12px;z-index:4500;
+  width:48px;height:48px;border-radius:50%;border:none;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 16px rgba(99,102,241,.4);cursor:pointer;
 }
 
-.visitor-count{
-font-size:22px;
-font-weight:700;
-margin-top:4px;
-}
-
-.mobile-map-popup .map-copyright{
-  bottom:10px;
-}
-
-/* 11번: 나침반/회전 리셋 버튼 */
-.map-compass-btn{
-  position:absolute;
-  bottom:72px;
-  right:20px;
-  z-index:1000;
-  width:44px;
-  height:44px;
-  border-radius:50%;
-  border:none;
-  background:#ffffff;
-  font-size:20px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  box-shadow:0 4px 12px rgba(0,0,0,0.20);
-  cursor:pointer;
-  transition:transform 0.3s;
-}
-
-.map-compass-btn:hover{
-  background:#f1f5f9;
-}
+/* ══ 알약 필터 바 ══ */
+@media(max-width:900px){#pcPillBar{display:none!important;}}
 .mobile-pill-bar{
-  position:absolute;
-  top:64px;
-  left:0;
-  right:0;
-  z-index:3500;
-  display:flex;
-  gap:8px;
-  padding:0 12px;
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  scrollbar-width:none;
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  right:auto;z-index:3500;
+  display:flex;gap:7px;padding:0 8px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  scrollbar-width:none;flex-wrap:nowrap;white-space:nowrap;
 }
-.mobile-pill-bar::-webkit-scrollbar{ display:none; }
-
+.mobile-pill-bar::-webkit-scrollbar{display:none;}
 .mobile-pill{
-  flex-shrink:0;
-  height:34px;
-  padding:0 14px;
-  border-radius:999px;
-  border:2px solid #e2e8f0;
-  background:#ffffff;
-  font-size:13px;
-  font-weight:700;
-  cursor:pointer;
-  white-space:nowrap;
-  display:flex;
-  align-items:center;
-  gap:6px;
-  box-shadow:0 2px 8px rgba(0,0,0,0.10);
-  transition:all 0.15s;
+  flex-shrink:0;height:33px;padding:0 13px;
+  border-radius:999px;border:1.5px solid rgba(255,255,255,.85);
+  background:rgba(255,255,255,.93);
+  font-size:12px;font-weight:700;cursor:pointer;
+  white-space:nowrap;display:flex;align-items:center;gap:4px;
+  box-shadow:0 2px 8px rgba(0,0,0,.10);transition:all .15s;
+  backdrop-filter:blur(8px);
+}
+.mobile-pill.active{color:#fff;border-color:transparent;}
+
+/* ══ 나침반 버튼 ══ */
+.map-compass-btn{
+  position:absolute;bottom:72px;right:20px;z-index:1000;
+  width:44px;height:44px;border-radius:50%;border:none;
+  background:#fff;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.15);cursor:pointer;transition:transform .3s;
 }
 
-.mobile-pill.active{
-  color:#fff;
-  border-color:transparent;
+/* ══ 모바일 레이아웃 ══ */
+@media(max-width:900px){
+  .page{display:block;height:auto;min-height:100vh;}
+  .sidebar{width:100%;min-width:0;box-shadow:none;}
+  .map-wrap{display:block;position:static;width:100%;height:0;overflow:visible;}
+  #map{display:none;}
+  .mobile-map-popup .map-legend{
+    position:absolute;top:68px;right:6px;bottom:auto;z-index:3000;display:block;
+  }
 }
 
-</style>
+/* ══ 기타 ══ */
+.leaflet-control-attribution{display:none!important;}
+.sexoffender-btn{width:100%;}
+@keyframes floatChar{0%{transform:translateY(0);}50%{transform:translateY(-6px);}100%{transform:translateY(0);}}
+.char{width:80px;animation:floatChar 2.2s ease-in-out infinite;}
+.loading-dots::after{content:"";animation:dots 1.4s steps(3,end) infinite;}
+@keyframes dots{0%{content:"";}33%{content:".";}66%{content:"..";}100%{content:"...";}}</style>{% endraw %}
 </head>
 <body>
 
 <div class="page">
   <aside class="sidebar">
-<div class="brand">
 
-  <div class="brand-left">
-    <div class="brand-title" onclick="goHome()">
-      <span>장기요양 안전로드</span>
+    <!-- 브랜드 헤더 -->
+    <div class="brand">
+      <div class="brand-accent"></div>
+      <div class="brand-left">
+        <div class="brand-title" onclick="goHome()">장기요양 안전로드</div>
+        <div class="brand-sub">자료제공: 행정안전부(생활안전지도)</div>
+      </div>
       <img src="/ci" class="ci-logo">
     </div>
 
+    <div class="sidebar-scroll">
 
-    <div class="brand-sub">자료제공: 행정안전부(생활안전지도)</div>
-  </div>
+      <!-- 조회 조건 -->
+      <div class="s-card">
+        <div class="s-card-label">
+          <span>조회 조건</span>
+          <button class="btn-reset" onclick="resetFilters()">초기화</button>
+        </div>
 
-</div>    
+        <label class="form-label">시도</label>
+        <select id="province" class="form-select">
+          <option value="">전체</option>
+        </select>
 
-<div class="card">
-      <h3>조회 조건</h3>
+        <label class="form-label">시군구</label>
+        <select id="city" class="form-select">
+          <option value="">전체</option>
+        </select>
 
-      <label class="label">시도</label>
-      <select id="province" class="select">
-      <option value="">전체</option>
-      </select>
+        <label class="form-label">읍면동 <span style="font-weight:400;color:#475569;font-size:10px;">(복수선택 가능)</span></label>
+        <div class="town-multi-wrap" id="townMultiWrap">
+          <div class="town-check-item" style="color:#475569;font-size:11px;">시군구를 먼저 선택하세요</div>
+        </div>
 
-      <label class="label">시군구</label>
-      <select id="city" class="select">
-        <option value="">전체</option>
-      </select>
+        <label class="form-label">구분</label>
+        <div class="check-grid" id="categoryBox"></div>
 
-      <label class="label">읍면동 <span style="font-weight:400;color:#94a3b8;font-size:11px;">(복수선택 가능)</span></label>
-      <div class="town-multi-wrap" id="townMultiWrap">
-        <div class="town-check-item" style="color:#94a3b8;font-size:12px;">시군구를 먼저 선택하세요</div>
+        <button class="btn-main" onclick="loadData()">조회</button>
       </div>
 
-      <label class="label">구분</label>
-      <div class="check-grid" id="categoryBox"></div>
+      <!-- 빠른 찾기 -->
+      <div class="s-card">
+        <div class="s-card-label"><span>빠른 찾기</span></div>
+        <div class="btn-grid" style="margin-bottom:6px;">
+          <button class="btn-action btn-kakao" onclick="openRouteSearch()">경로 주변찾기</button>
+          <button class="btn-action btn-kakao" onclick="openAddressSearch()">주소로 찾기</button>
+          <button class="btn-action" onclick="findNearestToilet()">내 주변 화장실</button>
+          <button class="btn-action" onclick="findNearestDanger()">내 주변 위험지역</button>
+        </div>
+        <button class="btn-action sexoffender-btn" style="margin-bottom:6px;" onclick="openSexOffenderApp()">성범죄자 알림e</button>
+        <button id="apkDownloadBtn" class="btn-action btn-green" style="display:none;" onclick="downloadApk()">안전로드 앱 다운로드 (Android)</button>
+        {% raw %}<script>
+        (function(){
+          if(/Android/i.test(navigator.userAgent||"")){
+            document.getElementById("apkDownloadBtn").style.display="flex";
+          }
+        })();
+        function downloadApk(){
+          window.location.href="https://limstep.github.io/safe_map/static/safeload.apk";
+        }
+        </script>{% endraw %}
+      </div>
 
-            <div class="btn-row">
-  <button class="btn primary" onclick="loadData()">조회</button>
-  <button class="btn secondary" onclick="resetFilters()">필터 초기화</button>
-</div>
+      <!-- 방문자 수 -->
+      <div class="s-card">
+        <div class="s-card-label"><span>방문자 수</span></div>
+        <div class="visitor-row">
+          <div class="visitor-box">
+            <div class="visitor-num">{{total_visit}}</div>
+            <div class="visitor-lbl">총 방문자</div>
+          </div>
+          <div class="visitor-box">
+            <div class="visitor-num">{{today_visit}}</div>
+            <div class="visitor-lbl">오늘</div>
+          </div>
+        </div>
+        <button class="btn-action" onclick="openAdminStats()">관리자 통계</button>
+      </div>
 
-<button class="btn kakao" onclick="openRouteSearch()">
-경로 주변 위험지역 찾기
-</button>
+    </div><!-- /sidebar-scroll -->
 
-<button class="btn" onclick="openAddressSearch()" style="background:#16a34a;color:#fff;border:none;">
-주소로 근처 위험지역 찾기
-</button>
-
-<button class="btn secondary" onclick="findNearestToilet()">
-내 주변 화장실 찾기
-</button>
-
-
-<button class="btn secondary" onclick="findNearestDanger()">
-내 주변 위험지역 찾기
-</button>
-
-<button class="btn secondary sexoffender-btn" onclick="openSexOffenderApp()">
-성범죄자 알림e
-</button>
-
-</div>
-
-<div class="card">
-      <h3>방문자 수</h3>
-      <div class="summary">
-
-<div class="summary-box">
-<div class="num">{{total_visit}}</div>
-<div class="txt">총 방문자</div>
-</div>
-
-<div class="summary-box">
-<div class="num">{{today_visit}}</div>
-<div class="txt">오늘 방문자</div>
-</div>
-
-
-<button class="btn secondary admin-btn" onclick="openAdminStats()">
-관리자 통계
-</button>
-
-</div>
-</div>
-
-<div style="padding:10px 4px 6px;text-align:center;font-size:11px;color:#94a3b8;line-height:1.6;border-top:1px solid #f1f5f9;margin-top:4px;">
-  © 국민건강보험공단<br>광주전라제주지역본부 요양운영부
-</div>
+    <div class="sidebar-footer">
+      © 국민건강보험공단 광주전라제주지역본부 요양운영부
+    </div>
 
   </aside>
 
   <main class="map-wrap">
   <div id="map"></div>
+
+  <!-- 알약형 카테고리 필터 (PC+모바일 공통) -->
+  <div class="mobile-pill-bar" id="pcPillBar">
+    <button class="mobile-pill active" id="pc_pill_all"
+      style="background:#475569;border-color:#475569;color:#fff;"
+      onclick="pcPillFilter('전체')">전체</button>
+    <button class="mobile-pill" id="pc_pill_ice"
+      style="color:#06b6d4;"
+      onclick="pcPillFilter('상습결빙지역')">상습결빙지역</button>
+    <button class="mobile-pill" id="pc_pill_toilet"
+      style="color:#f59e0b;"
+      onclick="pcPillFilter('공중화장실')">공중화장실</button>
+    <button class="mobile-pill" id="pc_pill_accident"
+      style="color:#ef4444;"
+      onclick="pcPillFilter('교통사고위험지역')">교통사고위험지역</button>
+  </div>
 
   <div class="mobile-result-panel" id="mobileResultPanel">
     <div class="mobile-result-header">
@@ -1280,9 +821,7 @@ margin-top:4px;
 
   </main>
 
-  <button id="locBtn">📍</button>
-  <!-- 11번: 나침반 버튼 (PC 지도용, 모바일에서는 숨김) -->
-  <button class="map-compass-btn" id="compassBtn" title="북쪽으로 초기화" onclick="resetMapBearing()" style="display:none;">🧭</button>
+  <button id="locBtn"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg></button>
   <div class="top-badge">모바일 / PC 지원</div>
   <div class="map-legend">
   
@@ -1312,7 +851,7 @@ margin-top:4px;
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-<script>
+{% raw %}<script>
 let ALL_DATA_CACHE = null;
 
 
@@ -1415,6 +954,7 @@ navigator.geolocation.getCurrentPosition(
     userLat = pos.coords.latitude;
     userLng = pos.coords.longitude;
     console.log("사전 위치:", userLat, userLng, "정확도:", pos.coords.accuracy);
+    drawUserLocation(userLat, userLng);
 
   },
 
@@ -1650,54 +1190,53 @@ function buildPopupHtml(item){
   const addr = encodeURIComponent(item.주소);
   const tmapBtn = isMobile() ? `
   <a href="tmap://search?name=${addr}" target="_blank"
-  style="display:block;text-align:center;background:#FF6600;color:#fff;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
-  티맵 길찾기
+  style="display:flex;align-items:center;justify-content:center;height:36px;background:#4b8fe2;color:#fff;font-weight:700;border-radius:8px;text-decoration:none;font-size:13px;">
+  티맵
   </a>` : "";
   const gridCols = isMobile() ? "1fr 1fr 1fr" : "1fr 1fr";
   const sid = escapeHtml(item.순번);
   const rvId = "rv_" + sid;
+  // PC는 더 넓은 팝업, 모바일은 기본
+  const rvHeight = isMobile() ? "220px" : "280px";
+  const popupWidth = isMobile() ? 290 : 480;
   return `
-  <div class="popup-wrap">
+  <div class="popup-wrap" style="width:${popupWidth}px;">
 
   <!-- 로드뷰 컨테이너 -->
-  <div id="${rvId}" style="width:100%;height:150px;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:10px;background:#f1f5f9;overflow:hidden;position:relative;">
-    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#94a3b8;" id="${rvId}_msg">🗺 로드뷰 불러오는 중...</div>
+  <div id="${rvId}" style="width:100%;height:${rvHeight};border-radius:10px;border:1px solid #e5e7eb;margin-bottom:8px;background:#f1f5f9;overflow:hidden;position:relative;">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#94a3b8;" id="${rvId}_msg">로드뷰 불러오는 중...</div>
   </div>
 
   <div class="popup-title">${escapeHtml(item.구분)}</div>
   <div class="popup-meta">
-  시군구: ${escapeHtml(item.시군구)}<br>
-  읍면동: ${escapeHtml(item.읍면동)}<br>
   주소: ${escapeHtml(item.주소)}
   </div>
-  <div class="popup-desc">${escapeHtml(item.사고설명)}</div>
 
-  <!-- 5번: 별점 UI -->
-  <div id="rating_wrap_${sid}" style="margin-top:10px;">
-    <div style="font-size:12px;color:#64748b;margin-bottom:4px;">이 지점 평가</div>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <span id="stars_${sid}" style="font-size:22px;cursor:pointer;letter-spacing:2px;">
-        ${[1,2,3,4,5].map(n=>`<span onclick="setRating('${sid}',${n})" style="cursor:pointer" data-star="${n}">☆</span>`).join("")}
-      </span>
-      <span id="avg_${sid}" style="font-size:12px;color:#f59e0b;font-weight:700;"></span>
-    </div>
+  <!-- 별점 UI: 평가하기 버튼 -->
+  <div id="rating_wrap_${sid}" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <button onclick="openRatingModal('${sid}')" style="
+      height:30px;padding:0 12px;border:1px solid #f59e0b;border-radius:8px;
+      background:#fffbeb;font-size:12px;cursor:pointer;font-weight:700;color:#b45309;">
+      ★ 평가하기
+    </button>
+    <span id="avg_${sid}" style="font-size:12px;color:#f59e0b;font-weight:700;"></span>
   </div>
 
   <!-- 5번: 코멘트 버튼 -->
   <button onclick="openComments('${sid}')" style="
-    margin-top:8px;width:100%;height:34px;border:1px solid #e2e8f0;
+    margin-top:6px;width:100%;height:32px;border:1px solid #e2e8f0;
     border-radius:8px;background:#f8fafc;font-size:13px;cursor:pointer;font-weight:600;color:#374151;">
-    💬 코멘트 보기 / 작성
+    코멘트 보기 / 작성
   </button>
 
-  <div style="margin-top:10px;display:grid;grid-template-columns:${gridCols};gap:6px;">
+  <div style="margin-top:8px;display:grid;grid-template-columns:${gridCols};gap:6px;">
   <a href="https://map.naver.com/v5/search/${addr}" target="_blank"
-  style="display:block;text-align:center;background:#03C75A;color:#fff;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
-  네이버 길찾기
+  style="display:flex;align-items:center;justify-content:center;height:36px;background:#03C75A;color:#fff;font-weight:700;border-radius:8px;text-decoration:none;font-size:13px;">
+  네이버
   </a>
   <a href="https://map.kakao.com/link/search/${addr}" target="_blank"
-  style="display:block;text-align:center;background:#FEE500;color:#191919;font-weight:700;padding:8px;border-radius:8px;text-decoration:none;font-size:13px;">
-  카카오 길찾기
+  style="display:flex;align-items:center;justify-content:center;height:36px;background:#FEE500;color:#191919;font-weight:700;border-radius:8px;text-decoration:none;font-size:13px;">
+  카카오
   </a>
   ${tmapBtn}
   </div>
@@ -1721,6 +1260,12 @@ function initRoadview(containerId, lat, lng){
         } else {
           if(msg) msg.style.display = "none";
           roadview.setPanoId(panoId, position);
+          // 초기 시야각: 수평(pitch=0), 정면 바라보기
+          roadview.setViewpoint({
+            pan: 0,
+            tilt: 0,
+            zoom: 0
+          });
         }
       });
     }catch(e){
@@ -1868,6 +1413,11 @@ const data = ALL_DATA_CACHE;
 
   const bounds = [];
 
+  // 내 위치가 있으면 먼저 표시
+  if(userLat !== null && userLng !== null){
+    drawUserLocation(userLat, userLng);
+  }
+
   data.forEach(item=>{
 
     const icon = buildMarkerIcon(item.마커색상);
@@ -1876,7 +1426,7 @@ const data = ALL_DATA_CACHE;
     marker.itemData = item;
     const popupHtml = buildPopupHtml(item);
 
-    marker.bindPopup(popupHtml,{maxWidth:290});
+    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 520});
 
     markerGroup.addLayer(marker);
 
@@ -1953,7 +1503,7 @@ fetch("/log_search", {
     marker.itemData = item;
     const popupHtml = buildPopupHtml(item);
 
-      marker.bindPopup(popupHtml, { maxWidth: 290 });
+      marker.bindPopup(popupHtml, { maxWidth: isMobile() ? 310 : 520 });
       markerGroup.addLayer(marker);
 bounds.push([item.위도, item.경도]);
 
@@ -2058,8 +1608,18 @@ window.addEventListener("DOMContentLoaded", function(){
   createCategoryChecks();
 
   loadMeta().then(()=>{
-    document.getElementById("city").addEventListener("change", updateTowns);
-    document.getElementById("province").addEventListener("change", updateCities);
+    // 시군구 선택 시 읍면동 갱신 + sessionStorage 즉시 저장 (조회는 버튼으로)
+    document.getElementById("city").addEventListener("change", async function(){
+      await updateTowns();
+      sessionStorage.setItem("sel_city", document.getElementById("city").value);
+    });
+    // 시도 선택 시 시군구 갱신 + sessionStorage 즉시 저장
+    document.getElementById("province").addEventListener("change", async function(){
+      await updateCities();
+      sessionStorage.setItem("sel_province", document.getElementById("province").value);
+      // 시도 바뀌면 시군구 초기화
+      sessionStorage.setItem("sel_city", "");
+    });
     loadAllMarkers();
   });
 
@@ -2217,6 +1777,7 @@ function openMobileMap(){
 
     // 5번: 모바일 팝업 열릴 때 별점 + 로드뷰 로드
     window.mobileLeafletMap.on("popupopen", onPopupOpen);
+    window.mobileLeafletMap.on("popupclose", onPopupClose);
   }
 
   setTimeout(()=>{
@@ -2966,9 +2527,9 @@ async function searchPlaceSuggestions(query, inputId){
       const roadAddr = place.road_address_name || "";
       const jibunAddr = place.address_name || "";
       const addrHtml = roadAddr
-        ? `<div style="color:#374151;font-size:12px;">🛣 ${escapeHtml(roadAddr)}</div>
-           <div style="color:#94a3b8;font-size:11px;">📍 ${escapeHtml(jibunAddr)}</div>`
-        : `<div style="color:#64748b;font-size:12px;">📍 ${escapeHtml(jibunAddr)}</div>`;
+        ? `<div style="color:#1e293b;font-size:12px;font-weight:600;">${escapeHtml(roadAddr)}</div>
+           <div style="color:#94a3b8;font-size:11px;">(${escapeHtml(jibunAddr)})</div>`
+        : `<div style="color:#64748b;font-size:12px;">${escapeHtml(jibunAddr)}</div>`;
 
       item.innerHTML=`
         <div style="font-weight:700;color:#111827;">
@@ -3255,13 +2816,13 @@ if(isMobile() && window.mobileLeafletMap){
   const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
 
   showMsg(
-      `경로 주변 시설\n\n🚻 공중화장실 ${toiletCount}개\n⚠️ 상습결빙지역 ${iceCount}개\n🚗 교통사고위험지역${accidentCount}개`
+      `경로 주변 시설\n\n공중화장실 ${toiletCount}개\n상습결빙지역 ${iceCount}개\n교통사고위험지역 ${accidentCount}개`
   );
 
-  showResultList(filtered, startLat, startLng);
+  showResultList(filtered, userLat !== null ? userLat : startLat, userLng !== null ? userLng : startLng);
 
   if(isMobile()){
-  syncToMobileMap(filtered,startLat,startLng);
+  syncToMobileMap(filtered, userLat !== null ? userLat : startLat, userLng !== null ? userLng : startLng);
 }
 
 
@@ -3314,8 +2875,13 @@ async function searchAddrSuggestions(query){
     data.documents.slice(0,5).forEach(place=>{
       const d = document.createElement("div");
       d.style.cssText="padding:9px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:13px;";
-      d.innerHTML=`<div style="font-weight:700;">${escapeHtml(place.place_name||"")}</div>
-        <div style="color:#64748b;font-size:12px;">${escapeHtml(place.address_name||"")}</div>`;
+      const roadA = place.road_address_name || "";
+      const jibunA = place.address_name || "";
+      const addrLineHtml = roadA
+        ? `<div style="color:#1e293b;font-size:12px;font-weight:600;">${escapeHtml(roadA)}</div>
+           <div style="color:#94a3b8;font-size:11px;">(${escapeHtml(jibunA)})</div>`
+        : `<div style="color:#64748b;font-size:12px;">${escapeHtml(jibunA)}</div>`;
+      d.innerHTML=`<div style="font-weight:700;color:#111827;margin-bottom:2px;">${escapeHtml(place.place_name||"")}</div>${addrLineHtml}`;
       d.onclick=function(){
         const inp=document.getElementById("addrSearchInput");
         inp.value=place.place_name||"";
@@ -3464,9 +3030,54 @@ function mobilePillFilter(cat){
   if(countEl) countEl.textContent = visible;
 }
 
+// PC 알약 필터
+const PC_PILL_COLORS = {
+  "상습결빙지역": "#06b6d4",
+  "공중화장실": "#f59e0b",
+  "교통사고위험지역": "#ef4444",
+  "전체": "#475569"
+};
+let pcPillActive = "전체";
+
+function pcPillFilter(cat){
+  pcPillActive = cat;
+  ["전체","상습결빙지역","공중화장실","교통사고위험지역"].forEach(k=>{
+    const id = "pc_pill_" + (k==="전체"?"all":k==="상습결빙지역"?"ice":k==="공중화장실"?"toilet":"accident");
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(k===cat){
+      el.classList.add("active");
+      el.style.background = PC_PILL_COLORS[k];
+      el.style.borderColor = PC_PILL_COLORS[k];
+      el.style.color = "#fff";
+    } else {
+      el.classList.remove("active");
+      el.style.background = "#fff";
+      el.style.borderColor = "#e2e8f0";
+      el.style.color = PC_PILL_COLORS[k] || "#374151";
+    }
+  });
+  // PC 마커 필터링
+  markerGroup.eachLayer(function(layer){
+    if(!layer.itemData) return;
+    if(cat==="전체"){
+      if(layer._icon) layer._icon.style.display="";
+    } else {
+      if(layer._icon) layer._icon.style.display = layer.itemData.구분===cat ? "" : "none";
+    }
+  });
+  // 결과 목록 필터
+  const list = document.getElementById("mobileResultList");
+  if(!list) return;
+  list.querySelectorAll(".mobile-result-item").forEach(el=>{
+    const b = el.querySelector("b");
+    el.style.display = (cat==="전체" || (b && b.textContent===cat)) ? "" : "none";
+  });
+}
+
 // ===== 5번: 별점 + 코멘트 =====
 
-// 팝업 열릴 때 별점 + 로드뷰 자동 초기화
+// 팝업 열릴 때 별점 + 로드뷰 자동 초기화, 검색결과 패널 숨김
 function onPopupOpen(e){
   const popup = e.popup;
   const marker = popup._source;
@@ -3476,18 +3087,28 @@ function onPopupOpen(e){
   loadRating(sid);
   // 로드뷰: 약간 딜레이 후 DOM 안정되면 초기화
   setTimeout(()=> initRoadview("rv_" + sid, item.위도, item.경도), 200);
+  // 검색결과 패널 숨기기
+  const panel = document.getElementById("mobileResultPanel");
+  if(panel && panel.style.display !== "none"){
+    panel._wasVisible = true;
+    panel.style.display = "none";
+  }
+}
+
+function onPopupClose(e){
+  // 팝업 닫히면 결과 패널 복원
+  const panel = document.getElementById("mobileResultPanel");
+  if(panel && panel._wasVisible){
+    panel.style.display = "flex";
+    panel._wasVisible = false;
+  }
 }
 
 map.on("popupopen", onPopupOpen);
+map.on("popupclose", onPopupClose);
 
 // 별점 렌더 함수
 function renderStars(sid, myScore, avgScore, count){
-  const wrap = document.getElementById("stars_"+sid);
-  if(!wrap) return;
-  wrap.innerHTML = [1,2,3,4,5].map(n=>`
-    <span onclick="setRating('${sid}',${n})" data-star="${n}"
-      style="cursor:pointer;font-size:22px;color:${n<=myScore?'#f59e0b':'#cbd5e1'};">★</span>
-  `).join("");
   const avg = document.getElementById("avg_"+sid);
   if(avg && count>0) avg.textContent = `${avgScore.toFixed(1)}점 (${count}명)`;
   else if(avg) avg.textContent = "아직 평가없음";
@@ -3497,14 +3118,50 @@ async function loadRating(sid){
   try{
     const res = await fetch("/api/rating?spot_id="+encodeURIComponent(sid));
     const d = await res.json();
-    // 내가 저장한 별점은 localStorage로 간단 관리
     const myScore = parseInt(localStorage.getItem("rating_"+sid)||"0");
     renderStars(sid, myScore, d.avg||0, d.count||0);
   }catch(e){}
 }
 
-async function setRating(sid, score){
+// 별점 모달
+let _ratingModalSid = null;
+let _ratingSelected = 0;
+
+function openRatingModal(sid){
+  _ratingModalSid = sid;
+  _ratingSelected = parseInt(localStorage.getItem("rating_"+sid)||"0");
+  renderRatingStars(_ratingSelected);
+  document.getElementById("ratingModal").style.display = "flex";
+}
+
+function closeRatingModal(){
+  document.getElementById("ratingModal").style.display = "none";
+  _ratingModalSid = null;
+  _ratingSelected = 0;
+}
+
+function selectRatingStar(n){
+  _ratingSelected = n;
+  renderRatingStars(n);
+}
+
+function renderRatingStars(n){
+  const row = document.getElementById("ratingStarRow");
+  if(!row) return;
+  row.querySelectorAll("span").forEach(s=>{
+    const sn = parseInt(s.dataset.n);
+    s.textContent = sn <= n ? "★" : "☆";
+    s.style.color = sn <= n ? "#f59e0b" : "#cbd5e1";
+  });
+}
+
+async function submitRating(){
+  if(!_ratingModalSid){ closeRatingModal(); return; }
+  if(_ratingSelected < 1){ alert("별점을 선택해주세요."); return; }
+  const sid = _ratingModalSid;
+  const score = _ratingSelected;
   localStorage.setItem("rating_"+sid, score);
+  closeRatingModal();
   try{
     await fetch("/api/rating", {
       method:"POST",
@@ -3602,8 +3259,11 @@ function applyMapRotation(){
   if(mMapPane) mMapPane.style.transform = `rotate(${mapRotation}deg)`;
 }
 
-// 두 손가락 회전 제스처
+// 두 손가락 회전 제스처 (모바일 전용)
 (function setupRotateGesture(){
+  // 모바일이 아니면 등록하지 않음
+  if(!('ontouchstart' in window) && !navigator.maxTouchPoints) return;
+
   let startAngle = null;
   let startRotation = 0;
 
@@ -3655,7 +3315,53 @@ function debounce(fn, delay){
 
 }
 
-</script>
+// 관리자 페이지에서 이동 시 해당 지점 로드뷰 팝업 자동 열기
+window.addEventListener("load", function(){
+  const params = new URLSearchParams(window.location.search);
+  const gotoSpot = params.get("goto_spot");
+  const gotoLat = parseFloat(params.get("lat"));
+  const gotoLng = parseFloat(params.get("lng"));
+  if(gotoSpot && !isNaN(gotoLat) && !isNaN(gotoLng)){
+    setTimeout(async function(){
+      if(!ALL_DATA_CACHE){
+        const res = await fetch("/data");
+        const result = await res.json();
+        ALL_DATA_CACHE = result.data;
+      }
+      const found = ALL_DATA_CACHE.find(d => String(d.순번) === String(gotoSpot));
+      if(found){
+        if(isMobile()){
+          openMobileMap();
+          setTimeout(()=>{
+            if(window.mobileLeafletMap){
+              window.mobileLeafletMap.flyTo([found.위도, found.경도], 17);
+              window.mobileLeafletMap.once("moveend", function(){
+                if(window.mobileMarkerGroup){
+                  window.mobileMarkerGroup.eachLayer(function(layer){
+                    if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
+                      layer.openPopup();
+                    }
+                  });
+                }
+              });
+            }
+          }, 600);
+        } else {
+          map.flyTo([found.위도, found.경도], 17);
+          map.once("moveend", function(){
+            markerGroup.eachLayer(function(layer){
+              if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
+                layer.openPopup();
+              }
+            });
+          });
+        }
+      }
+    }, 1500);
+  }
+});
+
+</script>{% endraw %}
 
 
 
@@ -3663,41 +3369,29 @@ function debounce(fn, delay){
 
   <div class="mobile-map-header">
   <button class="mobile-map-close" onclick="goHome()">
-  🏠 홈으로
+  홈으로
   </button>
   <span style="font-size:15px;font-weight:700;">지도 보기</span>
   <div style="width:70px;"></div>
 </div>
 
   <div id="mobileMap" class="mobile-map"></div>
-  <button id="mobileLocBtn">📍</button>
-  <!-- 11번: 모바일 나침반 버튼 (GPS 버튼 왼쪽) -->
-  <button class="map-compass-btn" id="mobileCompassBtn" style="bottom:20px;right:80px;" title="북쪽으로 초기화" onclick="resetMobileMapBearing()">🧭</button>
-  <div class="map-copyright">© 국민건강보험공단 광주전라제주지역본부 요양운영부</div>
+  <button id="mobileLocBtn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg></button>
 
-  <!-- 1번: 알약형 카테고리 필터 -->
-  <div class="mobile-pill-bar" id="mobilePillBar">
+  <!-- 알약형 카테고리 필터 -->
+  <div class="mobile-pill-bar" id="mobilePillBar" style="top:70px;left:90px;right:10px;transform:none;">
     <button class="mobile-pill active" id="pill_all"
       style="background:#475569;border-color:#475569;color:#fff;"
       onclick="mobilePillFilter('전체')">전체</button>
     <button class="mobile-pill" id="pill_ice"
       style="color:#06b6d4;"
-      onclick="mobilePillFilter('상습결빙지역')">
-      <span style="width:10px;height:10px;border-radius:50%;background:#06b6d4;display:inline-block;"></span>
-      상습결빙지역
-    </button>
+      onclick="mobilePillFilter('상습결빙지역')">상습결빙지역</button>
     <button class="mobile-pill" id="pill_toilet"
       style="color:#f59e0b;"
-      onclick="mobilePillFilter('공중화장실')">
-      <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
-      공중화장실
-    </button>
+      onclick="mobilePillFilter('공중화장실')">공중화장실</button>
     <button class="mobile-pill" id="pill_accident"
       style="color:#ef4444;"
-      onclick="mobilePillFilter('교통사고위험지역')">
-      <span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
-      교통사고위험지역
-    </button>
+      onclick="mobilePillFilter('교통사고위험지역')">교통사고위험지역</button>
   </div>
 
   <div class="map-legend">
@@ -3775,65 +3469,40 @@ cursor:pointer;
 </div>
 
 <div id="routePopup" style="
-position:fixed;
-inset:0;
-background:rgba(0,0,0,.4);
-display:none;
-align-items:center;
-justify-content:center;
-z-index:6000;
-">
-
+position:fixed;inset:0;
+background:rgba(0,0,0,.5);
+display:none;align-items:center;justify-content:center;z-index:6000;
+backdrop-filter:blur(4px);">
 <div style="
-background:white;
-padding:20px;
-border-radius:14px;
-width:340px;
-">
-
-<h3 style="margin-top:0">경로 설정</h3>
-
-<input id="startInput"
-placeholder="출발지 입력 (예: 광주전라제주지역본부)"
-style="
-width:100%;
-height:40px;
-padding:0 10px;
-border:1px solid #cbd5e1;
-border-radius:8px;
-margin-bottom:10px;
-">
-<input id="destInput"
-placeholder="도착지 입력 (예: 전라남도청)"
-style="
-width:100%;
-height:40px;
-padding:0 10px;
-border:1px solid #cbd5e1;
-border-radius:8px;
-margin-bottom:12px;
-">
-
-<div id="destSuggestBox" style="
-display:none;
-width:100%;
-height:180px;
-overflow-y:auto;
-border:1px solid #e5e7eb;
-border-radius:10px;
-background:#ffffff;
-margin-bottom:12px;
-box-shadow:0 4px 14px rgba(0,0,0,0.08);
-"></div>
-
-<button type="button" class="btn primary" onclick="runRouteSearch()">
-경로 조회
-</button>
-
-<button class="btn secondary" onclick="closeRoutePopup()">
-닫기
-</button>
-
+background:#fff;border-radius:18px;width:360px;max-width:94vw;
+overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+  <div style="background:#0f172a;padding:18px 20px 14px;">
+    <div style="font-size:15px;font-weight:900;color:#f8fafc;margin-bottom:2px;">경로 설정</div>
+    <div style="font-size:12px;color:#64748b;">출발지와 도착지를 입력하세요</div>
+  </div>
+  <div style="padding:18px 20px;">
+    <input id="startInput"
+      placeholder="출발지 (예: 광주전라제주지역본부)"
+      style="width:100%;height:42px;padding:0 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:8px;outline:none;transition:border-color .15s;"
+      onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+    <input id="destInput"
+      placeholder="도착지 (예: 전라남도청)"
+      style="width:100%;height:42px;padding:0 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:10px;outline:none;transition:border-color .15s;"
+      onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+    <div id="destSuggestBox" style="
+      display:none;width:100%;max-height:180px;overflow-y:auto;
+      border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;
+      margin-bottom:12px;box-shadow:0 4px 14px rgba(0,0,0,.08);"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button onclick="closeRoutePopup()" style="
+        height:42px;border:1.5px solid #e2e8f0;border-radius:10px;
+        background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
+      <button type="button" onclick="runRouteSearch()" style="
+        height:42px;border:none;border-radius:10px;
+        background:linear-gradient(135deg,#3b82f6,#6366f1);
+        color:#fff;font-weight:800;font-size:14px;cursor:pointer;">조회</button>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -3923,20 +3592,33 @@ padding:20px;
 
 <!-- 9번: 주소로 근처 위험지역 검색 팝업 -->
 <div id="addrSearchPopup" style="
-position:fixed;inset:0;background:rgba(0,0,0,.4);
-display:none;align-items:center;justify-content:center;z-index:6000;">
-<div style="background:white;padding:20px;border-radius:14px;width:340px;max-width:94vw;">
-  <h3 style="margin-top:0;">📌 주소로 근처 위험지역 찾기</h3>
-  <p style="font-size:13px;color:#64748b;margin-top:-8px;">입력한 주소 기준 5km 이내 위험지역을 가까운 순으로 표시합니다.</p>
-  <input id="addrSearchInput"
-    placeholder="주소 입력 (예: 광주시 서구 치평동)"
-    style="width:100%;height:40px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:8px;font-size:14px;">
-  <div id="addrSuggestBox" style="
-    display:none;width:100%;max-height:160px;overflow-y:auto;
-    border:1px solid #e5e7eb;border-radius:10px;background:#fff;
-    margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,0.08);"></div>
-  <button type="button" class="btn primary" onclick="runAddressSearch()">조회</button>
-  <button class="btn secondary" onclick="closeAddressSearch()" style="margin-top:6px;">닫기</button>
+position:fixed;inset:0;background:rgba(0,0,0,.5);
+display:none;align-items:center;justify-content:center;z-index:6000;
+backdrop-filter:blur(4px);">
+<div style="background:#fff;border-radius:18px;width:360px;max-width:94vw;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+  <div style="background:#0f172a;padding:18px 20px 14px;">
+    <div style="font-size:15px;font-weight:900;color:#f8fafc;margin-bottom:2px;">주소로 찾기</div>
+    <div style="font-size:12px;color:#64748b;">입력한 주소 5km 이내 위험지역을 표시합니다</div>
+  </div>
+  <div style="padding:18px 20px;">
+    <input id="addrSearchInput"
+      placeholder="주소 입력 (예: 광주시 서구 치평동)"
+      style="width:100%;height:42px;padding:0 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:8px;outline:none;transition:border-color .15s;"
+      onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+    <div id="addrSuggestBox" style="
+      display:none;width:100%;max-height:160px;overflow-y:auto;
+      border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;
+      margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,.08);"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button onclick="closeAddressSearch()" style="
+        height:42px;border:1.5px solid #e2e8f0;border-radius:10px;
+        background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
+      <button type="button" onclick="runAddressSearch()" style="
+        height:42px;border:none;border-radius:10px;
+        background:linear-gradient(135deg,#3b82f6,#6366f1);
+        color:#fff;font-weight:800;font-size:14px;cursor:pointer;">조회</button>
+    </div>
+  </div>
 </div>
 </div>
 
@@ -3954,6 +3636,27 @@ display:none;align-items:center;justify-content:center;z-index:7000;">
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
     <button onclick="closeComments()" style="height:42px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font-weight:700;cursor:pointer;">닫기</button>
     <button onclick="submitComment()" style="height:42px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">등록</button>
+  </div>
+</div>
+</div>
+
+<!-- 별점 평가 모달 -->
+<div id="ratingModal" style="
+position:fixed;inset:0;background:rgba(0,0,0,.45);
+display:none;align-items:center;justify-content:center;z-index:7500;">
+<div style="background:white;border-radius:18px;padding:24px 22px;width:320px;max-width:94vw;text-align:center;">
+  <div style="font-size:17px;font-weight:900;margin-bottom:6px;">이 지점 평가</div>
+  <div style="font-size:13px;color:#64748b;margin-bottom:16px;">별점을 선택하고 등록을 눌러주세요.</div>
+  <div id="ratingStarRow" style="font-size:36px;letter-spacing:4px;margin-bottom:18px;cursor:pointer;">
+    <span onclick="selectRatingStar(1)" data-n="1">☆</span>
+    <span onclick="selectRatingStar(2)" data-n="2">☆</span>
+    <span onclick="selectRatingStar(3)" data-n="3">☆</span>
+    <span onclick="selectRatingStar(4)" data-n="4">☆</span>
+    <span onclick="selectRatingStar(5)" data-n="5">☆</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+    <button onclick="closeRatingModal()" style="height:42px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font-weight:700;cursor:pointer;">취소</button>
+    <button onclick="submitRating()" style="height:42px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">등록</button>
   </div>
 </div>
 </div>
@@ -4043,17 +3746,19 @@ def post_rating():
     score = int(data.get("score", 0))
     if not spot_id or score < 1 or score > 5 or not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"ok": False})
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     try:
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json",
-            "Prefer": "return=representation"
+            "Prefer": "resolution=merge-duplicates,return=representation"
         }
+        # upsert: spot_id + ip 조합으로 중복 방지 (테이블에 unique(spot_id, ip) 필요)
         requests.post(
             f"{SUPABASE_URL}/rest/v1/spot_ratings",
             headers=headers,
-            json={"spot_id": spot_id, "score": score}
+            json={"spot_id": spot_id, "score": score, "ip": ip}
         )
         return jsonify({"ok": True})
     except Exception as e:
@@ -4108,6 +3813,20 @@ def post_comment():
         return jsonify({"ok": False})
 
 
+@app.route("/api/spot_location")
+def spot_location():
+    spot_id = request.args.get("spot_id", "")
+    try:
+        df = load_df()
+        row = df[df["순번"].astype(str) == str(spot_id)]
+        if row.empty:
+            return jsonify({"lat": None, "lng": None})
+        r = row.iloc[0]
+        return jsonify({"lat": float(r["위도"]), "lng": float(r["경도"])})
+    except Exception as e:
+        return jsonify({"lat": None, "lng": None})
+
+
 # ===== 관리자: 코멘트 전체 조회 =====
 @app.route("/api/admin/comments", methods=["GET"])
 def admin_get_comments():
@@ -4144,6 +3863,49 @@ def admin_delete_comment(comment_id):
         }
         r = requests.delete(
             f"{SUPABASE_URL}/rest/v1/spot_comments?id=eq.{comment_id}",
+            headers=headers
+        )
+        return jsonify({"ok": r.status_code < 300})
+    except Exception as e:
+        return jsonify({"ok": False})
+
+
+# ===== 관리자: 별점 전체 조회 =====
+@app.route("/api/admin/ratings", methods=["GET"])
+def admin_get_ratings():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"ratings": []})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/spot_ratings?order=created_at.desc&limit=1000",
+            headers=headers
+        )
+        rows = r.json()
+        if not isinstance(rows, list):
+            return jsonify({"ratings": []})
+        return jsonify({"ratings": rows})
+    except Exception as e:
+        return jsonify({"ratings": []})
+
+
+# ===== 관리자: 별점 삭제 =====
+@app.route("/api/admin/ratings/<int:rating_id>", methods=["DELETE"])
+def admin_delete_rating(rating_id):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"ok": False})
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/spot_ratings?id=eq.{rating_id}",
             headers=headers
         )
         return jsonify({"ok": r.status_code < 300})
@@ -4281,6 +4043,16 @@ def stats():
           background:white;
           margin-bottom:30px;
         }
+        .table-wrap{
+          max-height:400px;
+          overflow-y:auto;
+          margin-bottom:30px;
+          border:1px solid #ddd;
+          border-radius:6px;
+        }
+        .table-wrap table{
+          margin-bottom:0;
+        }
         th,td{
           border:1px solid #ddd;
           padding:8px;
@@ -4307,6 +4079,16 @@ def stats():
           border-radius:6px;
           cursor:pointer;
           font-size:13px;
+          margin-right:4px;
+        }
+        .btn-goto{
+          padding:4px 10px;
+          background:#2563eb;
+          color:white;
+          border:none;
+          border-radius:6px;
+          cursor:pointer;
+          font-size:13px;
         }
         pre{
           white-space:pre-wrap;
@@ -4325,13 +4107,16 @@ def stats():
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
         <h3>날짜별·지역별 조회 수</h3>
-        {{ region_table|safe }}
+        <div class="table-wrap">{{ region_table|safe }}</div>
 
         <h3>날짜별·위험지역 체크 수</h3>
-        {{ category_table|safe }}
+        <div class="table-wrap">{{ category_table|safe }}</div>
 
         <h3>💬 코멘트 관리</h3>
         <div id="commentAdminArea">불러오는 중...</div>
+
+        <h3 style="margin-top:32px;">⭐ 별점 관리</h3>
+        <div id="ratingAdminArea">불러오는 중...</div>
 
         <script>
         async function loadAdminComments(){
@@ -4342,17 +4127,20 @@ def stats():
             area.innerHTML='<p style="color:#94a3b8;">등록된 코멘트가 없습니다.</p>';
             return;
           }
-          let html = '<table><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제</th></tr></thead><tbody>';
+          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
           d.comments.forEach(c=>{
             html += `<tr>
               <td>${c.id}</td>
               <td>${c.spot_id}</td>
               <td style="max-width:300px;word-break:break-all;">${c.content}</td>
               <td>${c.created_at ? c.created_at.slice(0,16).replace('T',' ') : ''}</td>
-              <td><button class="btn-del" onclick="deleteComment(${c.id}, this)">삭제</button></td>
+              <td style="white-space:nowrap;">
+                <button class="btn-del" onclick="deleteComment(${c.id}, this)">삭제</button>
+                <button class="btn-goto" onclick="gotoSpot('${c.spot_id}')">이동</button>
+              </td>
             </tr>`;
           });
-          html += '</tbody></table>';
+          html += '</tbody></table></div>';
           area.innerHTML = html;
         }
 
@@ -4371,7 +4159,64 @@ def stats():
           }
         }
 
+        async function loadAdminRatings(){
+          const res = await fetch('/api/admin/ratings');
+          const d = await res.json();
+          const area = document.getElementById('ratingAdminArea');
+          if(!d.ratings || d.ratings.length===0){
+            area.innerHTML='<p style="color:#94a3b8;">등록된 별점이 없습니다.</p>';
+            return;
+          }
+          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>IP</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
+          d.ratings.forEach(r=>{
+            const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
+            html += `<tr>
+              <td>${r.id}</td>
+              <td>${r.spot_id}</td>
+              <td style="color:#f59e0b;font-weight:700;letter-spacing:1px;">${stars} (${r.score}점)</td>
+              <td style="font-size:12px;color:#94a3b8;">${r.ip||'-'}</td>
+              <td>${r.created_at ? r.created_at.slice(0,16).replace('T',' ') : ''}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn-del" onclick="deleteRating(${r.id}, this)">삭제</button>
+                <button class="btn-goto" onclick="gotoSpot('${r.spot_id}')">이동</button>
+              </td>
+            </tr>`;
+          });
+          html += '</tbody></table></div>';
+          area.innerHTML = html;
+        }
+
+        async function deleteRating(id, btn){
+          if(!confirm('이 별점을 삭제하시겠습니까?')) return;
+          btn.disabled = true;
+          btn.textContent = '삭제중...';
+          const res = await fetch('/api/admin/ratings/' + id, {method:'DELETE'});
+          const d = await res.json();
+          if(d.ok){
+            btn.closest('tr').remove();
+          } else {
+            btn.disabled = false;
+            btn.textContent = '삭제';
+            alert('삭제 실패');
+          }
+        }
+
+        async function gotoSpot(spotId){
+          try{
+            const res = await fetch('/api/spot_location?spot_id=' + encodeURIComponent(spotId));
+            const d = await res.json();
+            if(d.lat && d.lng){
+              window.open('/?goto_spot=' + encodeURIComponent(spotId) + '&lat=' + d.lat + '&lng=' + d.lng, '_blank');
+            } else {
+              alert('해당 지점의 좌표를 찾을 수 없습니다. (지점번호: ' + spotId + ')');
+            }
+          }catch(e){
+            alert('이동 오류: ' + e.message);
+          }
+        }
+
         loadAdminComments();
+        loadAdminRatings();
         </script>
 
         </body>
