@@ -688,10 +688,10 @@ html,body{
 }
 .mobile-pill-bar::-webkit-scrollbar{display:none;}
 .mobile-pill{
-  flex-shrink:0;height:33px;padding:0 13px;
+  flex-shrink:0;height:28px;padding:0 10px;
   border-radius:999px;border:1.5px solid rgba(255,255,255,.85);
   background:rgba(255,255,255,.93);
-  font-size:12px;font-weight:700;cursor:pointer;
+  font-size:11px;font-weight:700;cursor:pointer;
   white-space:nowrap;display:flex;align-items:center;gap:4px;
   box-shadow:0 2px 8px rgba(0,0,0,.10);transition:all .15s;
   backdrop-filter:blur(8px);
@@ -713,7 +713,7 @@ html,body{
   .map-wrap{display:block;position:static;width:100%;height:0;overflow:visible;}
   #map{display:none;}
   .mobile-map-popup .map-legend{
-    position:absolute;top:68px;right:6px;bottom:auto;z-index:3000;display:block;
+    display:none!important;
   }
 }
 
@@ -3425,7 +3425,7 @@ window.addEventListener("load", function(){
   <button id="mobileLocBtn"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg></button>
 
   <!-- 알약형 카테고리 필터 -->
-  <div class="mobile-pill-bar" id="mobilePillBar" style="top:70px;left:90px;right:10px;transform:none;">
+  <div class="mobile-pill-bar" id="mobilePillBar" style="top:62px;left:8px;right:8px;transform:none;justify-content:flex-start;gap:5px;">
     <button class="mobile-pill active" id="pill_all"
       style="background:#475569;border-color:#475569;color:#fff;"
       onclick="mobilePillFilter('전체')">전체</button>
