@@ -719,6 +719,16 @@ html,body{
 
 /* ══ 기타 ══ */
 .leaflet-control-attribution{display:none!important;}
+
+/* ══ 모바일 지도 줌 컨트롤: 알약 메뉴 아래로 이동 ══ */
+@media(max-width:900px){
+  #mobileMapPopup .leaflet-top.leaflet-left{
+    top:112px !important;
+  }
+  #mobileMapPopup .leaflet-control-zoom{
+    margin-top:0 !important;
+  }
+}
 .sexoffender-btn{width:100%;}
 @keyframes floatChar{0%{transform:translateY(0);}50%{transform:translateY(-6px);}100%{transform:translateY(0);}}
 .char{width:80px;animation:floatChar 2.2s ease-in-out infinite;}
@@ -1783,7 +1793,10 @@ function openMobileMap(){
 
     
 
-    window.mobileLeafletMap = L.map(mapDiv).setView([34.85, 126.90], 9);
+    window.mobileLeafletMap = L.map(mapDiv, {zoomControl: false}).setView([34.85, 126.90], 9);
+
+    // 줌 컨트롤을 알약 메뉴 아래(왼쪽)에 배치
+    L.control.zoom({position: 'topleft'}).addTo(window.mobileLeafletMap);
 
     L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -3112,13 +3125,19 @@ function pcPillFilter(cat){
       if(layer._icon) layer._icon.style.display = layer.itemData.구분===cat ? "" : "none";
     }
   });
-  // 결과 목록 필터
+  // 결과 목록 필터 + 건수 업데이트
   const list = document.getElementById("mobileResultList");
   if(!list) return;
-  list.querySelectorAll(".mobile-result-item").forEach(el=>{
+  const items = list.querySelectorAll(".mobile-result-item");
+  items.forEach(el=>{
     const b = el.querySelector("b");
     el.style.display = (cat==="전체" || (b && b.textContent===cat)) ? "" : "none";
   });
+  const visible = cat==="전체"
+    ? items.length
+    : [...items].filter(el => el.style.display !== "none").length;
+  const countEl = document.getElementById("mobileResultCount");
+  if(countEl) countEl.textContent = visible;
 }
 
 // ===== 5번: 별점 + 코멘트 =====
@@ -3138,6 +3157,19 @@ function onPopupOpen(e){
   if(panel && panel.style.display !== "none"){
     panel._wasVisible = true;
     panel.style.display = "none";
+  }
+  // 모바일: 팝업이 화면 중앙에 오도록 지도 pan
+  if(isMobile()){
+    setTimeout(()=>{
+      const theMap = window.mobileLeafletMap || map;
+      if(theMap && popup._latlng){
+        // 팝업 높이만큼 위로 오프셋해서 중앙에 맞춤
+        const popupHeight = 360; // 팝업 대략 높이(px)
+        const containerHeight = theMap.getSize().y;
+        const offset = (containerHeight / 2) - (popupHeight / 2) - 30;
+        theMap.panBy([0, -Math.max(offset, 0)], {animate:true, duration:0.3});
+      }
+    }, 150);
   }
 }
 
@@ -3206,17 +3238,22 @@ async function submitRating(){
   if(_ratingSelected < 1){ alert("별점을 선택해주세요."); return; }
   const sid = _ratingModalSid;
   const score = _ratingSelected;
-  localStorage.setItem("rating_"+sid, score);
   closeRatingModal();
   try{
-    await fetch("/api/rating", {
+    const res = await fetch("/api/rating", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({spot_id: sid, score: score})
     });
-    loadRating(sid);
+    const d = await res.json();
+    if(d.ok){
+      localStorage.setItem("rating_"+sid, score);
+      await loadRating(sid);
+    } else {
+      alert("별점 저장에 실패했습니다. 잠시 후 다시 시도해주세요.");
+    }
   }catch(e){
-    renderStars(sid, score, score, 1);
+    alert("네트워크 오류로 별점 저장에 실패했습니다.");
   }
 }
 
@@ -3368,42 +3405,65 @@ window.addEventListener("load", function(){
   const gotoLat = parseFloat(params.get("lat"));
   const gotoLng = parseFloat(params.get("lng"));
   if(gotoSpot && !isNaN(gotoLat) && !isNaN(gotoLng)){
-    setTimeout(async function(){
+    // 데이터 로드 완료 후 이동하는 함수
+    async function doGotoSpot(){
       if(!ALL_DATA_CACHE){
         const res = await fetch("/data");
         const result = await res.json();
         ALL_DATA_CACHE = result.data;
       }
       const found = ALL_DATA_CACHE.find(d => String(d.순번) === String(gotoSpot));
-      if(found){
-        if(isMobile()){
-          openMobileMap();
+      if(!found){
+        alert("해당 지점을 데이터에서 찾을 수 없습니다. (지점번호: " + gotoSpot + ")");
+        return;
+      }
+      const targetLat = found.위도;
+      const targetLng = found.경도;
+
+      function openMarkerPopup(mGroup){
+        mGroup.eachLayer(function(layer){
+          if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
+            layer.openPopup();
+          }
+        });
+      }
+
+      if(isMobile()){
+        openMobileMap();
+        // 모바일 지도에 전체 마커가 없으면 먼저 로드
+        const needsLoad = !window.mobileMarkerGroup ||
+          window.mobileMarkerGroup.getLayers().length === 0;
+        async function doMobileGoto(){
+          if(needsLoad){
+            // 전체 데이터를 모바일 마커 그룹에 로드
+            ALL_DATA_CACHE.forEach(item=>{
+              const icon = buildMarkerIcon(item.마커색상);
+              const marker = L.marker([item.위도, item.경도], {icon});
+              marker.itemData = item;
+              marker.bindPopup(buildPopupHtml(item), {maxWidth:290});
+              window.mobileMarkerGroup.addLayer(marker);
+            });
+          }
           setTimeout(()=>{
             if(window.mobileLeafletMap){
-              window.mobileLeafletMap.flyTo([found.위도, found.경도], 17);
+              window.mobileLeafletMap.flyTo([targetLat, targetLng], 17);
               window.mobileLeafletMap.once("moveend", function(){
-                if(window.mobileMarkerGroup){
-                  window.mobileMarkerGroup.eachLayer(function(layer){
-                    if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
-                      layer.openPopup();
-                    }
-                  });
-                }
+                if(window.mobileMarkerGroup) openMarkerPopup(window.mobileMarkerGroup);
               });
             }
-          }, 600);
-        } else {
-          map.flyTo([found.위도, found.경도], 17);
-          map.once("moveend", function(){
-            markerGroup.eachLayer(function(layer){
-              if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
-                layer.openPopup();
-              }
-            });
-          });
+          }, 400);
         }
+        setTimeout(doMobileGoto, 600);
+      } else {
+        map.flyTo([targetLat, targetLng], 17);
+        map.once("moveend", function(){
+          openMarkerPopup(markerGroup);
+        });
       }
-    }, 1500);
+    }
+
+    // loadAllMarkers 완료 후 실행되도록 충분히 기다림
+    setTimeout(doGotoSpot, 2000);
   }
 });
 
@@ -3693,12 +3753,12 @@ display:none;align-items:center;justify-content:center;z-index:7500;">
 <div style="background:white;border-radius:18px;padding:24px 22px;width:320px;max-width:94vw;text-align:center;">
   <div style="font-size:17px;font-weight:900;margin-bottom:6px;">이 지점 평가</div>
   <div style="font-size:13px;color:#64748b;margin-bottom:16px;">별점을 선택하고 등록을 눌러주세요.</div>
-  <div id="ratingStarRow" style="font-size:36px;letter-spacing:4px;margin-bottom:18px;cursor:pointer;">
-    <span onclick="selectRatingStar(1)" data-n="1">☆</span>
-    <span onclick="selectRatingStar(2)" data-n="2">☆</span>
-    <span onclick="selectRatingStar(3)" data-n="3">☆</span>
-    <span onclick="selectRatingStar(4)" data-n="4">☆</span>
-    <span onclick="selectRatingStar(5)" data-n="5">☆</span>
+  <div id="ratingStarRow" style="font-size:28px;letter-spacing:2px;margin-bottom:18px;cursor:pointer;display:flex;justify-content:center;gap:2px;flex-wrap:nowrap;white-space:nowrap;">
+    <span onclick="selectRatingStar(1)" data-n="1" style="display:inline-block;padding:2px;">☆</span>
+    <span onclick="selectRatingStar(2)" data-n="2" style="display:inline-block;padding:2px;">☆</span>
+    <span onclick="selectRatingStar(3)" data-n="3" style="display:inline-block;padding:2px;">☆</span>
+    <span onclick="selectRatingStar(4)" data-n="4" style="display:inline-block;padding:2px;">☆</span>
+    <span onclick="selectRatingStar(5)" data-n="5" style="display:inline-block;padding:2px;">☆</span>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
     <button onclick="closeRatingModal()" style="height:42px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font-weight:700;cursor:pointer;">취소</button>
@@ -3805,14 +3865,16 @@ def post_rating():
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=representation"
+            "Prefer": "return=representation"
         }
-        # upsert: spot_id + ip 조합으로 중복 방지 (테이블에 unique(spot_id, ip) 필요)
-        requests.post(
+        r = requests.post(
             f"{SUPABASE_URL}/rest/v1/spot_ratings",
             headers=headers,
-            json={"spot_id": spot_id, "score": score, "ip": ip}
+            json={"spot_id": spot_id, "score": score}
         )
+        if r.status_code >= 400:
+            print("별점 저장 실패:", r.status_code, r.text)
+            return jsonify({"ok": False, "error": r.text})
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False})
@@ -4083,8 +4145,10 @@ def stats():
         <html lang="ko">
         <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
         <title>조회 통계</title>
         <style>
+        *{ touch-action: pan-x pan-y pinch-zoom; }
         body{
           font-family:Malgun Gothic, sans-serif;
           padding:24px;
