@@ -780,7 +780,7 @@ html,body{
           }
         })();
         function downloadApk(){
-          window.location.href="https://limstep.github.io/safe_map/static/safeload.apk";
+          window.location.href="https://raw.githubusercontent.com/limstep/longtermcare0240-web/main/risk/static/safeload.apk";
         }
         </script>{% endraw %}
       </div>
@@ -2545,13 +2545,13 @@ const jibunAddr = place.address_name || "";
 
 const addrLineHtml = roadAddr
   ? `<div style="margin-top:3px;color:#64748b;font-size:11px;font-weight:600;">
-       도로명 ${escapeHtml(roadAddr)}
+       ${escapeHtml(roadAddr)}
      </div>
      <div style="margin-top:1px;color:#94a3b8;font-size:10.5px;">
-       지번 ${escapeHtml(jibunAddr)}
+       ${escapeHtml(jibunAddr)}
      </div>`
   : `<div style="margin-top:3px;color:#64748b;font-size:11px;">
-       지번 ${escapeHtml(jibunAddr)}
+       ${escapeHtml(jibunAddr)}
      </div>`;
 
 item.innerHTML = `
@@ -2904,13 +2904,13 @@ const jibunA = place.address_name || "";
 
 const addrLineHtml = roadA
   ? `<div style="margin-top:3px;color:#64748b;font-size:11px;font-weight:600;">
-       도로명 ${escapeHtml(roadA)}
+       ${escapeHtml(roadA)}
      </div>
      <div style="margin-top:1px;color:#94a3b8;font-size:10.5px;">
-       지번 ${escapeHtml(jibunA)}
+       ${escapeHtml(jibunA)}
      </div>`
   : `<div style="margin-top:3px;color:#64748b;font-size:11px;">
-       지번 ${escapeHtml(jibunA)}
+       ${escapeHtml(jibunA)}
      </div>`;
 
 d.innerHTML = `
