@@ -2489,7 +2489,20 @@ err=>{
 let loadingStartTime = 0;
 
 function openRouteSearch(){
+
   document.getElementById("routePopup").style.display="flex";
+
+  setTimeout(function(){
+
+    const input = document.getElementById("startInput");
+
+    if(input){
+      input.focus();
+      input.click();
+    }
+
+  }, 100);
+
 }
 
 function closeRoutePopup(){
