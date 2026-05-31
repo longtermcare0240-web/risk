@@ -2172,8 +2172,7 @@ function closeMsg(){
 
 function showMobileResults(items, userLat, userLng){
 
-  history.pushState({mobileResult:true}, "");
-
+  
 
 
   const panel = document.getElementById("mobileResultPanel");
@@ -3632,12 +3631,6 @@ function openMobileMap(){
 
 
 
-  if(!history.state || !history.state.mobileMap){
-
-    history.pushState({mobileMap:true}, "");
-
-  }
-
 
 
   if(!isMobile()) return;
@@ -3824,14 +3817,6 @@ window.safeBack = function(){
   return false;
 
 };
-
-
-
-window.addEventListener("popstate", function(e){
-
-  window.safeBack();
-
-});
 
 
 
