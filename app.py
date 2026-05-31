@@ -2906,7 +2906,7 @@ async function loadAllMarkers(){
 
   if(!ALL_DATA_CACHE){
 
-  const res = await fetch("/data");
+  const res = await fetch("/data/all");
 
   const result = await res.json();
 
@@ -4126,7 +4126,7 @@ async function runNearestSearch(lat,lng,targetType){
 
   if(!ALL_DATA_CACHE){
 
-  const res = await fetch("/data");
+  const res = await fetch("/data/all");
 
   const result = await res.json();
 
@@ -4590,7 +4590,7 @@ async function runRadius(lat,lng,km){
 
   if(!ALL_DATA_CACHE){
 
-  const res = await fetch("/data");
+  const res = await fetch("/data/all");
 
   const result = await res.json();
 
@@ -5674,7 +5674,7 @@ if(road){
 
  if(!ALL_DATA_CACHE){
 
-  const res = await fetch("/data");
+  const res = await fetch("/data/all");
 
   const result = await res.json();
 
@@ -6048,7 +6048,7 @@ async function runAddressSearch(){
 
   if(!ALL_DATA_CACHE){
 
-    const res = await fetch("/data");
+    const res = await fetch("/data/all");
 
     const result = await res.json();
 
@@ -9285,6 +9285,32 @@ def data():
     return jsonify({
 
         "total": total_count,
+
+        "too_many": False,
+
+        "data": records
+
+    })
+
+
+
+@app.route("/data/all")
+
+def data_all():
+
+
+
+    df = load_df()
+
+
+
+    records = df.apply(row_to_dict, axis=1).tolist()
+
+
+
+    return jsonify({
+
+        "total": len(records),
 
         "too_many": False,
 
