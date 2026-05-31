@@ -3741,8 +3741,6 @@ function closeMobileMap(){
 window.safeBack = function(){
 
   const mobileMap = document.getElementById("mobileMapPopup");
-  const mobileMapDisplay = mobileMap ? window.getComputedStyle(mobileMap).display : "null";
-  alert("safeBack called. mobileMap display: " + mobileMapDisplay);
 
   const result = document.getElementById("mobileResultPanel");
 
@@ -3770,7 +3768,7 @@ window.safeBack = function(){
 
     msgModal.style.display = "none";
 
-    return true;
+    return "handled";
 
   }
 
@@ -3780,7 +3778,7 @@ window.safeBack = function(){
 
     routePopup.style.display = "none";
 
-    return true;
+    return "handled";
 
   }
 
@@ -3790,7 +3788,7 @@ window.safeBack = function(){
 
     addrPopup.style.display = "none";
 
-    return true;
+    return "handled";
 
   }
 
@@ -3802,7 +3800,7 @@ window.safeBack = function(){
 
     if(result) result.style.display = "none";
 
-    return true;
+    return "handled";
 
   }
 
