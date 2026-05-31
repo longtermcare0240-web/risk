@@ -5137,7 +5137,15 @@ function openRouteSearch(){
 
     document.getElementById("destInput").value = "";
 
-    setTimeout(function(){ document.getElementById("startInput").focus(); }, 300);
+    // 키보드 올렸다 내려서 IME 활성화
+    var inp = document.getElementById("startInput");
+    inp.focus();
+    setTimeout(function(){
+      inp.blur();
+      setTimeout(function(){
+        inp.focus();
+      }, 300);
+    }, 100);
 
   }, 200);
 
