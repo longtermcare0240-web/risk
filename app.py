@@ -2256,7 +2256,7 @@ function showMobileResults(items, userLat, userLng){
     window.mobileLeafletMap.once("moveend", function(){
 
       // 팝업이 화면 중앙에 오도록 지도 오른쪽으로 이동
-      window.mobileLeafletMap.panBy([150, -100], {animate: false});
+      window.mobileLeafletMap.panBy([150, -200], {animate: false});
 
       if(window.mobileMarkerGroup){
 
@@ -4557,7 +4557,7 @@ function showResultList(items, userLat, userLng){
 
   map.once("moveend", function(){
 
-
+    map.panBy([0, -150], {animate: false});
 
     markerGroup.eachLayer(function(layer){
 
@@ -4604,7 +4604,7 @@ function showResultList(items, userLat, userLng){
     window.mobileLeafletMap.once("moveend", function(){
 
       // 팝업이 화면 중앙에 오도록 지도 오른쪽으로 이동
-      window.mobileLeafletMap.panBy([150, -100], {animate: false});
+      window.mobileLeafletMap.panBy([150, -200], {animate: false});
 
       if(window.mobileMarkerGroup){
 
