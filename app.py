@@ -1302,7 +1302,7 @@ html,body{
 
 .mobile-map{flex:1;}
 
-@media(min-width:901px){.mobile-map-popup{display:none;}}
+
 
 
 
