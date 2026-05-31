@@ -3060,6 +3060,18 @@ map.once("moveend", () => {
 
 
 
+    // 5000개 초과 시 서버 부하 방지 팝업
+    if(result.too_many){
+      setLoading(false);
+      showMsg(`🚨 검색 결과가 너무 많습니다 (${total.toLocaleString()}건)
+
+시도 → 시군구 → 읍면동 순서로 범위를 좁히거나,
+위험지역 구분을 선택해 상세 검색해 주세요.`);
+      return;
+    }
+
+
+
 fetch("/log_search", {
 
   method:"POST",
@@ -9252,6 +9264,22 @@ def data():
 
 
 
+    # 5000개 초과 시 서버 부하 방지: 데이터 전송 없이 경고 반환
+
+    if total_count > 5000:
+
+        return jsonify({
+
+            "total": total_count,
+
+            "too_many": True,
+
+            "data": []
+
+        })
+
+
+
     records = df.apply(row_to_dict, axis=1).tolist()
 
 
@@ -9259,6 +9287,8 @@ def data():
     return jsonify({
 
         "total": total_count,
+
+        "too_many": False,
 
         "data": records
 
