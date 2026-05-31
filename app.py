@@ -3491,7 +3491,7 @@ function openAdminStats(){
 
   setTimeout(()=>{
 
-    input.focus();
+    activateIme("adminPwInput");
 
   },100);
 
@@ -5123,6 +5123,16 @@ let loadingStartTime = 0;
 
 
 
+
+function activateIme(inputId){
+  var inp = document.getElementById(inputId);
+  if(!inp) return;
+  inp.focus();
+  setTimeout(function(){
+    inp.blur();
+    setTimeout(function(){ inp.focus(); }, 50);
+  }, 30);
+}
 function openRouteSearch(){
 
   var popup = document.getElementById("routePopup");
@@ -5137,15 +5147,7 @@ function openRouteSearch(){
 
     document.getElementById("destInput").value = "";
 
-    // 키보드 올렸다 내려서 IME 활성화
-    var inp = document.getElementById("startInput");
-    inp.focus();
-    setTimeout(function(){
-      inp.blur();
-      setTimeout(function(){
-        inp.focus();
-      }, 300);
-    }, 100);
+    activateIme("startInput");
 
   }, 200);
 
@@ -5948,7 +5950,7 @@ function openAddressSearch(){
 
   document.getElementById("addrSuggestBox").innerHTML="";
 
-  setTimeout(()=>document.getElementById("addrSearchInput").focus(),100);
+  setTimeout(()=>activateIme("addrSearchInput"),100);
 
 }
 
