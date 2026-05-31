@@ -4819,7 +4819,7 @@ drawUserLocation(lat,lng);
 
 
 
-if(window.mobileLeafletMap){
+if(isMobile() && window.mobileLeafletMap){
 
   window.mobileLeafletMap.flyTo(
 
@@ -5003,7 +5003,7 @@ console.log("모바일 위치 버튼:", lat, lng, "정확도:", pos.coords.accur
 
 
 
-if(window.mobileLeafletMap){
+if(isMobile() && window.mobileLeafletMap){
 
 
 
@@ -5117,49 +5117,14 @@ let loadingStartTime = 0;
 
 function openRouteSearch(){
 
-  const popup = document.getElementById("routePopup");
-  const startInput = document.getElementById("startInput");
-  const destInput = document.getElementById("destInput");
+  document.getElementById("routePopup").style.display = "flex";
 
-  if(!popup) return;
+  document.getElementById("startInput").value = "";
 
-  popup.style.display = "flex";
-  popup.style.pointerEvents = "auto";
+  document.getElementById("destInput").value = "";
 
-  [startInput, destInput].forEach(function(input){
-    if(!input) return;
+  setTimeout(function(){ document.getElementById("startInput").focus(); }, 100);
 
-    input.type = "search";
-    input.removeAttribute("readonly");
-    input.removeAttribute("disabled");
-    input.readOnly = false;
-    input.disabled = false;
-    input.style.pointerEvents = "auto";
-    input.style.userSelect = "text";
-    input.style.webkitUserSelect = "text";
-    input.style.touchAction = "manipulation";
-    input.setAttribute("autocomplete", "off");
-    input.setAttribute("autocorrect", "off");
-    input.setAttribute("autocapitalize", "off");
-    input.setAttribute("spellcheck", "false");
-    input.setAttribute("inputmode", "search");
-
-    input.ontouchstart = function(){
-      this.focus();
-    };
-  });
-
-  requestAnimationFrame(function(){
-    requestAnimationFrame(function(){
-      setTimeout(function(){
-        if(startInput){
-          startInput.focus();
-          startInput.click();
-          startInput.scrollIntoView({block:"center"});
-        }
-      }, 300);
-    });
-  });
 }
 
 
@@ -7083,7 +7048,7 @@ window.addEventListener("load", function(){
 
           setTimeout(()=>{
 
-            if(window.mobileLeafletMap){
+            if(isMobile() && window.mobileLeafletMap){
 
               window.mobileLeafletMap.flyTo([targetLat, targetLng], 17);
 
