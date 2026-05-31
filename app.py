@@ -3743,6 +3743,21 @@ function closeMobileMap(){
 }
 
 
+window.addEventListener("popstate", function(e){
+
+  const popup = document.getElementById("mobileMapPopup");
+  const result = document.getElementById("mobileResultPanel");
+
+  if(popup && popup.style.display === "flex"){
+    popup.style.display = "none";
+  }
+
+  if(result){
+    result.style.display = "none";
+  }
+
+});
+
 
 
 
@@ -5050,34 +5065,67 @@ function openRouteSearch(){
 
 
 
-  document.getElementById("routePopup").style.display="flex";
+  const popup = document.getElementById("routePopup");
+
+  const startInput = document.getElementById("startInput");
+
+  const destInput = document.getElementById("destInput");
+
+
+
+  if(!popup){
+
+    return;
+
+  }
+
+
+
+  popup.style.display = "flex";
+
+
+
+  [startInput, destInput].forEach(function(input){
+
+    if(input){
+
+      input.removeAttribute("readonly");
+
+      input.removeAttribute("disabled");
+
+      input.readOnly = false;
+
+      input.disabled = false;
+
+      input.style.pointerEvents = "auto";
+
+      input.style.userSelect = "text";
+
+      input.style.webkitUserSelect = "text";
+
+      input.setAttribute("autocomplete", "off");
+
+      input.setAttribute("inputmode", "search");
+
+    }
+
+  });
 
 
 
   setTimeout(function(){
 
+    if(startInput){
 
-
-    const input = document.getElementById("startInput");
-
-
-
-    if(input){
-
-      input.focus();
-
-      input.click();
+      startInput.focus();
 
     }
 
-
-
-  }, 100);
+  }, 300);
 
 
 
 }
-
 
 
 function closeRoutePopup(){
@@ -9096,7 +9144,7 @@ def stats_excel():
 
 
 
-        return send_file(
+        response = send_file(
 
             output,
 
@@ -9108,6 +9156,15 @@ def stats_excel():
 
         )
 
+
+
+        response.headers["Cache-Control"] = "no-store"
+
+        response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+
+
+
+        return response
 
 
     except Exception as e:
