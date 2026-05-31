@@ -3740,9 +3740,9 @@ function closeMobileMap(){
 
 window.safeBack = function(){
 
-
-
   const mobileMap = document.getElementById("mobileMapPopup");
+  const mobileMapDisplay = mobileMap ? window.getComputedStyle(mobileMap).display : "null";
+  alert("safeBack called. mobileMap display: " + mobileMapDisplay);
 
   const result = document.getElementById("mobileResultPanel");
 
