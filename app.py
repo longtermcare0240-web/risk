@@ -3760,7 +3760,7 @@ window.safeBack = function(){
 
     const style = window.getComputedStyle(el);
 
-    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    return style.display !== "none" && style.visibility !== "hidden";
 
   }
 
@@ -3778,7 +3778,7 @@ window.safeBack = function(){
 
   if(isOpen(routePopup)){
 
-    routePopup.style.opacity = "0"; routePopup.style.pointerEvents = "none";
+    routePopup.style.display = "none";
 
     return true;
 
@@ -5117,9 +5117,7 @@ let loadingStartTime = 0;
 
 function openRouteSearch(){
 
-  var p = document.getElementById("routePopup");
-  p.style.opacity = "1";
-  p.style.pointerEvents = "auto";
+  document.getElementById("routePopup").style.display = "flex";
 
   document.getElementById("startInput").value = "";
 
@@ -5132,7 +5130,7 @@ function openRouteSearch(){
 
 function closeRoutePopup(){
 
-  var _rp=document.getElementById("routePopup");_rp.style.opacity="0";_rp.style.pointerEvents="none";
+  document.getElementById("routePopup").style.display="none";
 
 
 
@@ -7338,9 +7336,7 @@ position:fixed;inset:0;
 
 background:rgba(0,0,0,.5);
 
-display:flex;align-items:center;justify-content:center;z-index:6000;
-
-opacity:0;pointer-events:none;
+display:none;align-items:center;justify-content:center;z-index:6000;
 
 backdrop-filter:blur(4px);">
 
