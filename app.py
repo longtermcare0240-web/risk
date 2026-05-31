@@ -2910,15 +2910,7 @@ async function loadAllMarkers(){
 
   const result = await res.json();
 
-  if(result.too_many){
-
-    showMsg("전체 데이터가 너무 많습니다. 지역을 먼저 선택해 주세요.");
-
-    return;
-
-  }
-
-  ALL_DATA_CACHE = result.data;
+  ALL_DATA_CACHE = result.data || [];
 
 }
 
@@ -3334,9 +3326,7 @@ function resetFilters(){
 
 
 
-  // 전체 마커 다시 표시
-
-  loadAllMarkers();
+  // 초기화 후 재조회는 사용자가 직접 조회 버튼을 눌러야 함 (자동 전체 조회 제거)
 
 
 
@@ -3394,7 +3384,7 @@ window.addEventListener("DOMContentLoaded", function(){
 
     });
 
-    loadAllMarkers();
+    // 자동 loadAllMarkers 제거 — 조회 버튼을 눌러야만 데이터 로드
 
   });
 
@@ -4140,15 +4130,7 @@ async function runNearestSearch(lat,lng,targetType){
 
   const result = await res.json();
 
-  if(result.too_many){
-
-    showMsg("전체 데이터가 너무 많습니다. 지역을 먼저 선택해 주세요.");
-
-    return;
-
-  }
-
-  ALL_DATA_CACHE = result.data;
+  ALL_DATA_CACHE = result.data || [];
 
 }
 
@@ -4612,15 +4594,7 @@ async function runRadius(lat,lng,km){
 
   const result = await res.json();
 
-  if(result.too_many){
-
-    showMsg("전체 데이터가 너무 많습니다. 지역을 먼저 선택해 주세요.");
-
-    return;
-
-  }
-
-  ALL_DATA_CACHE = result.data;
+  ALL_DATA_CACHE = result.data || [];
 
 }
 
@@ -5704,17 +5678,7 @@ if(road){
 
   const result = await res.json();
 
-  if(result.too_many){
-
-    showMsg("전체 데이터가 너무 많습니다. 지역을 먼저 선택해 주세요.");
-
-    hideLoadingLocation();
-
-    return;
-
-  }
-
-  ALL_DATA_CACHE = result.data;
+  ALL_DATA_CACHE = result.data || [];
 
 }
 
@@ -6088,17 +6052,7 @@ async function runAddressSearch(){
 
     const result = await res.json();
 
-    if(result.too_many){
-
-      closeMsg();
-
-      showMsg("전체 데이터가 너무 많습니다. 지역을 먼저 선택해 주세요.");
-
-      return;
-
-    }
-
-    ALL_DATA_CACHE = result.data;
+    ALL_DATA_CACHE = result.data || [];
 
   }
 
@@ -6976,15 +6930,7 @@ window.addEventListener("load", function(){
 
         const result = await res.json();
 
-        if(result.too_many){
-
-          alert("전체 데이터가 너무 많아 불러올 수 없습니다. 지역을 먼저 선택해 주세요.");
-
-          return;
-
-        }
-
-        ALL_DATA_CACHE = result.data;
+        ALL_DATA_CACHE = result.data || [];
 
       }
 
