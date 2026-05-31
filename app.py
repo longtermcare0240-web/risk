@@ -3743,18 +3743,93 @@ function closeMobileMap(){
 }
 
 
-window.addEventListener("popstate", function(e){
+window.safeBack = function(){
 
-  const popup = document.getElementById("mobileMapPopup");
+
+
+  const mobileMap = document.getElementById("mobileMapPopup");
+
   const result = document.getElementById("mobileResultPanel");
 
-  if(popup && popup.style.display === "flex"){
-    popup.style.display = "none";
+  const routePopup = document.getElementById("routePopup");
+
+  const addrPopup = document.getElementById("addressPopup");
+
+  const msgModal = document.getElementById("msgModal");
+
+
+
+  function isOpen(el){
+
+    if(!el) return false;
+
+    const style = window.getComputedStyle(el);
+
+    return style.display !== "none" && style.visibility !== "hidden";
+
   }
 
-  if(result){
-    result.style.display = "none";
+
+
+  if(isOpen(msgModal)){
+
+    msgModal.style.display = "none";
+
+    return true;
+
   }
+
+
+
+  if(isOpen(routePopup)){
+
+    routePopup.style.display = "none";
+
+    return true;
+
+  }
+
+
+
+  if(isOpen(addrPopup)){
+
+    addrPopup.style.display = "none";
+
+    return true;
+
+  }
+
+
+
+  if(isOpen(result)){
+
+    result.style.display = "none";
+
+    return true;
+
+  }
+
+
+
+  if(isOpen(mobileMap)){
+
+    mobileMap.style.display = "none";
+
+    return true;
+
+  }
+
+
+
+  return false;
+
+};
+
+
+
+window.addEventListener("popstate", function(e){
+
+  window.safeBack();
 
 });
 
@@ -5083,6 +5158,8 @@ function openRouteSearch(){
 
   popup.style.display = "flex";
 
+  popup.style.pointerEvents = "auto";
+
 
 
   [startInput, destInput].forEach(function(input){
@@ -5117,11 +5194,15 @@ function openRouteSearch(){
 
     if(startInput){
 
+      startInput.blur();
+
       startInput.focus();
+
+      startInput.click();
 
     }
 
-  }, 300);
+  }, 500);
 
 
 
