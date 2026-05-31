@@ -3553,6 +3553,8 @@ function submitAdminPw(){
 
 function isMobile(){
 
+  if(/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return true;
+
   return window.innerWidth < 900;
 
 }
@@ -5149,10 +5151,13 @@ function openRouteSearch(){
 
   requestAnimationFrame(function(){
     requestAnimationFrame(function(){
-      if(startInput){
-        startInput.focus();
-        startInput.scrollIntoView({block:"center"});
-      }
+      setTimeout(function(){
+        if(startInput){
+          startInput.focus();
+          startInput.click();
+          startInput.scrollIntoView({block:"center"});
+        }
+      }, 300);
     });
   });
 }
