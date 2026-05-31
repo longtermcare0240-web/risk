@@ -3062,10 +3062,7 @@ map.once("moveend", () => {
     // 5000개 초과 시 서버 부하 방지 팝업
     if(result.too_many){
       setLoading(false);
-      showMsg(`🚨 검색 결과가 너무 많습니다 (${total.toLocaleString()}건)
-
-시도 → 시군구 → 읍면동 순서로 범위를 좁히거나,
-위험지역 구분을 선택해 상세 검색해 주세요.`);
+      showMsg(`🚨 검색 결과가 너무 많습니다 (${total.toLocaleString()}건)\n\n시도 → 시군구 → 읍면동으로 범위를 좁히거나 위험지역 구분을 선택해 주세요.`);
       return;
     }
 
@@ -3816,7 +3813,7 @@ window.safeBack = function(){
 
 
 
-  return false;
+  return "exit";
 
 };
 
@@ -7310,17 +7307,19 @@ box-shadow:0 18px 40px rgba(0,0,0,0.18);
 
 <div id="msgText" style="
 
-font-size:16px;
+font-size:15px;
 
 margin-bottom:18px;
 
-line-height:1.7;
+line-height:1.6;
 
 white-space:pre-line;
 
 color:#0f172a;
 
-font-weight:700;
+font-weight:600;
+
+word-break:keep-all;
 
 "></div>
 
