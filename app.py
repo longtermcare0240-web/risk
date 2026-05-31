@@ -5138,74 +5138,46 @@ let loadingStartTime = 0;
 
 function openRouteSearch(){
 
-
-
   const popup = document.getElementById("routePopup");
-
   const startInput = document.getElementById("startInput");
-
   const destInput = document.getElementById("destInput");
 
-
-
-  if(!popup){
-
-    return;
-
-  }
-
-
+  if(!popup) return;
 
   popup.style.display = "flex";
-
   popup.style.pointerEvents = "auto";
 
-
-
   [startInput, destInput].forEach(function(input){
+    if(!input) return;
 
-    if(input){
+    input.type = "search";
+    input.removeAttribute("readonly");
+    input.removeAttribute("disabled");
+    input.readOnly = false;
+    input.disabled = false;
+    input.style.pointerEvents = "auto";
+    input.style.userSelect = "text";
+    input.style.webkitUserSelect = "text";
+    input.style.touchAction = "manipulation";
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("autocorrect", "off");
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("spellcheck", "false");
+    input.setAttribute("inputmode", "search");
 
-      input.removeAttribute("readonly");
-
-      input.removeAttribute("disabled");
-
-      input.readOnly = false;
-
-      input.disabled = false;
-
-      input.style.pointerEvents = "auto";
-
-      input.style.userSelect = "text";
-
-      input.style.webkitUserSelect = "text";
-
-      input.setAttribute("autocomplete", "off");
-
-      input.setAttribute("inputmode", "search");
-
-    }
-
+    input.ontouchstart = function(){
+      this.focus();
+    };
   });
 
-
-
-  setTimeout(function(){
-
-    if(startInput){
-
-      startInput.blur();
-
-      startInput.focus();
-
-      startInput.click();
-
-    }
-
-  }, 500);
-
-
-
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      if(startInput){
+        startInput.focus();
+        startInput.scrollIntoView({block:"center"});
+      }
+    });
+  });
 }
 
 
