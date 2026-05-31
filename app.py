@@ -3794,19 +3794,11 @@ window.safeBack = function(){
 
 
 
-  if(isOpen(result)){
-
-    result.style.display = "none";
-
-    return true;
-
-  }
-
-
-
   if(isOpen(mobileMap)){
 
     mobileMap.style.display = "none";
+
+    if(result) result.style.display = "none";
 
     return true;
 
@@ -7394,7 +7386,7 @@ overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
 
   <div style="padding:18px 20px;">
 
-    <input id="startInput"
+    <input id="startInput" type="text"
 
       placeholder="출발지 (예: 광주전라제주지역본부)"
 
@@ -7402,7 +7394,7 @@ overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25);">
 
       onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
 
-    <input id="destInput"
+    <input id="destInput" type="text"
 
       placeholder="도착지 (예: 전라남도청)"
 
