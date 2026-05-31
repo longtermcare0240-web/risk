@@ -3347,7 +3347,17 @@ window.addEventListener("load", function(){
 
 window.addEventListener("DOMContentLoaded", function(){
 
-
+  // WebView IME 강제 활성화
+  setTimeout(function(){
+    var tmp = document.createElement("input");
+    tmp.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+    document.body.appendChild(tmp);
+    tmp.focus();
+    setTimeout(function(){
+      tmp.blur();
+      document.body.removeChild(tmp);
+    }, 300);
+  }, 1000);
 
   preloadLocation();
 
