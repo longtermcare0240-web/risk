@@ -2231,7 +2231,7 @@ function showMobileResults(items, userLat, userLng){
 
 
 
-  if(window.mobileLeafletMap){
+  if(isMobile() && window.mobileLeafletMap){
 
 
 
@@ -4573,7 +4573,7 @@ function showResultList(items, userLat, userLng){
 
 
 
-  if(window.mobileLeafletMap){
+  if(isMobile() && window.mobileLeafletMap){
 
 
 
