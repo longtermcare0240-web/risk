@@ -2495,9 +2495,9 @@ function buildPopupHtml(item){
 
   // PC는 더 넓은 팝업, 모바일은 기본
 
-  const rvHeight = isMobile() ? "220px" : "280px";
+  const rvHeight = isMobile() ? "220px" : "340px";
 
-  const popupWidth = isMobile() ? 290 : 480;
+  const popupWidth = isMobile() ? 290 : 600;
 
   return `
 
@@ -2953,7 +2953,7 @@ const data = ALL_DATA_CACHE;
 
 
 
-    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 520});
+    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650});
 
 
 
@@ -3119,7 +3119,7 @@ fetch("/log_search", {
 
 
 
-      marker.bindPopup(popupHtml, { maxWidth: isMobile() ? 310 : 520 });
+      marker.bindPopup(popupHtml, { maxWidth: isMobile() ? 310 : 650 });
 
       markerGroup.addLayer(marker);
 
@@ -3760,7 +3760,7 @@ window.safeBack = function(){
 
     const style = window.getComputedStyle(el);
 
-    return style.display !== "none" && style.visibility !== "hidden";
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
 
   }
 
@@ -3778,7 +3778,7 @@ window.safeBack = function(){
 
   if(isOpen(routePopup)){
 
-    routePopup.style.display = "none";
+    routePopup.style.opacity = "0"; routePopup.style.pointerEvents = "none";
 
     return true;
 
@@ -3961,7 +3961,7 @@ items.forEach(item=>{
 
 
 
-  marker.bindPopup(popupHtml,{maxWidth:290});
+  marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
 
 
 
@@ -4377,7 +4377,7 @@ const popupHtml = buildPopupHtml(item);
 
 
 
-marker.bindPopup(popupHtml,{maxWidth:290});
+marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
 
 
 
@@ -5117,7 +5117,9 @@ let loadingStartTime = 0;
 
 function openRouteSearch(){
 
-  document.getElementById("routePopup").style.display = "flex";
+  var p = document.getElementById("routePopup");
+  p.style.opacity = "1";
+  p.style.pointerEvents = "auto";
 
   document.getElementById("startInput").value = "";
 
@@ -5130,7 +5132,7 @@ function openRouteSearch(){
 
 function closeRoutePopup(){
 
-  document.getElementById("routePopup").style.display="none";
+  var _rp=document.getElementById("routePopup");_rp.style.opacity="0";_rp.style.pointerEvents="none";
 
 
 
@@ -5786,7 +5788,7 @@ data.forEach(item=>{
 
     const popupHtml = buildPopupHtml(item);
 
-    marker.bindPopup(popupHtml,{maxWidth:290});
+    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
 
     markerGroup.addLayer(marker);
 
@@ -6158,7 +6160,7 @@ async function runAddressSearch(){
 
     marker.itemData = item;
 
-    marker.bindPopup(buildPopupHtml(item),{maxWidth:290});
+    marker.bindPopup(buildPopupHtml(item),{maxWidth: isMobile() ? 310 : 650});
 
     markerGroup.addLayer(marker);
 
@@ -7038,7 +7040,7 @@ window.addEventListener("load", function(){
 
               marker.itemData = item;
 
-              marker.bindPopup(buildPopupHtml(item), {maxWidth:290});
+              marker.bindPopup(buildPopupHtml(item), {maxWidth: isMobile() ? 310 : 650});
 
               window.mobileMarkerGroup.addLayer(marker);
 
@@ -7336,7 +7338,9 @@ position:fixed;inset:0;
 
 background:rgba(0,0,0,.5);
 
-display:none;align-items:center;justify-content:center;z-index:6000;
+display:flex;align-items:center;justify-content:center;z-index:6000;
+
+opacity:0;pointer-events:none;
 
 backdrop-filter:blur(4px);">
 
