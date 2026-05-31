@@ -5127,9 +5127,9 @@ function openRouteSearch(){
 
     document.getElementById("destInput").value = "";
 
-    setTimeout(function(){ document.getElementById("startInput").focus(); }, 100);
+    setTimeout(function(){ document.getElementById("startInput").focus(); }, 300);
 
-  }, 50);
+  }, 200);
 
 }
 
