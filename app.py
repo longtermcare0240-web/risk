@@ -5117,13 +5117,21 @@ let loadingStartTime = 0;
 
 function openRouteSearch(){
 
-  document.getElementById("routePopup").style.display = "flex";
+  var popup = document.getElementById("routePopup");
 
-  document.getElementById("startInput").value = "";
+  popup.style.display = "none";
 
-  document.getElementById("destInput").value = "";
+  setTimeout(function(){
 
-  setTimeout(function(){ document.getElementById("startInput").focus(); }, 100);
+    popup.style.display = "flex";
+
+    document.getElementById("startInput").value = "";
+
+    document.getElementById("destInput").value = "";
+
+    setTimeout(function(){ document.getElementById("startInput").focus(); }, 100);
+
+  }, 50);
 
 }
 
