@@ -206,13 +206,7 @@ def update_visitors():
 
             json={
 
-                "ip": request.headers.get(
-
-                    "X-Forwarded-For",
-
-                    request.remote_addr
-
-                )
+                "visited_at": datetime.now().isoformat()
 
             }
 
@@ -288,25 +282,11 @@ def save_search_log(data):
 
             "city": data.get("city", ""),
 
-            "town": data.get("town", ""),
-
             "categories": data.get("categories", []),
 
-            "result_count": data.get("result_count", 0),
-
-            "ip": request.headers.get(
-
-                "X-Forwarded-For",
-
-                request.remote_addr
-
-            )
+            "result_count": data.get("result_count", 0)
 
         }
-
-
-
-        print("Supabase 저장 payload:", payload)
 
 
 
@@ -322,7 +302,7 @@ def save_search_log(data):
 
 
 
-        print("Supabase search_logs 저장 상태:", r.status_code, r.text)
+        print("Supabase search_logs 저장 완료")
 
 
 
@@ -2256,8 +2236,6 @@ function showMobileResults(items, userLat, userLng){
     window.mobileLeafletMap.once("moveend", function(){
 
       // 팝업이 화면 중앙에 오도록 지도 오른쪽으로 이동
-      window.mobileLeafletMap.panBy([150, 150], {animate: false});
-
       if(window.mobileMarkerGroup){
 
 
@@ -2267,6 +2245,8 @@ function showMobileResults(items, userLat, userLng){
 
 
           if(layer.itemData && layer.itemData.순번 === item.순번){
+
+            window._skipPopupAutoPan = true;
 
             layer.openPopup();
 
@@ -3084,8 +3064,6 @@ fetch("/log_search", {
     province:province,
 
     city:city,
-
-    town:towns.join(","),
 
     categories:categories,
 
@@ -3967,7 +3945,7 @@ items.forEach(item=>{
 
 
 
-  marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
+  marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: false});
 
 
 
@@ -4383,7 +4361,7 @@ const popupHtml = buildPopupHtml(item);
 
 
 
-marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
+marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: false});
 
 
 
@@ -4604,8 +4582,6 @@ function showResultList(items, userLat, userLng){
     window.mobileLeafletMap.once("moveend", function(){
 
       // 팝업이 화면 중앙에 오도록 지도 오른쪽으로 이동
-      window.mobileLeafletMap.panBy([150, 150], {animate: false});
-
       if(window.mobileMarkerGroup){
 
 
@@ -4615,6 +4591,8 @@ function showResultList(items, userLat, userLng){
 
 
           if(layer.itemData && layer.itemData.순번 === item.순번){
+
+            window._skipPopupAutoPan = true;
 
             layer.openPopup();
 
@@ -5811,7 +5789,7 @@ data.forEach(item=>{
 
     const popupHtml = buildPopupHtml(item);
 
-    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: true, autoPanPadding: [50, 50]});
+    marker.bindPopup(popupHtml,{maxWidth: isMobile() ? 310 : 650, autoPan: false});
 
     markerGroup.addLayer(marker);
 
@@ -6499,31 +6477,52 @@ function onPopupOpen(e){
 
   }
 
-  // 모바일: 팝업이 화면 중앙에 오도록 지도 pan
-
+  // 모바일: 팝업이 실제로 화면 어디에 떴는지 측정해 정확히 중앙으로 panBy 보정
   if(isMobile()){
 
-    setTimeout(()=>{
+    // 팝업 DOM이 그려진 뒤 위치를 측정해야 하므로 약간의 딜레이를 둔다
+    setTimeout(function(){
 
-      const theMap = window.mobileLeafletMap || map;
+      const targetMap = (popup && popup._map) || window.mobileLeafletMap;
+      if(!targetMap) return;
 
-      if(theMap && popup._latlng){
+      const popupEl = popup.getElement ? popup.getElement() : null;
+      if(!popupEl) return;
 
-        // 팝업 높이만큼 위로 오프셋해서 중앙에 맞춤
+      const popupRect = popupEl.getBoundingClientRect();
+      const mapEl = targetMap.getContainer();
+      const mapRect = mapEl.getBoundingClientRect();
 
-        const popupHeight = 360; // 팝업 대략 높이(px)
+      // 팝업 높이가 0이면 아직 렌더링 전 — 한 번 더 시도
+      if(popupRect.height < 10){
+        setTimeout(function(){
+          const r2 = popupEl.getBoundingClientRect();
+          const m2 = mapEl.getBoundingClientRect();
+          if(r2.height < 10) return;
+          const popupCenterY = (r2.top + r2.bottom) / 2 - m2.top;
+          const mapCenterY = m2.height / 2;
+          const offsetY = popupCenterY - mapCenterY;
+          if(Math.abs(offsetY) > 5){
+            targetMap.panBy([0, offsetY], {animate: true, duration: 0.35});
+          }
+        }, 200);
+        return;
+      }
 
-        const containerHeight = theMap.getSize().y;
+      // 팝업의 세로 중심이 지도 컨테이너의 세로 중심에 오도록 지도 패닝
+      const popupCenterY = (popupRect.top + popupRect.bottom) / 2 - mapRect.top;
+      const mapCenterY = mapRect.height / 2;
+      const offsetY = popupCenterY - mapCenterY;
 
-        const offset = (containerHeight / 2) - (popupHeight / 2) - 30;
-
-        theMap.panBy([0, -Math.max(offset, 0)], {animate:true, duration:0.3});
-
+      if(Math.abs(offsetY) > 5){
+        targetMap.panBy([0, offsetY], {animate: true, duration: 0.35});
       }
 
     }, 150);
 
   }
+
+  window._skipPopupAutoPan = false;
 
 }
 
@@ -6999,7 +6998,7 @@ window.addEventListener("load", function(){
 
       if(!ALL_DATA_CACHE){
 
-        const res = await fetch("/data");
+        const res = await fetch("/data/all");
 
         const result = await res.json();
 
@@ -7023,17 +7022,50 @@ window.addEventListener("load", function(){
 
 
 
+      // 클러스터 그룹에서 해당 마커를 찾아 팝업을 여는 함수
+      // markerClusterGroup은 eachLayer가 클러스터 객체를 포함하므로
+      // getAllChildMarkers로 실제 마커를 직접 탐색한다
+
       function openMarkerPopup(mGroup){
+
+        let targetMarker = null;
 
         mGroup.eachLayer(function(layer){
 
+          // 클러스터면 자식 마커 탐색
+          if(layer.getAllChildMarkers){
+
+            layer.getAllChildMarkers().forEach(function(child){
+
+              if(child.itemData && String(child.itemData.순번) === String(gotoSpot)){
+
+                targetMarker = child;
+
+              }
+
+            });
+
+          }
+
+          // 일반 마커인 경우
           if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
 
-            layer.openPopup();
+            targetMarker = layer;
 
           }
 
         });
+
+        if(targetMarker){
+
+          // zoomToShowLayer: 클러스터가 펼쳐지면서 팝업 오픈
+          mGroup.zoomToShowLayer(targetMarker, function(){
+
+            targetMarker.openPopup();
+
+          });
+
+        }
 
       }
 
@@ -7092,6 +7124,26 @@ window.addEventListener("load", function(){
         setTimeout(doMobileGoto, 600);
 
       } else {
+
+        // PC: markerGroup에 마커가 없으면 전체 마커를 먼저 추가
+
+        if(markerGroup.getLayers().length === 0){
+
+          ALL_DATA_CACHE.forEach(item=>{
+
+            const icon = buildMarkerIcon(item.마커색상);
+
+            const marker = L.marker([item.위도, item.경도], {icon});
+
+            marker.itemData = item;
+
+            marker.bindPopup(buildPopupHtml(item), {maxWidth: 650});
+
+            markerGroup.addLayer(marker);
+
+          });
+
+        }
 
         map.flyTo([targetLat, targetLng], 17);
 
@@ -7740,6 +7792,104 @@ display:none;align-items:center;justify-content:center;z-index:7500;">
 </div>
 
 </div>
+
+
+
+<!-- 개인정보 안내 팝업 -->
+
+<div id="privacyNoticeModal" style="
+
+position:fixed;inset:0;background:rgba(15,23,42,0.55);
+
+display:none;align-items:center;justify-content:center;z-index:9999;
+
+backdrop-filter:blur(3px);">
+
+<div style="
+
+background:#ffffff;border-radius:22px;
+
+padding:36px 32px 28px;
+
+width:min(460px,92vw);
+
+box-shadow:0 20px 60px rgba(0,0,0,0.25);
+
+text-align:center;
+
+">
+
+  <!-- 알림 아이콘 (SVG) -->
+
+  <div style="margin-bottom:16px;display:flex;justify-content:center;">
+
+    <svg xmlns='http://www.w3.org/2000/svg' width='52' height='52' viewBox='0 0 24 24' fill='none' stroke='#2563eb' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>
+
+      <path d='M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9'/>
+
+      <path d='M13.73 21a2 2 0 0 1-3.46 0'/>
+
+    </svg>
+
+  </div>
+
+  <div style="font-size:clamp(16px,2.2vw,20px);font-weight:900;color:#1a202c;margin-bottom:14px;line-height:1.4;">
+
+    장기요양 안전로드 안내
+
+  </div>
+
+  <div style="font-size:clamp(13px,1.5vw,15px);color:#374151;line-height:1.9;margin-bottom:26px;word-break:keep-all;">
+
+    '장기요양 안전로드'는 내부직원 업무지원을 위해 제작되었으며,
+
+    사용자의 위치 정보를 수집하지 않습니다.
+
+  </div>
+
+  <button onclick="closePrivacyNotice()" style="
+
+    width:100%;height:clamp(44px,6vw,52px);border:none;border-radius:13px;
+
+    background:linear-gradient(135deg,#2563eb,#3b82f6);
+
+    color:#fff;font-size:clamp(14px,1.6vw,16px);font-weight:800;
+
+    cursor:pointer;
+
+    box-shadow:0 4px 14px rgba(37,99,235,.35);
+
+  ">확인</button>
+
+</div>
+
+</div>
+
+<script>
+
+(function(){
+
+  if(!sessionStorage.getItem("privacyNoticeSeen")){
+
+    const modal = document.getElementById("privacyNoticeModal");
+
+    if(modal) modal.style.display = "flex";
+
+  }
+
+})();
+
+function closePrivacyNotice(){
+
+  sessionStorage.setItem("privacyNoticeSeen","1");
+
+  const modal = document.getElementById("privacyNoticeModal");
+
+  if(modal) modal.style.display = "none";
+
+}
+
+</script>
 
 
 
