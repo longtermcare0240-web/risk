@@ -2570,7 +2570,7 @@ function buildPopupHtml(item){
 
 // 로드뷰 초기화 함수 (팝업 열릴 때 호출)
 
-function initRoadview(containerId, lat, lng){
+function initRoadview(containerId, lat, lng, category){
 
   const msg = document.getElementById(containerId + "_msg");
 
@@ -2602,17 +2602,63 @@ function initRoadview(containerId, lat, lng){
 
           roadview.setPanoId(panoId, position);
 
-          // 초기 시야각: 수평(pitch=0), 정면 바라보기
+          // 공중화장실: 로드뷰 위치 → 화장실 좌표 방향으로 카메라 회전
 
-          roadview.setViewpoint({
+          if(category === "공중화장실"){
 
-            pan: 0,
+            kakao.maps.event.addListener(roadview, 'init', function(){
 
-            tilt: 0,
+              try{
 
-            zoom: 0
+                const rvPos = roadview.getPosition();
 
-          });
+                if(!rvPos) return;
+
+                const rvLat = rvPos.getLat();
+
+                const rvLng = rvPos.getLng();
+
+                // 방위각(bearing) 계산: 북=0, 시계방향 (카카오 pan 규격과 동일)
+
+                const toRad = Math.PI / 180;
+
+                const phi1 = rvLat * toRad;
+
+                const phi2 = lat * toRad;
+
+                const dLng = (lng - rvLng) * toRad;
+
+                const y = Math.sin(dLng) * Math.cos(phi2);
+
+                const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLng);
+
+                const pan = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+
+                roadview.setViewpoint({ pan: pan, tilt: 0, zoom: 0 });
+
+              }catch(err){
+
+                // 실패 시 기본 시야각 유지
+
+              }
+
+            });
+
+          } else {
+
+            // 그 외 카테고리: 초기 시야각 정북
+
+            roadview.setViewpoint({
+
+              pan: 0,
+
+              tilt: 0,
+
+              zoom: 0
+
+            });
+
+          }
 
         }
 
@@ -6463,7 +6509,7 @@ function onPopupOpen(e){
 
   // 로드뷰: 약간 딜레이 후 DOM 안정되면 초기화
 
-  setTimeout(()=> initRoadview("rv_" + sid, item.위도, item.경도), 200);
+  setTimeout(()=> initRoadview("rv_" + sid, item.위도, item.경도, item.구분), 200);
 
   // 검색결과 패널 숨기기
 
