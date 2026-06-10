@@ -10094,7 +10094,7 @@ a{color:inherit;text-decoration:none}
 MEAL_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리 · 로그인</title><style>""" + MEAL_BASE_CSS + """
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.login-wrap{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:20px;transform:translateY(-4vh);}
 .login-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;
   box-shadow:0 8px 30px rgba(30,64,120,.12);padding:30px 24px;width:100%;max-width:360px;text-align:center;}
 .login-logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#3b82f6,#1e40af);
@@ -10138,10 +10138,11 @@ async function doLogin(){
 MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리</title><style>""" + MEAL_BASE_CSS + """
-.lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;}
+.lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;word-break:keep-all;}
 .lead b{color:var(--ink);}
+.lead-line{display:block;}
 .team-grid{display:grid;gap:12px;}
-.team-btn{display:flex;align-items:center;justify-content:space-between;
+.team-btn{display:flex;align-items:center;justify-content:flex-start;
   background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
   overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
@@ -10149,7 +10150,6 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
 .team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
 .team-btn .nm{display:flex;align-items:center;padding-left:8px;}
-.team-btn .arr{color:var(--primary);font-size:22px;}
 .logout{font-size:13px;color:var(--muted);background:var(--soft);border:none;
   border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;}
 </style></head><body><div class=wrap>
@@ -10157,11 +10157,12 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   <h1>매식비 관리</h1>
   <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
 </div>
-<p class=lead>팀을 선택해 들어가서 달력에서 <b>날짜를 누르고 팀원을 골라</b> 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.<br>
-한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하고, 초과하면 자동으로 막힙니다.</p>
+<p class=lead><span class=lead-line>팀을 선택한 뒤, 달력에서 <b>날짜를 누르고 팀원을 고르면</b></span>
+<span class=lead-line>식당·결재자를 입력해 1인 {{ "{:,}".format(amount) }}원씩 기록할 수 있어요.</span>
+<span class=lead-line>한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하며, 초과 입력은 자동으로 막힙니다.</span></p>
 <div class=team-grid>
 {% for t in teams %}
-  <a class=team-btn href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span><span class=arr>&#8594;</span></a>
+  <a class=team-btn href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span></a>
 {% endfor %}
 </div>
 </div></body></html>"""
@@ -10293,7 +10294,7 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
       {% if c.in_month %}
       <td class="{% if c.is_today %}today{% endif %}" onclick="openDay('{{c.date_str}}')">
         <span class=dn>{{c.day}}</span>
-        {% for e in c.entries %}<span class=chip>{{e.name}}</span>{% endfor %}
+        {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
       </td>
       {% else %}
       <td class=out><span class=dn>{{c.day}}</span></td>
