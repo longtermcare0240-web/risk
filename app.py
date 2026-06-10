@@ -9694,6 +9694,826 @@ def open_preferred_browser(url):
 
 
 
+
+# ================================================================
+# ===============  매식비 관리 모듈 (/meal)  =====================
+#   - 기존 지도앱 코드와 완전히 분리, /meal 하위 경로로만 동작
+#   - 저장소: Supabase REST (meal_teams / meal_members / meal_entries)
+#   - 로그인: 비밀번호 3333 (session['meal_authed'])
+# ================================================================
+import calendar as _meal_calendar
+import functools as _meal_functools
+from zoneinfo import ZoneInfo as _MealZoneInfo
+from flask import redirect as _meal_redirect
+
+MEAL_KST = _MealZoneInfo("Asia/Seoul")
+MEAL_FIXED_AMOUNT = 9000
+MEAL_MONTHLY_COUNT = 6
+MEAL_MONTHLY_CAP = MEAL_FIXED_AMOUNT * MEAL_MONTHLY_COUNT
+MEAL_PASSWORD = "3333"
+
+
+# ---------------------------------------------------------------- Supabase REST
+def _meal_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _meal_get(path):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/{path}",
+                         headers=_meal_headers(), timeout=10)
+        if r.status_code >= 400:
+            print("meal get err:", r.status_code, r.text)
+            return []
+        return r.json()
+    except Exception as e:
+        print("meal get exc:", e)
+        return []
+
+
+def _meal_post(table, payload):
+    h = _meal_headers()
+    h["Prefer"] = "return=representation"
+    return requests.post(f"{SUPABASE_URL}/rest/v1/{table}",
+                         headers=h, json=payload, timeout=10)
+
+
+def _meal_patch(table, filt, payload):
+    h = _meal_headers()
+    h["Prefer"] = "return=representation"
+    return requests.patch(f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                          headers=h, json=payload, timeout=10)
+
+
+def _meal_delete(table, filt):
+    return requests.delete(f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
+                           headers=_meal_headers(), timeout=10)
+
+
+# ---------------------------------------------------------------- helpers
+def meal_today_kst():
+    return datetime.now(MEAL_KST).date()
+
+
+def meal_parse_ym(ym):
+    t = meal_today_kst()
+    if ym:
+        try:
+            y, m = ym.split("-")
+            y, m = int(y), int(m)
+            if 1 <= m <= 12:
+                return y, m
+        except Exception:
+            pass
+    return t.year, t.month
+
+
+def meal_ym_str(y, m):
+    return f"{y:04d}-{m:02d}"
+
+
+def meal_shift_month(y, m, delta):
+    idx = y * 12 + (m - 1) + delta
+    return idx // 12, idx % 12 + 1
+
+
+def meal_status_of(count):
+    if count == 0:
+        return "none"
+    if count >= MEAL_MONTHLY_COUNT:
+        return "full"
+    return "ok"
+
+
+def meal_ensure_teams():
+    """팀이 하나도 없으면 기본 5팀 시드(통합돌봄팀 맨 위)."""
+    teams = _meal_get("meal_teams?select=*&order=sort_order.asc,id.asc")
+    if teams:
+        return teams
+    seed = [
+        {"name": "통합돌봄팀(TF)", "sort_order": 0},
+        {"name": "요양운영1팀", "sort_order": 1},
+        {"name": "요양운영2팀", "sort_order": 2},
+        {"name": "요양운영3팀", "sort_order": 3},
+        {"name": "요양운영4팀", "sort_order": 4},
+    ]
+    try:
+        _meal_post("meal_teams", seed)
+    except Exception as e:
+        print("meal seed err:", e)
+    return _meal_get("meal_teams?select=*&order=sort_order.asc,id.asc")
+
+
+# ---------------------------------------------------------------- login guard
+def meal_login_required(fn):
+    @_meal_functools.wraps(fn)
+    def _wrap(*a, **k):
+        if not session.get("meal_authed"):
+            if request.path.startswith("/meal/api/"):
+                return jsonify(ok=False, error="로그인이 필요해요."), 401
+            return _meal_redirect("/meal/login")
+        return fn(*a, **k)
+    return _wrap
+
+
+# ---------------------------------------------------------------- routes
+@app.route("/meal/login")
+def meal_login_page():
+    if session.get("meal_authed"):
+        return _meal_redirect("/meal")
+    return render_template_string(MEAL_LOGIN_HTML)
+
+
+@app.route("/meal/api/login", methods=["POST"])
+def meal_do_login():
+    data = request.get_json(force=True)
+    pw = (data.get("password") or "").strip()
+    if pw == MEAL_PASSWORD:
+        session["meal_authed"] = True
+        return jsonify(ok=True)
+    return jsonify(ok=False, error="비밀번호가 올바르지 않아요."), 401
+
+
+@app.route("/meal/logout")
+def meal_logout():
+    session.pop("meal_authed", None)
+    return _meal_redirect("/meal/login")
+
+
+@app.route("/meal")
+@meal_login_required
+def meal_home():
+    teams = meal_ensure_teams()
+    return render_template_string(MEAL_HOME_HTML, teams=teams,
+                                  monthly_count=MEAL_MONTHLY_COUNT,
+                                  cap=MEAL_MONTHLY_CAP, amount=MEAL_FIXED_AMOUNT)
+
+
+@app.route("/meal/team/<int:team_id>")
+@meal_login_required
+def meal_team_page(team_id):
+    ym = request.args.get("ym")
+    year, month = meal_parse_ym(ym)
+
+    trows = _meal_get(f"meal_teams?id=eq.{team_id}&select=*")
+    if not trows:
+        return _meal_redirect("/meal")
+    team = trows[0]
+
+    members = _meal_get(f"meal_members?team_id=eq.{team_id}&select=*&order=id.asc")
+    prefix = meal_ym_str(year, month)
+    rows = _meal_get(
+        f"meal_entries?team_id=eq.{team_id}&d=like.{prefix}*"
+        f"&select=*&order=d.asc,id.asc")
+
+    member_name = {m["id"]: m["name"] for m in members}
+
+    by_date = {}
+    for r in rows:
+        by_date.setdefault(r["d"], []).append({
+            "id": r["id"],
+            "member_id": r["member_id"],
+            "name": member_name.get(r["member_id"], "?"),
+            "restaurant": r.get("restaurant") or "",
+            "approver": r.get("approver") or "",
+        })
+
+    per_member_days = {m["id"]: [] for m in members}
+    for r in rows:
+        per_member_days.setdefault(r["member_id"], [])
+        per_member_days[r["member_id"]].append(r["d"])
+
+    summaries = []
+    team_total = 0
+    full_people = 0
+    for m in members:
+        cnt = len(per_member_days.get(m["id"], []))
+        st = meal_status_of(cnt)
+        if st == "full":
+            full_people += 1
+        team_total += cnt * MEAL_FIXED_AMOUNT
+        summaries.append({"id": m["id"], "name": m["name"],
+                          "count": cnt, "total": cnt * MEAL_FIXED_AMOUNT,
+                          "status": st})
+
+    rest_map = {}
+    for r in rows:
+        key = (r.get("restaurant") or "").strip() or "미지정"
+        if key not in rest_map:
+            rest_map[key] = {"name": key, "count": 0, "total": 0}
+        rest_map[key]["count"] += 1
+        rest_map[key]["total"] += r.get("amount") or MEAL_FIXED_AMOUNT
+    rest_summaries = sorted(rest_map.values(),
+                            key=lambda x: x["total"], reverse=True)
+
+    cal = _meal_calendar.Calendar(firstweekday=6)
+    today = meal_today_kst()
+    weeks = []
+    for week in cal.monthdatescalendar(year, month):
+        wk = []
+        for dt in week:
+            ds = dt.strftime("%Y-%m-%d")
+            wk.append({
+                "day": dt.day,
+                "date_str": ds,
+                "in_month": dt.month == month,
+                "is_today": dt == today,
+                "entries": by_date.get(ds, []),
+            })
+        weeks.append(wk)
+
+    member_info = {}
+    for m in members:
+        days = sorted(per_member_days.get(m["id"], []))
+        member_info[m["id"]] = {"name": m["name"], "days": days,
+                                "count": len(days)}
+
+    py, pm = meal_shift_month(year, month, -1)
+    ny, nm = meal_shift_month(year, month, 1)
+
+    return render_template_string(
+        MEAL_TEAM_HTML,
+        team=team, members=members, weeks=weeks, summaries=summaries,
+        rest_summaries=rest_summaries,
+        year=year, month=month,
+        prev_ym=meal_ym_str(py, pm), next_ym=meal_ym_str(ny, nm),
+        team_total=team_total, full_people=full_people,
+        amount=MEAL_FIXED_AMOUNT, monthly_count=MEAL_MONTHLY_COUNT,
+        cap=MEAL_MONTHLY_CAP,
+        member_info_json=json.dumps(member_info, ensure_ascii=False),
+        weekdays=["일", "월", "화", "수", "목", "금", "토"],
+    )
+
+
+@app.route("/meal/api/entry", methods=["POST"])
+@meal_login_required
+def meal_add_entry():
+    data = request.get_json(force=True)
+    team_id = int(data.get("team_id", 0))
+    member_ids = data.get("member_ids") or []
+    d = (data.get("date") or "").strip()
+    restaurant = (data.get("restaurant") or "").strip()
+    approver = (data.get("approver") or "").strip()
+
+    try:
+        member_ids = [int(x) for x in member_ids]
+    except Exception:
+        member_ids = []
+
+    if not (team_id and member_ids and d):
+        return jsonify(ok=False, error="팀원과 날짜를 선택해 주세요."), 400
+    if not restaurant:
+        return jsonify(ok=False, error="식당명을 입력해 주세요."), 400
+
+    members = _meal_get(f"meal_members?team_id=eq.{team_id}&select=id,name")
+    name_of = {m["id"]: m["name"] for m in members}
+    month_prefix = d[:7]
+    now_iso = datetime.now(MEAL_KST).isoformat()
+
+    added, skipped = [], []
+    to_insert = []
+    for mid in member_ids:
+        ex = _meal_get(
+            f"meal_entries?member_id=eq.{mid}&d=like.{month_prefix}*&select=d")
+        used_days = {r["d"] for r in ex}
+        nm = name_of.get(mid, str(mid))
+        if d in used_days:
+            skipped.append(f"{nm}(이미 입력)")
+            continue
+        if len(used_days) >= MEAL_MONTHLY_COUNT:
+            skipped.append(f"{nm}(한도초과)")
+            continue
+        to_insert.append({
+            "team_id": team_id, "member_id": mid, "d": d,
+            "amount": MEAL_FIXED_AMOUNT, "restaurant": restaurant,
+            "approver": approver, "created_at": now_iso,
+        })
+        added.append(nm)
+
+    if to_insert:
+        resp = _meal_post("meal_entries", to_insert)
+        if resp.status_code >= 400:
+            return jsonify(ok=False, error="저장 중 오류가 발생했어요."), 500
+
+    if not added:
+        return jsonify(ok=False,
+                       error="추가된 인원이 없어요. " + ", ".join(skipped)), 400
+    return jsonify(ok=True, added=added, skipped=skipped)
+
+
+@app.route("/meal/api/entry/delete", methods=["POST"])
+@meal_login_required
+def meal_delete_entry():
+    data = request.get_json(force=True)
+    entry_id = int(data.get("entry_id", 0))
+    _meal_delete("meal_entries", f"id=eq.{entry_id}")
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/member/add", methods=["POST"])
+@meal_login_required
+def meal_add_member():
+    data = request.get_json(force=True)
+    team_id = int(data.get("team_id", 0))
+    name = (data.get("name") or "").strip()
+    if not (team_id and name):
+        return jsonify(ok=False, error="이름을 입력해 주세요."), 400
+    resp = _meal_post("meal_members", {"team_id": team_id, "name": name})
+    if resp.status_code >= 400:
+        return jsonify(ok=False, error="추가 중 오류가 발생했어요."), 500
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/member/delete", methods=["POST"])
+@meal_login_required
+def meal_delete_member():
+    data = request.get_json(force=True)
+    member_id = int(data.get("member_id", 0))
+    _meal_delete("meal_entries", f"member_id=eq.{member_id}")
+    _meal_delete("meal_members", f"id=eq.{member_id}")
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/team/rename", methods=["POST"])
+@meal_login_required
+def meal_rename_team():
+    data = request.get_json(force=True)
+    team_id = int(data.get("team_id", 0))
+    name = (data.get("name") or "").strip()
+    if not (team_id and name):
+        return jsonify(ok=False, error="팀 이름을 입력해 주세요."), 400
+    resp = _meal_patch("meal_teams", f"id=eq.{team_id}", {"name": name})
+    if resp.status_code >= 400:
+        return jsonify(ok=False, error="변경 중 오류가 발생했어요."), 500
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- templates
+MEAL_BASE_CSS = """
+:root{
+  --bg:#e8ecf4; --surface:#ffffff; --primary:#3b82f6; --primary-d:#2563eb;
+  --primary-dd:#1e40af; --ink:#1f2937; --muted:#6b7280; --line:#e2e8f0;
+  --soft:#eef3fb; --ok:#1f9d6b; --full:#d64545; --strip:#3b82f6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  -webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:760px;margin:0 auto;padding:16px 14px 70px;}
+.topbar{display:flex;align-items:center;gap:10px;padding:6px 2px 16px;}
+.topbar h1{font-size:20px;margin:0;font-weight:800;letter-spacing:-.4px;flex:1;}
+.back{font-size:24px;line-height:1;color:var(--primary);padding:4px 8px;margin-left:-8px;}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 2px 8px rgba(30,64,120,.06);padding:15px;margin-bottom:14px;
+  position:relative;overflow:hidden;}
+.card.strip{padding-left:18px;}
+.card.strip::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;
+  background:var(--strip);}
+.muted{color:var(--muted);font-size:13px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;
+  background:var(--primary);color:#fff;font-weight:700;border-radius:12px;
+  padding:12px 15px;font-size:15px;cursor:pointer;
+  box-shadow:0 3px 0 var(--primary-dd);transition:transform .05s,box-shadow .05s,background .15s;}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--primary-dd);background:var(--primary-d);}
+.btn:disabled{background:#c2c8d2;box-shadow:0 3px 0 #9aa3b2;cursor:not-allowed;}
+.btn.ghost{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #cdd9ef;}
+.btn.ghost:active{box-shadow:0 1px 0 #cdd9ef;}
+.del{background:#fdecec;color:var(--full);border:none;border-radius:8px;
+  padding:6px 10px;font-size:13px;cursor:pointer;font-weight:600;}
+.pill{font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;
+  background:var(--soft);color:var(--primary-dd);}
+"""
+
+MEAL_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>매식비 관리 · 로그인</title><style>""" + MEAL_BASE_CSS + """
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.login-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;
+  box-shadow:0 8px 30px rgba(30,64,120,.12);padding:30px 24px;width:100%;max-width:360px;text-align:center;}
+.login-logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#3b82f6,#1e40af);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 14px;
+  color:#fff;font-size:26px;box-shadow:0 4px 12px rgba(59,130,246,.35);}
+.login-card h1{font-size:20px;margin:0 0 4px;font-weight:800;letter-spacing:-.4px;}
+.login-card p{font-size:13px;color:var(--muted);margin:0 0 22px;}
+.login-card input{width:100%;font:inherit;font-size:18px;text-align:center;letter-spacing:6px;
+  border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff;}
+.login-card input:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
+.login-card .btn{width:100%;}
+.login-err{color:var(--full);font-size:13px;font-weight:600;margin-bottom:10px;min-height:18px;}
+</style></head><body>
+<div class=login-wrap>
+  <div class=login-card>
+    <div class=login-logo>&#127869;</div>
+    <h1>매식비 관리</h1>
+    <p>비밀번호를 입력해 주세요.</p>
+    <div class=login-err id=err></div>
+    <input id=pw type=password inputmode=numeric placeholder="****"
+           onkeydown="if(event.key=='Enter')doLogin()" autofocus>
+    <button class=btn onclick=doLogin()>로그인</button>
+  </div>
+</div>
+<script>
+async function doLogin(){
+  const pw = document.getElementById('pw').value;
+  const r = await fetch('/meal/api/login',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+  const res = await r.json();
+  if(res.ok){location.href='/meal';}
+  else{
+    document.getElementById('err').textContent = res.error||'로그인 실패';
+    document.getElementById('pw').value='';
+    document.getElementById('pw').focus();
+  }
+}
+</script>
+</body></html>"""
+
+MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>매식비 관리</title><style>""" + MEAL_BASE_CSS + """
+.lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;}
+.lead b{color:var(--ink);}
+.team-grid{display:grid;gap:12px;}
+.team-btn{display:flex;align-items:center;justify-content:space-between;
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
+  overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
+  transition:transform .06s,box-shadow .06s;}
+.team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
+.team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
+.team-btn .nm{display:flex;align-items:center;padding-left:8px;}
+.team-btn .arr{color:var(--primary);font-size:22px;}
+.logout{font-size:13px;color:var(--muted);background:var(--soft);border:none;
+  border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;}
+</style></head><body><div class=wrap>
+<div class=topbar>
+  <h1>매식비 관리</h1>
+  <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
+</div>
+<p class=lead>팀을 선택해 들어가서 달력에서 <b>날짜를 누르고 팀원을 골라</b> 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.<br>
+한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하고, 초과하면 자동으로 막힙니다.</p>
+<div class=team-grid>
+{% for t in teams %}
+  <a class=team-btn href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span><span class=arr>&#8594;</span></a>
+{% endfor %}
+</div>
+</div></body></html>"""
+
+MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>{{team.name}} · 매식비</title><style>""" + MEAL_BASE_CSS + """
+.monthbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.monthbar .m{font-size:17px;font-weight:800;}
+.navb{font-size:18px;color:var(--primary-dd);background:var(--soft);border:none;border-radius:10px;
+  padding:8px 14px;cursor:pointer;box-shadow:0 2px 0 #cdd9ef;}
+.navb:active{transform:translateY(1px);box-shadow:0 1px 0 #cdd9ef;}
+.teamtotal{display:flex;gap:10px;margin-bottom:14px;}
+.tot{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px;box-shadow:0 2px 8px rgba(30,64,120,.06);}
+.tot .lab{font-size:12px;color:var(--muted);}
+.tot .val{font-size:19px;font-weight:800;margin-top:3px;}
+.cal{width:100%;border-collapse:collapse;table-layout:fixed;}
+.cal th{font-size:12px;color:var(--muted);font-weight:700;padding:7px 0;}
+.cal th.sun{color:var(--full);} .cal th.sat{color:#2f6fd6;}
+.cal td{vertical-align:top;height:76px;border:1px solid var(--line);padding:3px;cursor:pointer;
+  background:var(--surface);transition:background .1s;border-radius:6px;}
+.cal td:active{background:var(--soft);}
+.cal td.out{background:#f3f5f9;color:#c2c8d2;cursor:default;}
+.cal td .dn{font-size:12px;font-weight:700;}
+.cal td.today .dn{background:var(--primary);color:#fff;border-radius:50%;
+  width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;}
+.chip{font-size:10px;line-height:1.3;background:var(--soft);color:var(--primary-dd);
+  border-radius:5px;padding:1px 4px;margin-top:2px;display:block;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+.sec-title{font-size:15px;font-weight:800;margin:22px 2px 10px;}
+.sumrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
+.sumrow:last-child{border-bottom:none;}
+.sumrow .nm{font-weight:700;min-width:64px;}
+.bar{flex:1;height:8px;background:#eef1f6;border-radius:5px;overflow:hidden;}
+.bar > i{display:block;height:100%;background:var(--ok);}
+.sumrow.full .bar > i{background:var(--full);}
+.cntpill{font-size:12px;font-weight:800;min-width:34px;text-align:right;}
+.cntpill.full{color:var(--full);}
+.amt{font-size:12px;color:var(--muted);min-width:74px;text-align:right;}
+.badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;}
+.badge.full{background:#fdecec;color:var(--full);}
+.empty{color:var(--muted);font-size:13px;padding:14px 4px;}
+.restrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
+.restrow:last-child{border-bottom:none;}
+.restrow .rn{flex:1;font-weight:700;}
+.restrow .rc{font-size:12px;color:var(--muted);min-width:44px;text-align:right;}
+.restrow .ra{font-size:13px;font-weight:700;min-width:84px;text-align:right;}
+.acc-head{display:flex;align-items:center;justify-content:space-between;
+  width:100%;background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:14px 16px;cursor:pointer;font-size:15px;font-weight:800;
+  box-shadow:0 2px 8px rgba(30,64,120,.06);}
+.acc-head .ico{color:var(--primary);font-size:14px;transition:transform .2s;}
+.acc-wrap.open .acc-head{border-radius:14px 14px 0 0;}
+.acc-wrap.open .acc-head .ico{transform:rotate(180deg);}
+.acc-body{display:none;background:var(--surface);border:1px solid var(--line);border-top:none;
+  border-radius:0 0 14px 14px;padding:6px 15px 14px;box-shadow:0 2px 8px rgba(30,64,120,.06);}
+.acc-wrap.open .acc-body{display:block;}
+.memrow{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line);}
+.memrow:last-child{border-bottom:none;}
+.memrow .nm{flex:1;font-weight:600;}
+.addmem{display:flex;gap:8px;margin-top:12px;}
+.addmem input{flex:1;}
+input,select{font:inherit;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff;}
+input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
+.editname{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
+  cursor:pointer;padding:7px 11px;border-radius:9px;font-weight:600;}
+.mask{position:fixed;inset:0;background:rgba(20,28,50,.5);display:none;
+  align-items:center;justify-content:center;z-index:50;padding:18px;}
+.mask.on{display:flex;}
+.modal{background:#fff;width:100%;max-width:440px;border-radius:20px;padding:20px 18px;
+  max-height:88vh;overflow-y:auto;animation:pop .16s ease;box-shadow:0 16px 50px rgba(20,28,50,.3);}
+@keyframes pop{from{transform:scale(.94);opacity:.5}to{transform:none;opacity:1}}
+.modal h3{margin:0 0 4px;font-size:17px;font-weight:800;}
+.modal .hint{font-size:13px;color:var(--muted);margin:0 0 14px;}
+.dayentries{margin:0 0 6px;}
+.de{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);}
+.de .nm{font-weight:700;min-width:54px;}
+.de .meta{flex:1;min-width:0;font-size:12px;color:var(--muted);line-height:1.4;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.de .am{color:var(--muted);font-size:13px;white-space:nowrap;}
+.flabel{font-size:13px;font-weight:700;margin:14px 0 6px;display:block;}
+.memberchecks{display:flex;flex-direction:column;max-height:220px;overflow-y:auto;
+  border:1px solid var(--line);border-radius:12px;}
+.mcheck{display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;
+  border-bottom:1px solid var(--line);}
+.mcheck:last-child{border-bottom:none;}
+.mcheck:active{background:var(--soft);}
+.mcheck input{flex:0 0 auto;width:18px;height:18px;margin:0;accent-color:var(--primary);}
+.mcheck .mname{flex:1 1 auto;min-width:0;font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;}
+.mcheck .mcount{flex:0 0 auto;font-size:12px;color:var(--muted);white-space:nowrap;}
+.mcheck .mtag{flex:0 0 auto;font-size:11px;color:var(--full);font-weight:700;white-space:nowrap;}
+.mcheck.disabled{opacity:.5;}
+.addform input,.addform select{width:100%;}
+.note{font-size:13px;border-radius:10px;padding:10px 12px;display:none;margin-top:10px;}
+.note.on{display:block;}
+.note.warn{color:var(--full);background:#fdecec;}
+.note.ok{color:#15663f;background:#e7f6ee;}
+.modalbtns{display:flex;gap:8px;margin-top:16px;}
+.modalbtns .btn{flex:1;}
+.cancelbtn{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #cdd9ef;}
+.cancelbtn:active{box-shadow:0 1px 0 #cdd9ef;}
+</style></head><body><div class=wrap>
+
+<div class=topbar>
+  <a class=back href="/meal">‹</a>
+  <h1 id=teamTitle>{{team.name}}</h1>
+  <button class=editname onclick="renameTeam()">이름수정</button>
+</div>
+
+<div class=monthbar>
+  <a class=navb href="/meal/team/{{team.id}}?ym={{prev_ym}}">‹</a>
+  <span class=m>{{year}}년 {{month}}월</span>
+  <a class=navb href="/meal/team/{{team.id}}?ym={{next_ym}}">›</a>
+</div>
+
+<div class=teamtotal>
+  <div class=tot><div class=lab>이번 달 총 사용</div><div class=val>{{ "{:,}".format(team_total) }}원</div></div>
+  <div class=tot><div class=lab>한도 마감 인원</div><div class=val>{{full_people}}명</div></div>
+</div>
+
+<div class=card style="padding:8px">
+<table class=cal>
+  <tr>{% for w in weekdays %}<th class="{% if loop.index0==0 %}sun{% elif loop.index0==6 %}sat{% endif %}">{{w}}</th>{% endfor %}</tr>
+  {% for week in weeks %}
+  <tr>
+    {% for c in week %}
+      {% if c.in_month %}
+      <td class="{% if c.is_today %}today{% endif %}" onclick="openDay('{{c.date_str}}')">
+        <span class=dn>{{c.day}}</span>
+        {% for e in c.entries %}<span class=chip>{{e.name}}</span>{% endfor %}
+      </td>
+      {% else %}
+      <td class=out><span class=dn>{{c.day}}</span></td>
+      {% endif %}
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<div class=sec-title>팀원별 집계 ({{month}}월)</div>
+<div class="card strip">
+{% if summaries %}
+  {% for s in summaries %}
+  <div class="sumrow {{s.status}}">
+    <span class=nm>{{s.name}}</span>
+    <span class="cntpill {{s.status}}">{{s.count}}/{{monthly_count}}</span>
+    <span class=bar><i style="width:{{ (s.count*100//monthly_count) if s.count<monthly_count else 100 }}%"></i></span>
+    <span class=amt>{{ "{:,}".format(s.total) }}원</span>
+    {% if s.status=='full' %}<span class="badge full">마감</span>{% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <div class=empty>아직 등록된 팀원이 없어요. 아래 팀원 관리에서 추가해 주세요.</div>
+{% endif %}
+</div>
+
+<div class=sec-title>식당별 집계 ({{month}}월)</div>
+<div class="card strip">
+{% if rest_summaries %}
+  {% for r in rest_summaries %}
+  <div class=restrow>
+    <span class=rn>{{r.name}}</span>
+    <span class=rc>{{r.count}}건</span>
+    <span class=ra>{{ "{:,}".format(r.total) }}원</span>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class=empty>아직 입력 내역이 없어요.</div>
+{% endif %}
+</div>
+
+<div class=sec-title>팀원 관리</div>
+<div class=acc-wrap id=memAcc>
+  <div class=acc-head onclick="document.getElementById('memAcc').classList.toggle('open')">
+    <span>팀원 {{members|length}}명</span>
+    <span class=ico>▼</span>
+  </div>
+  <div class=acc-body>
+    {% for m in members %}
+    <div class=memrow>
+      <span class=nm>{{m.name}}</span>
+      <button class=del onclick="delMember({{m.id}},'{{m.name}}')">삭제</button>
+    </div>
+    {% endfor %}
+    <div class=addmem>
+      <input id=newMember placeholder="새 팀원 이름" onkeydown="if(event.key=='Enter')addMember()">
+      <button class="btn" onclick="addMember()">추가</button>
+    </div>
+  </div>
+</div>
+
+<div class=mask id=mask>
+  <div class=modal>
+    <h3 id=modalDate></h3>
+    <p class=hint>팀원을 고르고 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.</p>
+    <div class=dayentries id=dayEntries></div>
+    <div class=addform>
+      <label class=flabel>팀원 선택 (여러 명 가능)</label>
+      <div class=memberchecks id=memberChecks></div>
+
+      <label class=flabel>식당</label>
+      <input id=restaurantInput placeholder="예: ○○식당">
+
+      <label class=flabel>결재자</label>
+      <select id=approverSel onchange="onApproverChange()">
+        <option value="">선택 안 함</option>
+        {% for m in members %}<option value="{{m.name}}">{{m.name}}</option>{% endfor %}
+        <option value="__other__">그 외 (직접 입력)</option>
+      </select>
+      <input id=approverOther placeholder="결재자 이름" style="display:none;margin-top:8px;">
+
+      <div class=note id=noteBox></div>
+      <div class=modalbtns>
+        <button class="btn" id=addBtn onclick="saveEntry()">추가하기</button>
+        <button class="btn cancelbtn" onclick="closeDay()">취소</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TEAM_ID = {{team.id}};
+const AMOUNT = {{amount}};
+const MONTHLY_COUNT = {{monthly_count}};
+const MONTHLY_CAP = {{cap}};
+const MEMBER_INFO = {{ member_info_json | safe }};
+const DAY_ENTRIES = {
+{% for week in weeks %}{% for c in week %}{% if c.in_month and c.entries %}"{{c.date_str}}":[{% for e in c.entries %}{id:{{e.id}},mid:{{e.member_id}},name:"{{e.name}}",rest:"{{e.restaurant}}",appr:"{{e.approver}}"},{% endfor %}],{% endif %}{% endfor %}{% endfor %}
+};
+const HAS_MEMBERS = {{ 'true' if members else 'false' }};
+let curDate = null;
+
+function fmt(n){return n.toLocaleString('ko-KR');}
+async function api(url, body){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return r.json();
+}
+
+function openDay(ds){
+  if(!HAS_MEMBERS){alert('먼저 팀원을 추가해 주세요.');return;}
+  curDate = ds;
+  document.getElementById('modalDate').textContent = ds.replace(/-/g,'.');
+  renderDayEntries();
+  renderMemberChecks();
+  document.getElementById('restaurantInput').value='';
+  document.getElementById('approverSel').value='';
+  document.getElementById('approverOther').value='';
+  document.getElementById('approverOther').style.display='none';
+  document.getElementById('noteBox').className='note';
+  document.getElementById('mask').classList.add('on');
+}
+function closeDay(){document.getElementById('mask').classList.remove('on');}
+document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='mask')closeDay();});
+
+function renderDayEntries(){
+  const box = document.getElementById('dayEntries');
+  const list = DAY_ENTRIES[curDate] || [];
+  if(!list.length){box.innerHTML='<div class=muted style="padding:4px 0 6px">이 날 입력 내역이 없어요.</div>';return;}
+  box.innerHTML = list.map(e=>{
+    let meta = [];
+    if(e.rest) meta.push('🍽 '+e.rest);
+    if(e.appr) meta.push('결재 '+e.appr);
+    return `<div class=de><span class=nm>${e.name}</span>`+
+      `<span class=meta>${meta.join(' · ')}</span>`+
+      `<span class=am>${fmt(AMOUNT)}원</span>`+
+      `<button class=del onclick="delEntry(${e.id})">삭제</button></div>`;
+  }).join('');
+}
+
+function renderMemberChecks(){
+  const box = document.getElementById('memberChecks');
+  let html='';
+  for(const mid in MEMBER_INFO){
+    const info = MEMBER_INFO[mid];
+    const already = info.days.includes(curDate);
+    const full = info.count >= MONTHLY_COUNT;
+    const disabled = already || full;
+    let tag = '';
+    if(already) tag='<span class=mtag>이미 입력</span>';
+    else if(full) tag='<span class=mtag>한도초과</span>';
+    html += `<label class="mcheck ${disabled?'disabled':''}">`+
+      `<input type=checkbox value="${mid}" ${disabled?'disabled':''}>`+
+      `<span class=mname>${info.name}</span>`+
+      `<span class=mcount>${info.count}/${MONTHLY_COUNT}</span>`+
+      `${tag}</label>`;
+  }
+  box.innerHTML = html;
+}
+
+function onApproverChange(){
+  const sel = document.getElementById('approverSel');
+  const other = document.getElementById('approverOther');
+  if(sel.value==='__other__'){other.style.display='block';other.focus();}
+  else{other.style.display='none';}
+}
+
+async function saveEntry(){
+  const checks = document.querySelectorAll('#memberChecks input:checked');
+  const ids = Array.from(checks).map(c=>parseInt(c.value,10));
+  const note = document.getElementById('noteBox');
+  if(!ids.length){note.className='note warn on';note.textContent='팀원을 한 명 이상 선택해 주세요.';return;}
+  const rest = document.getElementById('restaurantInput').value.trim();
+  if(!rest){note.className='note warn on';note.textContent='식당명을 입력해 주세요.';return;}
+  let appr = document.getElementById('approverSel').value;
+  if(appr==='__other__') appr = document.getElementById('approverOther').value.trim();
+  if(appr==='') appr='';
+
+  const res = await api('/meal/api/entry',{team_id:TEAM_ID,member_ids:ids,date:curDate,
+    restaurant:rest,approver:appr});
+  if(res.ok){
+    if(res.skipped && res.skipped.length){
+      alert('추가: '+res.added.join(', ')+'\\n제외: '+res.skipped.join(', '));
+    }
+    location.reload();
+  }else{
+    note.className='note warn on';note.textContent=res.error||'저장에 실패했어요.';
+  }
+}
+async function delEntry(id){
+  if(!confirm('이 입력을 삭제할까요?'))return;
+  const res = await api('/meal/api/entry/delete',{entry_id:id});
+  if(res.ok)location.reload();
+}
+async function addMember(){
+  const inp = document.getElementById('newMember');
+  const name = inp.value.trim();
+  if(!name){inp.focus();return;}
+  const res = await api('/meal/api/member/add',{team_id:TEAM_ID,name:name});
+  if(res.ok)location.reload(); else alert(res.error||'추가 실패');
+}
+async function delMember(id,name){
+  if(!confirm(`'${name}' 팀원을 삭제할까요? 입력 내역도 함께 삭제돼요.`))return;
+  const res = await api('/meal/api/member/delete',{member_id:id});
+  if(res.ok)location.reload();
+}
+async function renameTeam(){
+  const name = prompt('팀 이름', document.getElementById('teamTitle').textContent);
+  if(!name||!name.trim())return;
+  const res = await api('/meal/api/team/rename',{team_id:TEAM_ID,name:name.trim()});
+  if(res.ok)location.reload(); else alert(res.error||'변경 실패');
+}
+</script>
+</div></body></html>"""
+# ================================================================
+# ===============  매식비 관리 모듈 끝  ==========================
+# ================================================================
+
+
+
 if __name__ == "__main__":
 
 
