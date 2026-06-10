@@ -10026,6 +10026,21 @@ def meal_delete_entry():
     return jsonify(ok=True)
 
 
+@app.route("/meal/api/entry/delete-many", methods=["POST"])
+@meal_login_required
+def meal_delete_entries():
+    data = request.get_json(force=True)
+    ids = data.get("entry_ids") or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    if ids:
+        idlist = ",".join(str(i) for i in ids)
+        _meal_delete("meal_entries", f"id=in.({idlist})")
+    return jsonify(ok=True)
+
+
 @app.route("/meal/api/member/add", methods=["POST"])
 @meal_login_required
 def meal_add_member():
@@ -10047,6 +10062,21 @@ def meal_delete_member():
     member_id = int(data.get("member_id", 0))
     # 기존 입력 기록은 그대로 두고, 명단에서만 숨김 처리(소프트 삭제)
     _meal_patch("meal_members", f"id=eq.{member_id}", {"active": False})
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/member/delete-many", methods=["POST"])
+@meal_login_required
+def meal_delete_members():
+    data = request.get_json(force=True)
+    ids = data.get("member_ids") or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    if ids:
+        idlist = ",".join(str(i) for i in ids)
+        _meal_patch("meal_members", f"id=in.({idlist})", {"active": False})
     return jsonify(ok=True)
 
 
@@ -10235,6 +10265,12 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .memrow{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line);}
 .memrow:last-child{border-bottom:none;}
 .memrow .nm{flex:1;font-weight:600;}
+.memrow .memchk{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:var(--primary);}
+.memtools{display:flex;gap:8px;margin-bottom:8px;}
+.selbtn,.selcancel{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
+  font-weight:600;padding:7px 12px;border-radius:9px;cursor:pointer;}
+.seldel{background:#fdecec;border:none;color:var(--full);font-size:13px;font-weight:700;
+  padding:7px 12px;border-radius:9px;cursor:pointer;}
 .addmem{display:flex;gap:8px;margin-top:12px;align-items:stretch;}
 .addmem input{flex:1 1 auto;min-width:0;}
 .addmem .btn{flex:0 0 auto;white-space:nowrap;padding:11px 16px;}
@@ -10256,6 +10292,8 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 .de .meta{flex:1;min-width:0;font-size:12px;color:var(--muted);line-height:1.4;
   white-space:normal;word-break:break-all;}
 .de .am{color:var(--muted);font-size:13px;white-space:nowrap;}
+.de .entrychk{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:var(--primary);margin-top:1px;}
+.detools{display:flex;justify-content:flex-end;gap:8px;margin:8px 0 2px;}
 .flabel{font-size:13px;font-weight:700;margin:14px 0 6px;display:block;}
 .memberchecks{display:flex;flex-direction:column;max-height:220px;overflow-y:auto;overflow-x:hidden;
   border:1px solid var(--line);border-radius:12px;}
@@ -10356,10 +10394,16 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
     <span class=ico>▼</span>
   </div>
   <div class=acc-body>
+    <div class=memtools>
+      <button class=selbtn id=selToggle onclick="toggleSelMode()">선택 삭제</button>
+      <button class=seldel id=selDelBtn onclick="delSelected()" style="display:none">선택한 0명 삭제</button>
+      <button class=selcancel id=selCancelBtn onclick="toggleSelMode()" style="display:none">취소</button>
+    </div>
     {% for m in members %}
     <div class=memrow>
+      <input type=checkbox class=memchk value="{{m.id}}" data-name="{{m.name}}" onchange="updateSelCount()" style="display:none">
       <span class=nm>{{m.name}}</span>
-      <button class=del onclick="delMember({{m.id}},'{{m.name}}')">삭제</button>
+      <button class="del rowdel" onclick="delMember({{m.id}},'{{m.name}}')">삭제</button>
     </div>
     {% endfor %}
     <div class=addmem>
@@ -10420,6 +10464,7 @@ function openDay(ds){
   if(!HAS_MEMBERS){alert('먼저 팀원을 추가해 주세요.');return;}
   curDate = ds;
   document.getElementById('modalDate').textContent = ds.replace(/-/g,'.');
+  entrySelMode=false;
   renderDayEntries();
   renderMemberChecks();
   document.getElementById('restaurantInput').value='';
@@ -10433,19 +10478,44 @@ function openDay(ds){
 function closeDay(){document.getElementById('mask').classList.remove('on');document.body.style.overflow='';}
 document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='mask')closeDay();});
 
+let entrySelMode=false;
 function renderDayEntries(){
   const box = document.getElementById('dayEntries');
   const list = DAY_ENTRIES[curDate] || [];
-  if(!list.length){box.innerHTML='<div class=muted style="padding:4px 0 6px">이 날 입력 내역이 없어요.</div>';return;}
-  box.innerHTML = list.map(e=>{
+  if(!list.length){entrySelMode=false;box.innerHTML='<div class=muted style="padding:4px 0 6px">이 날 입력 내역이 없어요.</div>';return;}
+  const rows = list.map(e=>{
     let meta = [];
     if(e.rest) meta.push(e.rest);
     if(e.appr) meta.push('결재 '+e.appr);
-    return `<div class=de><span class=nm>${e.name}</span>`+
+    return `<div class=de>`+
+      `<input type=checkbox class=entrychk value="${e.id}" onchange="updateEntrySelCount()" style="display:${entrySelMode?'block':'none'}">`+
+      `<span class=nm>${e.name}</span>`+
       `<span class=meta>${meta.join(' · ')}</span>`+
       `<span class=am>${fmt(AMOUNT)}원</span>`+
-      `<button class=del onclick="delEntry(${e.id})">삭제</button></div>`;
+      `<button class="del entrydel" onclick="delEntry(${e.id})" style="display:${entrySelMode?'none':''}">삭제</button></div>`;
   }).join('');
+  let tools = '';
+  if(list.length >= 2){
+    tools = `<div class=detools>`+(entrySelMode
+      ? `<button class=seldel id=entrySelDelBtn onclick="delSelectedEntries()">선택한 0건 삭제</button>`+
+        `<button class=selcancel onclick="toggleEntrySelMode()">취소</button>`
+      : `<button class=selbtn onclick="toggleEntrySelMode()">선택 삭제</button>`)+`</div>`;
+  }
+  box.innerHTML = rows + tools;
+}
+function toggleEntrySelMode(){entrySelMode=!entrySelMode;renderDayEntries();}
+function updateEntrySelCount(){
+  const n=document.querySelectorAll('#dayEntries .entrychk:checked').length;
+  const b=document.getElementById('entrySelDelBtn');
+  if(b)b.textContent='선택한 '+n+'건 삭제';
+}
+async function delSelectedEntries(){
+  const checked=Array.from(document.querySelectorAll('#dayEntries .entrychk:checked'));
+  if(!checked.length){alert('삭제할 항목을 선택해 주세요.');return;}
+  if(!confirm(`선택한 ${checked.length}건을 삭제할까요?`))return;
+  const ids=checked.map(c=>parseInt(c.value,10));
+  const res=await api('/meal/api/entry/delete-many',{entry_ids:ids});
+  if(res.ok)location.reload(); else alert(res.error||'삭제 실패');
 }
 
 function renderMemberChecks(){
@@ -10453,18 +10523,16 @@ function renderMemberChecks(){
   let html='';
   for(const mid in MEMBER_INFO){
     const info = MEMBER_INFO[mid];
-    const already = info.days.includes(curDate);
+    if(info.days.includes(curDate)) continue; // 그 날 이미 입력한 사람은 숨김(위 내역에 표시됨)
     const full = info.count >= MONTHLY_COUNT;
-    const disabled = already || full;
-    let tag = '';
-    if(already) tag='<span class=mtag>이미 입력</span>';
-    else if(full) tag='<span class=mtag>한도초과</span>';
-    html += `<label class="mcheck ${disabled?'disabled':''}">`+
-      `<input type=checkbox value="${mid}" ${disabled?'disabled':''}>`+
+    const tag = full ? '<span class=mtag>한도초과</span>' : '';
+    html += `<label class="mcheck ${full?'disabled':''}">`+
+      `<input type=checkbox value="${mid}" ${full?'disabled':''}>`+
       `<span class=mname>${info.name}</span>`+
       `<span class=mcount>${info.count}/${MONTHLY_COUNT}</span>`+
       `${tag}</label>`;
   }
+  if(!html) html='<div class=muted style="padding:14px;text-align:center;font-size:13px">오늘 추가할 수 있는 팀원이 없어요.</div>';
   box.innerHTML = html;
 }
 
@@ -10513,6 +10581,29 @@ async function delMember(id,name){
   if(!confirm(`'${name}' 팀원을 명단에서 삭제할까요?\n\n지금까지 입력한 식비 기록은 그대로 남고,\n팀원 선택 명단에서만 빠집니다.`))return;
   const res = await api('/meal/api/member/delete',{member_id:id});
   if(res.ok)location.reload();
+}
+let selMode=false;
+function toggleSelMode(){
+  selMode=!selMode;
+  document.querySelectorAll('.memchk').forEach(c=>{c.style.display=selMode?'block':'none';if(!selMode)c.checked=false;});
+  document.querySelectorAll('.rowdel').forEach(b=>{b.style.display=selMode?'none':'';});
+  document.getElementById('selToggle').style.display=selMode?'none':'';
+  document.getElementById('selDelBtn').style.display=selMode?'':'none';
+  document.getElementById('selCancelBtn').style.display=selMode?'':'none';
+  updateSelCount();
+}
+function updateSelCount(){
+  const n=document.querySelectorAll('.memchk:checked').length;
+  document.getElementById('selDelBtn').textContent='선택한 '+n+'명 삭제';
+}
+async function delSelected(){
+  const checked=Array.from(document.querySelectorAll('.memchk:checked'));
+  if(!checked.length){alert('삭제할 팀원을 선택해 주세요.');return;}
+  const names=checked.map(c=>c.dataset.name).join(', ');
+  if(!confirm(`선택한 ${checked.length}명(${names})을 명단에서 삭제할까요?\n\n입력한 식비 기록은 그대로 남고, 팀원 명단에서만 빠집니다.`))return;
+  const ids=checked.map(c=>parseInt(c.value,10));
+  const res=await api('/meal/api/member/delete-many',{member_ids:ids});
+  if(res.ok)location.reload(); else alert(res.error||'삭제 실패');
 }
 async function renameTeam(){
   const name = prompt('팀 이름', document.getElementById('teamTitle').textContent);
