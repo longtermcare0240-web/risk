@@ -10143,7 +10143,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;word-break:keep-all;}
 .lead b{color:var(--ink);}
 .lead-line{display:block;}
-.team-grid{display:grid;gap:12px;max-width:440px;margin:0 auto;}
+.team-grid{display:grid;gap:12px;}
 .team-btn{display:flex;align-items:center;justify-content:center;
   background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
