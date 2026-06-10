@@ -9866,13 +9866,14 @@ def meal_team_page(team_id):
         return _meal_redirect("/meal")
     team = trows[0]
 
-    members = _meal_get(f"meal_members?team_id=eq.{team_id}&select=*&order=id.asc")
+    members_all = _meal_get(f"meal_members?team_id=eq.{team_id}&select=*&order=id.asc")
+    members = [m for m in members_all if m.get("active", True) is not False]
     prefix = meal_ym_str(year, month)
     rows = _meal_get(
         f"meal_entries?team_id=eq.{team_id}&d=like.{prefix}*"
         f"&select=*&order=d.asc,id.asc")
 
-    member_name = {m["id"]: m["name"] for m in members}
+    member_name = {m["id"]: m["name"] for m in members_all}
 
     by_date = {}
     for r in rows:
@@ -9889,10 +9890,17 @@ def meal_team_page(team_id):
         per_member_days.setdefault(r["member_id"], [])
         per_member_days[r["member_id"]].append(r["d"])
 
+    # 삭제(비활성)된 팀원이라도 이번 달 기록이 있으면 집계에 그대로 표시
+    entry_mids = {r["member_id"] for r in rows}
+    active_ids = {m["id"] for m in members}
+    summary_members = list(members) + [
+        m for m in members_all
+        if m["id"] not in active_ids and m["id"] in entry_mids]
+
     summaries = []
     team_total = 0
     full_people = 0
-    for m in members:
+    for m in summary_members:
         cnt = len(per_member_days.get(m["id"], []))
         st = meal_status_of(cnt)
         if st == "full":
@@ -10037,8 +10045,8 @@ def meal_add_member():
 def meal_delete_member():
     data = request.get_json(force=True)
     member_id = int(data.get("member_id", 0))
-    _meal_delete("meal_entries", f"member_id=eq.{member_id}")
-    _meal_delete("meal_members", f"id=eq.{member_id}")
+    # 기존 입력 기록은 그대로 두고, 명단에서만 숨김 처리(소프트 삭제)
+    _meal_patch("meal_members", f"id=eq.{member_id}", {"active": False})
     return jsonify(ok=True)
 
 
@@ -10149,7 +10157,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
   overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
   transition:transform .06s,box-shadow .06s;}
-.team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
+.team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:8px;background:var(--strip);}
 .team-btn.tf::before{background:#dd6b6b;}
 .team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
 .team-btn .nm{display:flex;align-items:center;justify-content:center;text-align:center;}
@@ -10235,7 +10243,7 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 .editname{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
   cursor:pointer;padding:7px 11px;border-radius:9px;font-weight:600;}
 .mask{position:fixed;inset:0;background:rgba(20,28,50,.5);display:none;
-  align-items:center;justify-content:center;z-index:50;padding:18px;}
+  align-items:center;justify-content:center;z-index:50;padding:18px;overscroll-behavior:contain;}
 .mask.on{display:flex;}
 .modal{background:#fff;width:100%;max-width:440px;border-radius:20px;padding:20px 18px;
   max-height:88vh;overflow-y:auto;animation:pop .16s ease;box-shadow:0 16px 50px rgba(20,28,50,.3);}
@@ -10243,10 +10251,10 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 .modal h3{margin:0 0 4px;font-size:17px;font-weight:800;}
 .modal .hint{font-size:13px;color:var(--muted);margin:0 0 14px;}
 .dayentries{margin:0 0 6px;}
-.de{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);}
+.de{display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);}
 .de .nm{font-weight:700;min-width:54px;}
 .de .meta{flex:1;min-width:0;font-size:12px;color:var(--muted);line-height:1.4;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  white-space:normal;word-break:break-all;}
 .de .am{color:var(--muted);font-size:13px;white-space:nowrap;}
 .flabel{font-size:13px;font-weight:700;margin:14px 0 6px;display:block;}
 .memberchecks{display:flex;flex-direction:column;max-height:220px;overflow-y:auto;overflow-x:hidden;
@@ -10420,8 +10428,9 @@ function openDay(ds){
   document.getElementById('approverOther').style.display='none';
   document.getElementById('noteBox').className='note';
   document.getElementById('mask').classList.add('on');
+  document.body.style.overflow='hidden';
 }
-function closeDay(){document.getElementById('mask').classList.remove('on');}
+function closeDay(){document.getElementById('mask').classList.remove('on');document.body.style.overflow='';}
 document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='mask')closeDay();});
 
 function renderDayEntries(){
@@ -10430,7 +10439,7 @@ function renderDayEntries(){
   if(!list.length){box.innerHTML='<div class=muted style="padding:4px 0 6px">이 날 입력 내역이 없어요.</div>';return;}
   box.innerHTML = list.map(e=>{
     let meta = [];
-    if(e.rest) meta.push('🍽 '+e.rest);
+    if(e.rest) meta.push(e.rest);
     if(e.appr) meta.push('결재 '+e.appr);
     return `<div class=de><span class=nm>${e.name}</span>`+
       `<span class=meta>${meta.join(' · ')}</span>`+
@@ -10501,7 +10510,7 @@ async function addMember(){
   if(res.ok)location.reload(); else alert(res.error||'추가 실패');
 }
 async function delMember(id,name){
-  if(!confirm(`'${name}' 팀원을 삭제할까요? 입력 내역도 함께 삭제돼요.`))return;
+  if(!confirm(`'${name}' 팀원을 명단에서 삭제할까요?\n\n지금까지 입력한 식비 기록은 그대로 남고,\n팀원 선택 명단에서만 빠집니다.`))return;
   const res = await api('/meal/api/member/delete',{member_id:id});
   if(res.ok)location.reload();
 }
