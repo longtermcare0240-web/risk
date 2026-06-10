@@ -10143,8 +10143,8 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;word-break:keep-all;}
 .lead b{color:var(--ink);}
 .lead-line{display:block;}
-.team-grid{display:grid;gap:12px;}
-.team-btn{display:flex;align-items:center;justify-content:flex-start;
+.team-grid{display:grid;gap:12px;max-width:440px;margin:0 auto;}
+.team-btn{display:flex;align-items:center;justify-content:center;
   background:var(--surface);border:1px solid var(--line);border-radius:16px;
   padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
   overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
@@ -10152,7 +10152,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
 .team-btn.tf::before{background:#dd6b6b;}
 .team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
-.team-btn .nm{display:flex;align-items:center;padding-left:8px;}
+.team-btn .nm{display:flex;align-items:center;justify-content:center;text-align:center;}
 .logout{font-size:13px;color:var(--muted);background:var(--soft);border:none;
   border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;}
 </style></head><body><div class=wrap>
