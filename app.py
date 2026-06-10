@@ -9906,11 +9906,13 @@ def meal_team_page(team_id):
     for r in rows:
         key = (r.get("restaurant") or "").strip() or "미지정"
         if key not in rest_map:
-            rest_map[key] = {"name": key, "count": 0, "total": 0}
-        rest_map[key]["count"] += 1
+            rest_map[key] = {"name": key, "days": set(), "total": 0}
+        rest_map[key]["days"].add(r["d"])
         rest_map[key]["total"] += r.get("amount") or MEAL_FIXED_AMOUNT
-    rest_summaries = sorted(rest_map.values(),
-                            key=lambda x: x["total"], reverse=True)
+    rest_summaries = sorted(
+        [{"name": v["name"], "count": len(v["days"]), "total": v["total"]}
+         for v in rest_map.values()],
+        key=lambda x: x["total"], reverse=True)
 
     cal = _meal_calendar.Calendar(firstweekday=6)
     today = meal_today_kst()
@@ -10148,6 +10150,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
   transition:transform .06s,box-shadow .06s;}
 .team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
+.team-btn.tf::before{background:#dd6b6b;}
 .team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
 .team-btn .nm{display:flex;align-items:center;padding-left:8px;}
 .logout{font-size:13px;color:var(--muted);background:var(--soft);border:none;
@@ -10162,7 +10165,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <span class=lead-line>한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하며, 초과 입력은 자동으로 막힙니다.</span></p>
 <div class=team-grid>
 {% for t in teams %}
-  <a class=team-btn href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span></a>
+  <a class="team-btn{% if '통합돌봄' in t.name %} tf{% endif %}" href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span></a>
 {% endfor %}
 </div>
 </div></body></html>"""
@@ -10224,8 +10227,9 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .memrow{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line);}
 .memrow:last-child{border-bottom:none;}
 .memrow .nm{flex:1;font-weight:600;}
-.addmem{display:flex;gap:8px;margin-top:12px;}
-.addmem input{flex:1;}
+.addmem{display:flex;gap:8px;margin-top:12px;align-items:stretch;}
+.addmem input{flex:1 1 auto;min-width:0;}
+.addmem .btn{flex:0 0 auto;white-space:nowrap;padding:11px 16px;}
 input,select{font:inherit;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff;}
 input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 .editname{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
