@@ -9712,7 +9712,7 @@ MEAL_MONTHLY_COUNT = 6
 MEAL_MONTHLY_CAP = MEAL_FIXED_AMOUNT * MEAL_MONTHLY_COUNT
 MEAL_PASSWORD = "3333"
 MEAL_ADMIN_PASSWORD = "qwer"   # 백업/복원 관리자 화면 비밀번호
-MEAL_BACKUP_SLOTS = 10         # 수동 저장 슬롯 개수 (1~10)
+MEAL_BACKUP_SLOTS = 3          # 수동 저장 슬롯 개수 (1~3)
 MEAL_AUTO_SLOT = 0             # 복원 직전 자동저장 슬롯
 
 
@@ -10641,7 +10641,7 @@ MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .sbtn{border:none;border-radius:10px;padding:9px 13px;font-size:13px;font-weight:700;cursor:pointer;
   letter-spacing:-.2px;transition:transform .06s,filter .12s;}
 .sbtn:active{transform:translateY(1px);}
-.sbtn.save{background:linear-gradient(180deg,var(--primary),var(--primary-d));color:#fff;box-shadow:0 2px 0 var(--primary-dd);}
+.sbtn.save{background:linear-gradient(180deg,#8ba0f6,#7186ef);color:#fff;box-shadow:0 2px 0 #5b72e3;}
 .sbtn.load{background:var(--ok-soft);color:var(--ok);}
 .sbtn.dl{background:var(--soft);color:var(--primary-dd);}
 .sbtn.rm{background:var(--full-soft);color:var(--full);}
