@@ -10570,7 +10570,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .sec-title .dot{width:7px;height:7px;border-radius:50%;background:var(--primary);
   box-shadow:0 0 0 3px rgba(79,110,240,.18);}
 
-.team-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.team-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px 10px;}
 .team-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
   background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:13px 12px;
   box-shadow:var(--shadow-sm);position:relative;overflow:hidden;text-align:center;
