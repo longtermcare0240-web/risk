@@ -9711,6 +9711,9 @@ MEAL_FIXED_AMOUNT = 9000
 MEAL_MONTHLY_COUNT = 6
 MEAL_MONTHLY_CAP = MEAL_FIXED_AMOUNT * MEAL_MONTHLY_COUNT
 MEAL_PASSWORD = "3333"
+MEAL_ADMIN_PASSWORD = "qwer"   # 백업/복원 관리자 화면 비밀번호
+MEAL_BACKUP_SLOTS = 10         # 수동 저장 슬롯 개수 (1~10)
+MEAL_AUTO_SLOT = 0             # 복원 직전 자동저장 슬롯
 
 
 # ---------------------------------------------------------------- Supabase REST
@@ -9754,6 +9757,110 @@ def _meal_patch(table, filt, payload):
 def _meal_delete(table, filt):
     return requests.delete(f"{SUPABASE_URL}/rest/v1/{table}?{filt}",
                            headers=_meal_headers(), timeout=10)
+
+
+# ---------------------------------------------------------------- 백업 / 복원
+def meal_make_snapshot():
+    """현재 매식비 데이터 전체(팀/팀원/입력내역)를 하나의 딕셔너리로 묶는다."""
+    teams = _meal_get("meal_teams?select=*&order=sort_order.asc,id.asc")
+    members = _meal_get("meal_members?select=*&order=id.asc")
+    entries = _meal_get("meal_entries?select=*&order=id.asc")
+    return {
+        "version": 1,
+        "saved_at": datetime.now(MEAL_KST).isoformat(),
+        "teams": teams,
+        "members": members,
+        "entries": entries,
+        "counts": {
+            "teams": len(teams),
+            "members": len(members),
+            "entries": len(entries),
+        },
+    }
+
+
+def _meal_chunks(lst, size):
+    for i in range(0, len(lst), size):
+        yield lst[i:i + size]
+
+
+def meal_restore_snapshot(snap):
+    """스냅샷으로 현재 데이터를 통째로 교체한다.
+    id 충돌/시퀀스 문제를 피하려고, 새 id를 받아 옛 id -> 새 id로 다시 연결한다."""
+    teams = snap.get("teams") or []
+    members = snap.get("members") or []
+    entries = snap.get("entries") or []
+
+    # 1) 기존 데이터 삭제 (자식 -> 부모 순서로)
+    _meal_delete("meal_entries", "id=gt.0")
+    _meal_delete("meal_members", "id=gt.0")
+    _meal_delete("meal_teams", "id=gt.0")
+
+    # 2) 팀 복원 (옛 id -> 새 id)
+    team_map = {}
+    if teams:
+        payload = [{"name": t.get("name", ""),
+                    "sort_order": t.get("sort_order", 0)} for t in teams]
+        resp = _meal_post("meal_teams", payload)
+        if resp.status_code >= 400:
+            raise RuntimeError("teams: " + resp.text)
+        for old, new in zip(teams, resp.json()):
+            team_map[old["id"]] = new["id"]
+
+    # 3) 팀원 복원 (옛 id -> 새 id, team_id 재매핑)
+    mem_map = {}
+    if members:
+        payload = [{"team_id": team_map.get(m.get("team_id")),
+                    "name": m.get("name", ""),
+                    "active": m.get("active", True)} for m in members]
+        resp = _meal_post("meal_members", payload)
+        if resp.status_code >= 400:
+            raise RuntimeError("members: " + resp.text)
+        for old, new in zip(members, resp.json()):
+            mem_map[old["id"]] = new["id"]
+
+    # 4) 입력내역 복원 (team_id / member_id 재매핑, 큰 데이터는 나눠 삽입)
+    if entries:
+        payload = [{"team_id": team_map.get(e.get("team_id")),
+                    "member_id": mem_map.get(e.get("member_id")),
+                    "d": e.get("d"),
+                    "amount": e.get("amount", MEAL_FIXED_AMOUNT),
+                    "restaurant": e.get("restaurant") or "",
+                    "approver": e.get("approver") or "",
+                    "created_at": e.get("created_at")} for e in entries]
+        payload = [p for p in payload
+                   if p["team_id"] and p["member_id"] and p["d"]]
+        for chunk in _meal_chunks(payload, 400):
+            resp = _meal_post("meal_entries", chunk)
+            if resp.status_code >= 400:
+                raise RuntimeError("entries: " + resp.text)
+
+
+def meal_save_backup(slot, label, snap):
+    """slot 자리에 백업을 저장(기존 것 있으면 교체)."""
+    _meal_delete("meal_backups", f"slot=eq.{slot}")
+    return _meal_post("meal_backups", {
+        "slot": slot,
+        "label": (label or "").strip()[:60],
+        "created_at": datetime.now(MEAL_KST).isoformat(),
+        "payload": snap,
+    })
+
+
+def meal_backup_list():
+    rows = _meal_get("meal_backups?select=slot,label,created_at,payload&order=slot.asc")
+    by_slot = {}
+    for r in rows:
+        c = (r.get("payload") or {}).get("counts") or {}
+        by_slot[r["slot"]] = {
+            "slot": r["slot"],
+            "label": r.get("label") or "",
+            "created_at": r.get("created_at") or "",
+            "teams": c.get("teams", 0),
+            "members": c.get("members", 0),
+            "entries": c.get("entries", 0),
+        }
+    return by_slot
 
 
 # ---------------------------------------------------------------- helpers
@@ -9822,6 +9929,17 @@ def meal_login_required(fn):
     return _wrap
 
 
+def meal_admin_required(fn):
+    @_meal_functools.wraps(fn)
+    def _wrap(*a, **k):
+        if not session.get("meal_admin_authed"):
+            if request.path.startswith("/meal/api/"):
+                return jsonify(ok=False, error="관리자 인증이 필요해요."), 401
+            return _meal_redirect("/meal/admin/login")
+        return fn(*a, **k)
+    return _wrap
+
+
 # ---------------------------------------------------------------- routes
 @app.route("/meal/login")
 def meal_login_page():
@@ -9844,6 +9962,136 @@ def meal_do_login():
 def meal_logout():
     session.pop("meal_authed", None)
     return _meal_redirect("/meal/login")
+
+
+# ---------------------------------------------------------------- 관리자(백업)
+@app.route("/meal/admin/login")
+def meal_admin_login_page():
+    if session.get("meal_admin_authed"):
+        return _meal_redirect("/meal/admin")
+    return render_template_string(MEAL_ADMIN_LOGIN_HTML)
+
+
+@app.route("/meal/api/admin/login", methods=["POST"])
+def meal_admin_do_login():
+    data = request.get_json(force=True)
+    pw = (data.get("password") or "").strip()
+    if pw == MEAL_ADMIN_PASSWORD:
+        session["meal_admin_authed"] = True
+        return jsonify(ok=True)
+    return jsonify(ok=False, error="비밀번호가 올바르지 않아요."), 401
+
+
+@app.route("/meal/admin/logout")
+def meal_admin_logout():
+    session.pop("meal_admin_authed", None)
+    return _meal_redirect("/meal/login")
+
+
+@app.route("/meal/admin")
+@meal_admin_required
+def meal_admin_page():
+    backups = meal_backup_list()
+    now = meal_make_snapshot()["counts"]
+    return render_template_string(
+        MEAL_ADMIN_HTML,
+        slots=list(range(1, MEAL_BACKUP_SLOTS + 1)),
+        backups=backups,
+        auto=backups.get(MEAL_AUTO_SLOT),
+        auto_slot=MEAL_AUTO_SLOT,
+        now=now,
+    )
+
+
+@app.route("/meal/api/admin/save", methods=["POST"])
+@meal_admin_required
+def meal_admin_save():
+    data = request.get_json(force=True)
+    try:
+        slot = int(data.get("slot"))
+    except Exception:
+        return jsonify(ok=False, error="슬롯이 올바르지 않아요."), 400
+    if not (1 <= slot <= MEAL_BACKUP_SLOTS):
+        return jsonify(ok=False, error="슬롯이 올바르지 않아요."), 400
+    label = data.get("label") or ""
+    snap = meal_make_snapshot()
+    resp = meal_save_backup(slot, label, snap)
+    if resp.status_code >= 400:
+        return jsonify(ok=False, error="저장 중 오류가 발생했어요."), 500
+    return jsonify(ok=True, counts=snap["counts"])
+
+
+@app.route("/meal/api/admin/load", methods=["POST"])
+@meal_admin_required
+def meal_admin_load():
+    data = request.get_json(force=True)
+    try:
+        slot = int(data.get("slot"))
+    except Exception:
+        return jsonify(ok=False, error="슬롯이 올바르지 않아요."), 400
+    rows = _meal_get(f"meal_backups?slot=eq.{slot}&select=payload")
+    if not rows:
+        return jsonify(ok=False, error="해당 슬롯에 백업이 없어요."), 404
+    snap = rows[0].get("payload") or {}
+    # 복원 전에 현재 상태를 자동저장본(slot 0)으로 보관 → 실수 복원 되돌리기용
+    try:
+        cur = meal_make_snapshot()
+        meal_save_backup(MEAL_AUTO_SLOT, "복원 직전 자동저장", cur)
+    except Exception as e:
+        print("meal auto-backup err:", e)
+    try:
+        meal_restore_snapshot(snap)
+    except Exception as e:
+        print("meal restore err:", e)
+        return jsonify(ok=False, error="복원 중 오류가 발생했어요."), 500
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/admin/delete", methods=["POST"])
+@meal_admin_required
+def meal_admin_delete():
+    data = request.get_json(force=True)
+    try:
+        slot = int(data.get("slot"))
+    except Exception:
+        return jsonify(ok=False, error="슬롯이 올바르지 않아요."), 400
+    _meal_delete("meal_backups", f"slot=eq.{slot}")
+    return jsonify(ok=True)
+
+
+@app.route("/meal/admin/download/<int:slot>")
+@meal_admin_required
+def meal_admin_download(slot):
+    rows = _meal_get(f"meal_backups?slot=eq.{slot}&select=payload,created_at")
+    if not rows:
+        return _meal_redirect("/meal/admin")
+    snap = rows[0].get("payload") or {}
+    raw = json.dumps(snap, ensure_ascii=False, indent=2)
+    stamp = (rows[0].get("created_at") or meal_today_kst().isoformat())[:10]
+    fname = f"meal_backup_slot{slot}_{stamp}.json"
+    return Response(
+        raw, mimetype="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+@app.route("/meal/api/admin/restore-file", methods=["POST"])
+@meal_admin_required
+def meal_admin_restore_file():
+    data = request.get_json(force=True)
+    snap = data.get("snapshot")
+    if not isinstance(snap, dict) or "entries" not in snap:
+        return jsonify(ok=False, error="백업 파일 형식이 올바르지 않아요."), 400
+    try:
+        cur = meal_make_snapshot()
+        meal_save_backup(MEAL_AUTO_SLOT, "파일복원 직전 자동저장", cur)
+    except Exception as e:
+        print("meal auto-backup err:", e)
+    try:
+        meal_restore_snapshot(snap)
+    except Exception as e:
+        print("meal file restore err:", e)
+        return jsonify(ok=False, error="복원 중 오류가 발생했어요."), 500
+    return jsonify(ok=True)
 
 
 @app.route("/meal")
@@ -9947,6 +10195,17 @@ def meal_team_page(team_id):
     py, pm = meal_shift_month(year, month, -1)
     ny, nm = meal_shift_month(year, month, 1)
 
+    # 이 팀이 지금까지(전체 기간) 사용한 식당 목록 → 식당 선택 콤보박스용
+    rest_rows = _meal_get(
+        f"meal_entries?team_id=eq.{team_id}&select=restaurant")
+    seen, restaurant_list = set(), []
+    for r in rest_rows:
+        nm_r = (r.get("restaurant") or "").strip()
+        if nm_r and nm_r not in seen:
+            seen.add(nm_r)
+            restaurant_list.append(nm_r)
+    restaurant_list.sort()
+
     return render_template_string(
         MEAL_TEAM_HTML,
         team=team, members=members, weeks=weeks, summaries=summaries,
@@ -9957,6 +10216,7 @@ def meal_team_page(team_id):
         amount=MEAL_FIXED_AMOUNT, monthly_count=MEAL_MONTHLY_COUNT,
         cap=MEAL_MONTHLY_CAP,
         member_info_json=json.dumps(member_info, ensure_ascii=False),
+        restaurant_list=restaurant_list,
         weekdays=["일", "월", "화", "수", "목", "금", "토"],
     )
 
@@ -10097,56 +10357,109 @@ def meal_rename_team():
 # ---------------------------------------------------------------- templates
 MEAL_BASE_CSS = """
 :root{
-  --bg:#e8ecf4; --surface:#ffffff; --primary:#3b82f6; --primary-d:#2563eb;
-  --primary-dd:#1e40af; --ink:#1f2937; --muted:#6b7280; --line:#e2e8f0;
-  --soft:#eef3fb; --ok:#1f9d6b; --full:#d64545; --strip:#3b82f6;
+  --bg:#eef1f7; --bg2:#e6ebf5;
+  --surface:#ffffff; --surface-2:#f7f9fd;
+  --primary:#4f6ef0; --primary-d:#3f5bdc; --primary-dd:#2f47b8;
+  --accent:#6366f1;
+  --ink:#1b2436; --ink-soft:#3a455c; --muted:#7b8499; --line:#e6eaf2;
+  --soft:#eef1fb; --soft-2:#f1f4fb;
+  --ok:#10a37f; --ok-soft:#e6f6f0; --full:#e2555a; --full-soft:#fdeceec0;
+  --strip:linear-gradient(180deg,#5b7bf5,#3f5bdc);
+  --shadow-sm:0 1px 2px rgba(27,36,54,.05),0 2px 8px rgba(27,36,54,.05);
+  --shadow-md:0 4px 14px rgba(27,36,54,.08),0 1px 3px rgba(27,36,54,.05);
+  --shadow-lg:0 18px 50px rgba(27,36,54,.22);
+  --r:16px;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
+body{margin:0;color:var(--ink);
+  background:
+    radial-gradient(1200px 420px at 50% -120px,#f4f6fc 0%,rgba(244,246,252,0) 70%),
+    linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);
+  background-attachment:fixed;min-height:100svh;
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
-  -webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;}
+  -webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;
+  letter-spacing:-.2px;}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:760px;margin:0 auto;padding:16px 14px 70px;}
-.topbar{display:flex;align-items:center;gap:10px;padding:6px 2px 16px;}
-.topbar h1{font-size:20px;margin:0;font-weight:800;letter-spacing:-.4px;flex:1;}
-.back{font-size:24px;line-height:1;color:var(--primary);padding:4px 8px;margin-left:-8px;}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
-  box-shadow:0 2px 8px rgba(30,64,120,.06);padding:15px;margin-bottom:14px;
+.wrap{max-width:760px;margin:0 auto;padding:18px 15px 80px;}
+.topbar{display:flex;align-items:center;gap:10px;padding:4px 2px 18px;}
+.topbar h1{font-size:21px;margin:0;font-weight:800;letter-spacing:-.6px;flex:1;}
+.back{font-size:22px;line-height:1;color:var(--primary-d);padding:6px 10px;margin-left:-6px;
+  background:rgba(255,255,255,.7);border-radius:11px;box-shadow:var(--shadow-sm);font-weight:700;}
+.back:active{transform:scale(.94);}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow-sm);padding:16px;margin-bottom:14px;
   position:relative;overflow:hidden;}
-.card.strip{padding-left:18px;}
+.card.strip{padding-left:19px;}
 .card.strip::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;
   background:var(--strip);}
 .muted{color:var(--muted);font-size:13px;}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;
-  background:var(--primary);color:#fff;font-weight:700;border-radius:12px;
-  padding:12px 15px;font-size:15px;cursor:pointer;
-  box-shadow:0 3px 0 var(--primary-dd);transition:transform .05s,box-shadow .05s,background .15s;}
-.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--primary-dd);background:var(--primary-d);}
-.btn:disabled{background:#c2c8d2;box-shadow:0 3px 0 #9aa3b2;cursor:not-allowed;}
-.btn.ghost{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #cdd9ef;}
-.btn.ghost:active{box-shadow:0 1px 0 #cdd9ef;}
-.del{background:#fdecec;color:var(--full);border:none;border-radius:8px;
-  padding:6px 10px;font-size:13px;cursor:pointer;font-weight:600;}
+  background:linear-gradient(180deg,var(--primary),var(--primary-d));color:#fff;font-weight:700;
+  border-radius:13px;padding:12px 16px;font-size:15px;cursor:pointer;letter-spacing:-.2px;
+  box-shadow:0 3px 0 var(--primary-dd),0 6px 14px rgba(79,110,240,.30);
+  transition:transform .06s,box-shadow .06s,filter .15s;}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--primary-dd),0 3px 8px rgba(79,110,240,.25);filter:brightness(.97);}
+.btn:disabled{background:#c4cad6;box-shadow:0 3px 0 #aab2c2;cursor:not-allowed;filter:none;}
+.btn.ghost{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #d3dcf6;}
+.btn.ghost:active{box-shadow:0 1px 0 #d3dcf6;}
+.del{background:var(--full-soft);color:var(--full);border:none;border-radius:9px;
+  padding:6px 11px;font-size:13px;cursor:pointer;font-weight:700;transition:transform .06s;}
+.del:active{transform:scale(.95);}
 .pill{font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;
   background:var(--soft);color:var(--primary-dd);}
+
+/* ── 로딩 오버레이 (클릭 반응 표시) ── */
+.mloader{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;
+  background:rgba(20,27,45,.40);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  animation:mfade .15s ease;}
+.mloader.on{display:flex;}
+@keyframes mfade{from{opacity:0}to{opacity:1}}
+.mloader-card{background:#fff;border-radius:18px;padding:22px 28px;display:flex;flex-direction:column;
+  align-items:center;gap:13px;box-shadow:var(--shadow-lg);min-width:130px;}
+.mloader-spin{width:36px;height:36px;border-radius:50%;
+  border:3.5px solid var(--soft);border-top-color:var(--primary);animation:mspin .7s linear infinite;}
+@keyframes mspin{to{transform:rotate(360deg)}}
+.mloader-txt{font-size:13.5px;font-weight:700;color:var(--ink);letter-spacing:-.2px;}
+"""
+
+# 모든 매식비 화면에서 재사용하는 로딩 오버레이 (markup + 제어 스크립트)
+MEAL_LOADER_HTML = """
+<div class=mloader id=mloader><div class=mloader-card>
+  <div class=mloader-spin></div><div class=mloader-txt id=mloaderTxt>처리 중…</div>
+</div></div>
+<script>
+window.mealLoading=function(show,txt){
+  var el=document.getElementById('mloader');if(!el)return;
+  if(txt){var t=document.getElementById('mloaderTxt');if(t)t.textContent=txt;}
+  el.classList.toggle('on',show!==false);
+};
+window.addEventListener('pageshow',function(){
+  var el=document.getElementById('mloader');if(el)el.classList.remove('on');
+});
+</script>
 """
 
 MEAL_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리 · 로그인</title><style>""" + MEAL_BASE_CSS + """
-.login-wrap{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:20px;transform:translateY(-4vh);}
-.login-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;
-  box-shadow:0 8px 30px rgba(30,64,120,.12);padding:30px 24px;width:100%;max-width:360px;text-align:center;}
-.login-logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#3b82f6,#1e40af);
-  display:flex;align-items:center;justify-content:center;margin:0 auto 14px;
-  color:#fff;font-size:26px;box-shadow:0 4px 12px rgba(59,130,246,.35);}
-.login-card h1{font-size:20px;margin:0 0 4px;font-weight:800;letter-spacing:-.4px;}
+.login-wrap{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.login-card{background:var(--surface);border:1px solid var(--line);border-radius:22px;
+  box-shadow:var(--shadow-lg);padding:34px 26px 26px;width:100%;max-width:362px;text-align:center;
+  transform:translateY(-3vh);}
+.login-logo{width:62px;height:62px;border-radius:18px;
+  background:linear-gradient(135deg,#5b7bf5,#2f47b8);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 16px;
+  color:#fff;font-size:28px;box-shadow:0 8px 20px rgba(79,110,240,.40);}
+.login-card h1{font-size:21px;margin:0 0 5px;font-weight:800;letter-spacing:-.5px;}
 .login-card p{font-size:13px;color:var(--muted);margin:0 0 22px;}
-.login-card input{width:100%;font:inherit;font-size:18px;text-align:center;letter-spacing:6px;
-  border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff;}
-.login-card input:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
+.login-card input{width:100%;font:inherit;font-size:19px;text-align:center;letter-spacing:7px;
+  border:1.5px solid var(--line);border-radius:13px;padding:14px;margin-bottom:12px;background:var(--surface-2);
+  transition:border-color .15s,box-shadow .15s;}
+.login-card input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,110,240,.18);background:#fff;}
 .login-card .btn{width:100%;}
 .login-err{color:var(--full);font-size:13px;font-weight:600;margin-bottom:10px;min-height:18px;}
+.admin-link{margin-top:20px;font-size:12.5px;color:var(--muted);}
+.admin-link a{color:var(--primary-d);font-weight:700;border-bottom:1px dashed rgba(79,110,240,.5);padding-bottom:1px;}
 </style></head><body>
 <div class=login-wrap>
   <div class=login-card>
@@ -10157,6 +10470,7 @@ MEAL_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
     <input id=pw type=password inputmode=numeric placeholder="****"
            onkeydown="if(event.key=='Enter')doLogin()" autofocus>
     <button class=btn onclick=doLogin()>로그인</button>
+    <div class=admin-link><a href="/meal/admin/login">백업 · 복원 (관리자)</a></div>
   </div>
 </div>
 <script>
@@ -10175,130 +10489,402 @@ async function doLogin(){
 </script>
 </body></html>"""
 
+MEAL_ADMIN_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>매식비 · 백업 관리자</title><style>""" + MEAL_BASE_CSS + """
+.login-wrap{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:20px;}
+.login-card{background:var(--surface);border:1px solid var(--line);border-radius:22px;
+  box-shadow:var(--shadow-lg);padding:34px 26px 26px;width:100%;max-width:362px;text-align:center;
+  transform:translateY(-3vh);}
+.login-logo{width:62px;height:62px;border-radius:18px;
+  background:linear-gradient(135deg,#2f3b57,#111a2e);
+  display:flex;align-items:center;justify-content:center;margin:0 auto 16px;
+  color:#fff;font-size:26px;box-shadow:0 8px 20px rgba(17,26,46,.35);}
+.login-card h1{font-size:20px;margin:0 0 5px;font-weight:800;letter-spacing:-.5px;}
+.login-card p{font-size:13px;color:var(--muted);margin:0 0 22px;}
+.login-card input{width:100%;font:inherit;font-size:18px;text-align:center;letter-spacing:5px;
+  border:1.5px solid var(--line);border-radius:13px;padding:14px;margin-bottom:12px;background:var(--surface-2);
+  transition:border-color .15s,box-shadow .15s;}
+.login-card input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,110,240,.18);background:#fff;}
+.login-card .btn{width:100%;}
+.login-err{color:var(--full);font-size:13px;font-weight:600;margin-bottom:10px;min-height:18px;}
+.admin-link{margin-top:20px;font-size:12.5px;color:var(--muted);}
+.admin-link a{color:var(--primary-d);font-weight:700;}
+</style></head><body>
+<div class=login-wrap>
+  <div class=login-card>
+    <div class=login-logo>&#128274;</div>
+    <h1>백업 · 복원</h1>
+    <p>관리자 비밀번호를 입력해 주세요.</p>
+    <div class=login-err id=err></div>
+    <input id=pw type=password placeholder="비밀번호"
+           onkeydown="if(event.key=='Enter')doLogin()" autofocus>
+    <button class=btn onclick=doLogin()>들어가기</button>
+    <div class=admin-link><a href="/meal/login">‹ 일반 로그인으로</a></div>
+  </div>
+</div>
+<script>
+async function doLogin(){
+  const pw = document.getElementById('pw').value;
+  const r = await fetch('/meal/api/admin/login',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+  const res = await r.json();
+  if(res.ok){location.href='/meal/admin';}
+  else{
+    document.getElementById('err').textContent = res.error||'로그인 실패';
+    document.getElementById('pw').value='';
+    document.getElementById('pw').focus();
+  }
+}
+</script>
+</body></html>"""
+
 MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리</title><style>""" + MEAL_BASE_CSS + """
-.lead{font-size:14px;color:var(--muted);line-height:1.65;margin:2px 0 18px;word-break:keep-all;}
-.lead b{color:var(--ink);}
+.hero{position:relative;overflow:hidden;border-radius:20px;padding:22px 20px;margin-bottom:16px;
+  background:linear-gradient(135deg,#5b7bf5 0%,#3f5bdc 55%,#2f47b8 100%);
+  box-shadow:0 12px 30px rgba(47,71,184,.28);}
+.hero::before{content:"";position:absolute;width:180px;height:180px;border-radius:50%;
+  right:-52px;top:-72px;background:rgba(255,255,255,.13);}
+.hero::after{content:"";position:absolute;width:120px;height:120px;border-radius:50%;
+  right:34px;bottom:-62px;background:rgba(255,255,255,.08);}
+.hero-row{position:relative;z-index:1;display:flex;align-items:center;gap:14px;}
+.hero-logo{width:54px;height:54px;border-radius:16px;flex:0 0 auto;
+  background:rgba(255,255,255,.20);display:flex;align-items:center;justify-content:center;font-size:27px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.28);}
+.hero-tt{flex:1;min-width:0;}
+.hero-tt h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.6px;color:#fff;}
+.hero-tt p{margin:3px 0 0;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.85);letter-spacing:-.2px;}
+.hero .logout{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);color:#fff;
+  box-shadow:none;flex:0 0 auto;}
+.hero .logout:active{transform:scale(.95);background:rgba(255,255,255,.30);}
+
+.lead-card{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r);padding:15px 17px 15px 20px;box-shadow:var(--shadow-sm);margin-bottom:22px;}
+.lead-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
+.lead{font-size:14px;color:var(--ink-soft);line-height:1.7;margin:0;word-break:keep-all;}
+.lead b{color:var(--primary-dd);font-weight:800;}
 .lead-line{display:block;}
-.team-grid{display:grid;gap:12px;}
-.team-btn{display:flex;align-items:center;justify-content:center;
-  background:var(--surface);border:1px solid var(--line);border-radius:16px;
-  padding:18px;font-size:18px;font-weight:800;letter-spacing:-.4px;position:relative;
-  overflow:hidden;box-shadow:0 2px 8px rgba(30,64,120,.06);
-  transition:transform .06s,box-shadow .06s;}
-.team-btn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:8px;background:var(--strip);}
-.team-btn.tf::before{background:#dd6b6b;}
-.team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(30,64,120,.05);}
-.team-btn .nm{display:flex;align-items:center;justify-content:center;text-align:center;}
-.logout{font-size:13px;color:var(--muted);background:var(--soft);border:none;
-  border-radius:9px;padding:7px 12px;cursor:pointer;font-weight:600;}
+
+.sec-title{font-size:14px;font-weight:800;margin:0 2px 12px;letter-spacing:-.3px;color:var(--ink-soft);
+  display:flex;align-items:center;gap:7px;}
+.sec-title .dot{width:7px;height:7px;border-radius:50%;background:var(--primary);
+  box-shadow:0 0 0 3px rgba(79,110,240,.18);}
+
+.team-grid{display:grid;gap:11px;}
+.team-btn{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);
+  border-radius:16px;padding:15px 16px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
+  transition:transform .14s ease,box-shadow .2s ease,border-color .2s ease;}
+.team-btn .ava{width:46px;height:46px;border-radius:14px;flex:0 0 auto;display:flex;align-items:center;
+  justify-content:center;font-size:22px;color:#fff;
+  background:linear-gradient(135deg,#5b7bf5,#3f5bdc);box-shadow:0 5px 12px rgba(79,110,240,.30);}
+.team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
+.team-btn .nm{flex:1;min-width:0;font-size:17px;font-weight:800;letter-spacing:-.4px;text-align:left;}
+.team-btn .chev{color:#c2c8d2;font-size:22px;font-weight:600;flex:0 0 auto;
+  transition:transform .15s,color .15s;}
+@media (hover:hover) and (pointer:fine){
+  .team-btn:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:rgba(79,110,240,.35);}
+  .team-btn:hover .chev{transform:translateX(3px);color:var(--primary);}
+}
+.team-btn:active{transform:scale(.99);box-shadow:0 1px 4px rgba(27,36,54,.06);}
+.logout{font-size:13px;color:var(--muted);background:rgba(255,255,255,.7);border:1px solid var(--line);
+  border-radius:10px;padding:7px 13px;cursor:pointer;font-weight:600;box-shadow:var(--shadow-sm);}
+.logout:active{transform:scale(.95);}
 </style></head><body><div class=wrap>
-<div class=topbar>
-  <h1>매식비 관리</h1>
-  <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
+<div class=hero>
+  <div class=hero-row>
+    <div class=hero-logo>&#127869;</div>
+    <div class=hero-tt>
+      <h1>매식비 관리</h1>
+      <p>1인 {{ "{:,}".format(amount) }}원 · 한 달 {{monthly_count}}회까지 기록</p>
+    </div>
+    <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
+  </div>
 </div>
-<p class=lead><span class=lead-line>팀을 선택한 뒤, 달력에서 <b>날짜를 누르고 팀원을 고르면</b></span>
+<div class=lead-card><p class=lead>
+<span class=lead-line>팀을 선택한 뒤, 달력에서 <b>날짜를 누르고 팀원을 고르면</b></span>
 <span class=lead-line>식당·결재자를 입력해 1인 {{ "{:,}".format(amount) }}원씩 기록할 수 있어요.</span>
-<span class=lead-line>한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하며, 초과 입력은 자동으로 막힙니다.</span></p>
+<span class=lead-line>한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하며, 초과 입력은 자동으로 막힙니다.</span></p></div>
+<div class=sec-title><span class=dot></span>팀 선택</div>
 <div class=team-grid>
 {% for t in teams %}
-  <a class="team-btn{% if '통합돌봄' in t.name %} tf{% endif %}" href="/meal/team/{{t.id}}"><span class=nm>{{t.name}}</span></a>
+  <a class="team-btn{% if '통합돌봄' in t.name %} tf{% endif %}" href="/meal/team/{{t.id}}"
+     onclick="mealLoading(true,'불러오는 중…')">
+    <span class=ava>&#127869;</span>
+    <span class=nm>{{t.name}}</span>
+    <span class=chev>›</span>
+  </a>
 {% endfor %}
 </div>
-</div></body></html>"""
+</div>""" + MEAL_LOADER_HTML + """</body></html>"""
+
+MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>매식비 · 백업 관리</title><style>""" + MEAL_BASE_CSS + """
+.note-card{background:linear-gradient(180deg,#fff,var(--surface-2));border:1px solid var(--line);
+  border-radius:var(--r);padding:15px 17px;box-shadow:var(--shadow-sm);margin-bottom:16px;
+  font-size:13.5px;color:var(--ink-soft);line-height:1.65;word-break:keep-all;}
+.note-card b{color:var(--primary-dd);}
+.cur{display:flex;gap:8px;margin-top:11px;}
+.cur .c{flex:1;background:#fff;border:1px solid var(--line);border-radius:11px;padding:9px 10px;text-align:center;}
+.cur .c .n{font-size:18px;font-weight:800;}
+.cur .c .l{font-size:11px;color:var(--muted);margin-top:1px;}
+.sec-title{font-size:15px;font-weight:800;margin:22px 2px 11px;display:flex;align-items:center;gap:7px;}
+.slot{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:14px 15px;
+  margin-bottom:11px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;}
+.slot.filled{padding-left:18px;}
+.slot.filled::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
+.slot.empty{border-style:dashed;background:var(--surface-2);}
+.slot .head{display:flex;align-items:center;gap:9px;margin-bottom:3px;}
+.slot .sn{font-size:12px;font-weight:800;color:#fff;background:var(--primary-d);
+  border-radius:8px;width:26px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.slot .lb{font-weight:800;font-size:15px;flex:1;min-width:0;letter-spacing:-.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.slot .meta{font-size:12px;color:var(--muted);margin:1px 0 0 35px;}
+.slot .meta .dot{margin:0 5px;opacity:.5;}
+.slot .actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;}
+.sbtn{border:none;border-radius:10px;padding:9px 13px;font-size:13px;font-weight:700;cursor:pointer;
+  letter-spacing:-.2px;transition:transform .06s,filter .12s;}
+.sbtn:active{transform:translateY(1px);}
+.sbtn.save{background:linear-gradient(180deg,var(--primary),var(--primary-d));color:#fff;box-shadow:0 2px 0 var(--primary-dd);}
+.sbtn.load{background:var(--ok-soft);color:var(--ok);}
+.sbtn.dl{background:var(--soft);color:var(--primary-dd);}
+.sbtn.rm{background:var(--full-soft);color:var(--full);}
+.sbtn.full{flex:1;}
+.auto-card{background:#fff7ed;border:1px solid #fed7aa;border-radius:15px;padding:14px 15px;margin-bottom:8px;
+  box-shadow:var(--shadow-sm);}
+.auto-card .ttl{font-weight:800;font-size:14px;color:#b45309;display:flex;align-items:center;gap:6px;}
+.auto-card .meta{font-size:12px;color:#a16207;margin:3px 0 0;}
+.auto-card .actions{display:flex;gap:7px;margin-top:11px;}
+.auto-card .sbtn.load{background:#fff1e0;color:#b45309;}
+.auto-card .sbtn.dl{background:#fff1e0;color:#b45309;}
+.file-card{background:var(--surface);border:1px dashed var(--line);border-radius:15px;padding:15px;
+  box-shadow:var(--shadow-sm);}
+.file-card p{font-size:13px;color:var(--ink-soft);margin:0 0 11px;line-height:1.6;}
+.file-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.file-row input[type=file]{font-size:13px;flex:1;min-width:0;}
+.logout{font-size:13px;color:var(--muted);background:rgba(255,255,255,.7);border:1px solid var(--line);
+  border-radius:10px;padding:7px 13px;cursor:pointer;font-weight:600;box-shadow:var(--shadow-sm);}
+</style></head><body><div class=wrap>
+<div class=topbar>
+  <a class=back href="/meal/login">‹</a>
+  <h1>백업 · 복원</h1>
+  <button class=logout onclick="location.href='/meal/admin/logout'">나가기</button>
+</div>
+
+<div class=note-card>
+  매식비 기록을 슬롯에 <b>통째로 저장(백업)</b>해 두고, 필요할 때 <b>그 시점으로 되돌릴(복원)</b> 수 있어요.
+  슬롯은 최대 <b>{{ slots|length }}개</b>까지 쓸 수 있고, 각 백업은 JSON 파일로 <b>내려받아 보관</b>할 수도 있습니다.
+  <span style="color:var(--full);font-weight:700">복원하면 현재 데이터가 그 백업으로 교체</span>되지만,
+  복원 직전 상태는 자동으로 한 번 저장되니 안심하세요.
+  <div class=cur>
+    <div class=c><div class=n>{{now.teams}}</div><div class=l>팀</div></div>
+    <div class=c><div class=n>{{now.members}}</div><div class=l>팀원</div></div>
+    <div class=c><div class=n>{{now.entries}}</div><div class=l>입력내역</div></div>
+  </div>
+</div>
+
+{% if auto %}
+<div class=auto-card>
+  <div class=ttl>&#9888;&#65039; 복원 직전 자동저장본</div>
+  <div class=meta>{{auto.created_at[:16].replace('T',' ')}} · 팀 {{auto.teams}} · 팀원 {{auto.members}} · 내역 {{auto.entries}}</div>
+  <div class=actions>
+    <button class="sbtn load" onclick="admLoad({{auto_slot}},'복원 직전 자동저장본')">이 상태로 되돌리기</button>
+    <a class="sbtn dl" href="/meal/admin/download/{{auto_slot}}">다운로드</a>
+  </div>
+</div>
+{% endif %}
+
+<div class=sec-title>&#128190; 저장 슬롯</div>
+{% for s in slots %}
+  {% set b = backups.get(s) %}
+  {% if b %}
+  <div class="slot filled">
+    <div class=head>
+      <span class=sn>{{s}}</span>
+      <span class=lb>{{ b.label if b.label else '백업 ' ~ s }}</span>
+    </div>
+    <div class=meta>{{b.created_at[:16].replace('T',' ')}}<span class=dot>·</span>팀 {{b.teams}}<span class=dot>·</span>팀원 {{b.members}}<span class=dot>·</span>내역 {{b.entries}}</div>
+    <div class=actions>
+      <button class="sbtn save" onclick="admSave({{s}})">덮어쓰기</button>
+      <button class="sbtn load" data-label="{{ b.label|e if b.label else '백업 ' ~ s }}" onclick="admLoad({{s}}, this.dataset.label)">복원</button>
+      <a class="sbtn dl" href="/meal/admin/download/{{s}}">다운로드</a>
+      <button class="sbtn rm" onclick="admDelete({{s}})">삭제</button>
+    </div>
+  </div>
+  {% else %}
+  <div class="slot empty">
+    <div class=head>
+      <span class=sn>{{s}}</span>
+      <span class=lb style="color:var(--muted);font-weight:600">비어 있음</span>
+    </div>
+    <div class=actions>
+      <button class="sbtn save full" onclick="admSave({{s}})">여기에 현재 데이터 저장</button>
+    </div>
+  </div>
+  {% endif %}
+{% endfor %}
+
+<div class=sec-title>&#128193; 파일에서 복원</div>
+<div class=file-card>
+  <p>내려받아 둔 백업 JSON 파일로도 복원할 수 있어요. (복원 전 현재 상태는 자동 저장됩니다.)</p>
+  <div class=file-row>
+    <input type=file id=restoreFile accept="application/json,.json">
+    <button class="btn" onclick="admRestoreFile()">파일로 복원</button>
+  </div>
+</div>
+
+</div>""" + MEAL_LOADER_HTML + """
+<script>
+async function admApi(url, body){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  return r.json();
+}
+async function admSave(slot){
+  const label = prompt('이 백업에 붙일 이름 (선택):', '');
+  if(label===null) return;
+  mealLoading(true,'저장 중…');
+  const res = await admApi('/meal/api/admin/save',{slot:slot,label:label});
+  if(res.ok){ location.reload(); }
+  else{ mealLoading(false); alert(res.error||'저장 실패'); }
+}
+async function admLoad(slot,label){
+  label = label || ('백업 '+slot);
+  if(!confirm("'"+label+"' 백업으로 복원할까요?\\n\\n지금의 모든 매식비 데이터가 이 백업 시점으로 교체됩니다.\\n(복원 직전 상태는 자동저장본으로 보관돼요.)")) return;
+  mealLoading(true,'복원 중…');
+  const res = await admApi('/meal/api/admin/load',{slot:slot});
+  if(res.ok){ mealLoading(false); alert('복원이 완료됐어요.'); location.reload(); }
+  else{ mealLoading(false); alert(res.error||'복원 실패'); }
+}
+async function admDelete(slot){
+  if(!confirm('이 슬롯의 백업을 삭제할까요?')) return;
+  mealLoading(true,'삭제 중…');
+  const res = await admApi('/meal/api/admin/delete',{slot:slot});
+  if(res.ok){ location.reload(); }
+  else{ mealLoading(false); alert(res.error||'삭제 실패'); }
+}
+async function admRestoreFile(){
+  const f = document.getElementById('restoreFile').files[0];
+  if(!f){ alert('백업 파일을 선택해 주세요.'); return; }
+  let snap;
+  try{ snap = JSON.parse(await f.text()); }
+  catch(e){ alert('JSON 파일을 읽을 수 없어요.'); return; }
+  if(!snap || !snap.entries){ alert('매식비 백업 파일이 아닌 것 같아요.'); return; }
+  const c = snap.counts || {};
+  if(!confirm('이 파일로 복원할까요?\\n\\n팀 '+(c.teams||'?')+' · 팀원 '+(c.members||'?')+' · 내역 '+(c.entries||'?')+'\\n현재 데이터가 모두 교체됩니다.')) return;
+  mealLoading(true,'복원 중…');
+  const res = await admApi('/meal/api/admin/restore-file',{snapshot:snap});
+  if(res.ok){ mealLoading(false); alert('복원이 완료됐어요.'); location.href='/meal'; }
+  else{ mealLoading(false); alert(res.error||'복원 실패'); }
+}
+</script>
+</body></html>"""
 
 MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>{{team.name}} · 매식비</title><style>""" + MEAL_BASE_CSS + """
-.monthbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
-.monthbar .m{font-size:17px;font-weight:800;}
+.monthbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:6px;box-shadow:var(--shadow-sm);}
+.monthbar .m{font-size:17px;font-weight:800;letter-spacing:-.4px;}
 .navb{font-size:18px;color:var(--primary-dd);background:var(--soft);border:none;border-radius:10px;
-  padding:8px 14px;cursor:pointer;box-shadow:0 2px 0 #cdd9ef;}
-.navb:active{transform:translateY(1px);box-shadow:0 1px 0 #cdd9ef;}
+  padding:8px 16px;cursor:pointer;font-weight:700;transition:transform .06s,filter .12s;}
+.navb:active{transform:scale(.92);filter:brightness(.96);}
 .teamtotal{display:flex;gap:10px;margin-bottom:14px;}
-.tot{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;
-  padding:12px 14px;box-shadow:0 2px 8px rgba(30,64,120,.06);}
-.tot .lab{font-size:12px;color:var(--muted);}
-.tot .val{font-size:19px;font-weight:800;margin-top:3px;}
-.cal{width:100%;border-collapse:collapse;table-layout:fixed;}
-.cal th{font-size:12px;color:var(--muted);font-weight:700;padding:7px 0;}
-.cal th.sun{color:var(--full);} .cal th.sat{color:#2f6fd6;}
-.cal td{vertical-align:top;height:76px;border:1px solid var(--line);padding:3px;cursor:pointer;
-  background:var(--surface);transition:background .1s;border-radius:6px;}
-.cal td:active{background:var(--soft);}
-.cal td.out{background:#f3f5f9;color:#c2c8d2;cursor:default;}
-.cal td .dn{font-size:12px;font-weight:700;}
-.cal td.today .dn{background:var(--primary);color:#fff;border-radius:50%;
-  width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;}
-.chip{font-size:10px;line-height:1.3;background:var(--soft);color:var(--primary-dd);
-  border-radius:5px;padding:1px 4px;margin-top:2px;display:block;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;font-weight:600;}
-.sec-title{font-size:15px;font-weight:800;margin:22px 2px 10px;}
+.tot{flex:1;background:linear-gradient(180deg,#fff,var(--surface-2));border:1px solid var(--line);
+  border-radius:14px;padding:13px 15px;box-shadow:var(--shadow-sm);}
+.tot.hl{background:linear-gradient(135deg,var(--primary),var(--primary-dd));border-color:transparent;}
+.tot.hl .lab,.tot.hl .val{color:#fff;}
+.tot .lab{font-size:12px;color:var(--muted);font-weight:600;}
+.tot .val{font-size:20px;font-weight:800;margin-top:3px;letter-spacing:-.5px;}
+.cal{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed;}
+.cal th{font-size:11.5px;color:var(--muted);font-weight:700;padding:4px 0 7px;}
+.cal th.sun{color:var(--full);} .cal th.sat{color:#3b6fe0;}
+.cal td{vertical-align:top;height:74px;border:1px solid var(--line);padding:4px;cursor:pointer;
+  background:var(--surface);transition:background .12s,transform .06s,box-shadow .12s;border-radius:10px;}
+.cal td:active{background:var(--soft);transform:scale(.96);}
+.cal td.has{box-shadow:inset 0 0 0 1.5px rgba(79,110,240,.25);}
+.cal td.out{background:transparent;border-color:transparent;color:#c2c8d2;cursor:default;}
+.cal td .dn{font-size:12px;font-weight:700;color:var(--ink-soft);}
+.cal td.today{background:#fff7ed;border-color:#fcd29a;box-shadow:inset 0 0 0 1.5px rgba(245,158,11,.45);}
+.cal td.today .dn{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#fff;border-radius:50%;
+  width:21px;height:21px;display:inline-flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 6px rgba(245,158,11,.5);}
+.chip{font-size:10.5px;line-height:1.3;background:linear-gradient(135deg,#5b7bf5,#3f5bdc);color:#fff;
+  border-radius:6px;padding:2px 5px;margin-top:3px;display:inline-flex;align-items:center;gap:2px;
+  white-space:nowrap;font-weight:700;box-shadow:0 1px 3px rgba(79,110,240,.3);}
+.sec-title{font-size:15px;font-weight:800;margin:22px 2px 11px;letter-spacing:-.3px;}
 .sumrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
 .sumrow:last-child{border-bottom:none;}
 .sumrow .nm{font-weight:700;min-width:64px;}
-.bar{flex:1;height:8px;background:#eef1f6;border-radius:5px;overflow:hidden;}
-.bar > i{display:block;height:100%;background:var(--ok);}
-.sumrow.full .bar > i{background:var(--full);}
+.bar{flex:1;height:8px;background:#eaeef6;border-radius:5px;overflow:hidden;}
+.bar > i{display:block;height:100%;background:linear-gradient(90deg,#13b88f,var(--ok));
+  border-radius:5px;transition:width .3s;}
+.sumrow.full .bar > i{background:linear-gradient(90deg,#ef6a6f,var(--full));}
 .cntpill{font-size:12px;font-weight:800;min-width:34px;text-align:right;}
 .cntpill.full{color:var(--full);}
-.amt{font-size:12px;color:var(--muted);min-width:74px;text-align:right;}
-.badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;}
-.badge.full{background:#fdecec;color:var(--full);}
+.amt{font-size:12px;color:var(--muted);min-width:74px;text-align:right;font-weight:600;}
+.badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
+.badge.full{background:var(--full-soft);color:var(--full);}
 .empty{color:var(--muted);font-size:13px;padding:14px 4px;}
 .restrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
 .restrow:last-child{border-bottom:none;}
 .restrow .rn{flex:1;font-weight:700;}
-.restrow .rc{font-size:12px;color:var(--muted);min-width:44px;text-align:right;}
+.restrow .rc{font-size:12px;color:var(--muted);min-width:44px;text-align:right;font-weight:600;}
 .restrow .ra{font-size:13px;font-weight:700;min-width:84px;text-align:right;}
 .acc-head{display:flex;align-items:center;justify-content:space-between;
   width:100%;background:var(--surface);border:1px solid var(--line);border-radius:14px;
   padding:14px 16px;cursor:pointer;font-size:15px;font-weight:800;
-  box-shadow:0 2px 8px rgba(30,64,120,.06);}
-.acc-head .ico{color:var(--primary);font-size:14px;transition:transform .2s;}
+  box-shadow:var(--shadow-sm);}
+.acc-head .ico{color:var(--primary);font-size:13px;transition:transform .2s;}
 .acc-wrap.open .acc-head{border-radius:14px 14px 0 0;}
 .acc-wrap.open .acc-head .ico{transform:rotate(180deg);}
 .acc-body{display:none;background:var(--surface);border:1px solid var(--line);border-top:none;
-  border-radius:0 0 14px 14px;padding:6px 15px 14px;box-shadow:0 2px 8px rgba(30,64,120,.06);}
+  border-radius:0 0 14px 14px;padding:6px 15px 14px;box-shadow:var(--shadow-sm);}
 .acc-wrap.open .acc-body{display:block;}
-.memrow{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line);}
+.memrow{display:flex;align-items:center;gap:8px;padding:10px 2px;border-bottom:1px solid var(--line);}
 .memrow:last-child{border-bottom:none;}
 .memrow .nm{flex:1;font-weight:600;}
 .memrow .memchk{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:var(--primary);}
 .memtools{display:flex;gap:8px;margin-bottom:8px;}
 .selbtn,.selcancel{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
   font-weight:600;padding:7px 12px;border-radius:9px;cursor:pointer;}
-.seldel{background:#fdecec;border:none;color:var(--full);font-size:13px;font-weight:700;
+.seldel{background:var(--full-soft);border:none;color:var(--full);font-size:13px;font-weight:700;
   padding:7px 12px;border-radius:9px;cursor:pointer;}
 .addmem{display:flex;gap:8px;margin-top:12px;align-items:stretch;}
 .addmem input{flex:1 1 auto;min-width:0;}
 .addmem .btn{flex:0 0 auto;white-space:nowrap;padding:11px 16px;}
-input,select{font:inherit;border:1px solid var(--line);border-radius:10px;padding:11px;background:#fff;}
-input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
+input,select{font:inherit;border:1.5px solid var(--line);border-radius:11px;padding:12px;background:var(--surface-2);
+  transition:border-color .15s,box-shadow .15s;color:var(--ink);}
+input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,110,240,.16);background:#fff;}
+select{appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%237b8499' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 14px center;padding-right:36px;cursor:pointer;}
 .editname{background:var(--soft);border:none;color:var(--primary-dd);font-size:13px;
   cursor:pointer;padding:7px 11px;border-radius:9px;font-weight:600;}
-.mask{position:fixed;inset:0;background:rgba(20,28,50,.5);display:none;
+.editname:active{transform:scale(.95);}
+.mask{position:fixed;inset:0;background:rgba(20,27,45,.5);display:none;backdrop-filter:blur(2px);
+  -webkit-backdrop-filter:blur(2px);
   align-items:center;justify-content:center;z-index:50;padding:18px;overscroll-behavior:contain;}
 .mask.on{display:flex;}
-.modal{background:#fff;width:100%;max-width:440px;border-radius:20px;padding:20px 18px;
-  max-height:88vh;overflow-y:auto;animation:pop .16s ease;box-shadow:0 16px 50px rgba(20,28,50,.3);}
-@keyframes pop{from{transform:scale(.94);opacity:.5}to{transform:none;opacity:1}}
-.modal h3{margin:0 0 4px;font-size:17px;font-weight:800;}
+.modal{background:#fff;width:100%;max-width:440px;border-radius:22px;padding:22px 19px;
+  max-height:88vh;overflow-y:auto;animation:pop .18s cubic-bezier(.2,.8,.3,1);box-shadow:var(--shadow-lg);}
+@keyframes pop{from{transform:scale(.94) translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.modal h3{margin:0 0 4px;font-size:18px;font-weight:800;letter-spacing:-.4px;}
 .modal .hint{font-size:13px;color:var(--muted);margin:0 0 14px;}
 .dayentries{margin:0 0 6px;}
-.de{display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);}
+.de{display:flex;align-items:flex-start;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);}
 .de .nm{font-weight:700;min-width:54px;}
 .de .meta{flex:1;min-width:0;font-size:12px;color:var(--muted);line-height:1.4;
   white-space:normal;word-break:break-all;}
 .de .am{color:var(--muted);font-size:13px;white-space:nowrap;}
 .de .entrychk{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:var(--primary);margin-top:1px;}
 .detools{display:flex;justify-content:flex-end;gap:8px;margin:8px 0 2px;}
-.flabel{font-size:13px;font-weight:700;margin:14px 0 6px;display:block;}
+.flabel{font-size:13px;font-weight:700;margin:14px 0 6px;display:block;color:var(--ink-soft);}
 .memberchecks{display:flex;flex-direction:column;max-height:220px;overflow-y:auto;overflow-x:hidden;
-  border:1px solid var(--line);border-radius:12px;}
+  border:1.5px solid var(--line);border-radius:12px;background:var(--surface-2);}
 .mcheck{width:100%;display:grid;grid-template-columns:22px 1fr auto auto;align-items:center;gap:10px;
-  padding:11px 12px;cursor:pointer;border-bottom:1px solid var(--line);}
+  padding:12px;cursor:pointer;border-bottom:1px solid var(--line);}
 .mcheck:last-child{border-bottom:none;}
 .mcheck:active{background:var(--soft);}
 .mcheck input{width:18px;height:18px;margin:0;accent-color:var(--primary);}
@@ -10308,14 +10894,14 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 .mcheck .mtag{font-size:11px;color:var(--full);font-weight:700;white-space:nowrap;}
 .mcheck.disabled{opacity:.5;}
 .addform input,.addform select{width:100%;}
-.note{font-size:13px;border-radius:10px;padding:10px 12px;display:none;margin-top:10px;}
+.note{font-size:13px;border-radius:11px;padding:11px 13px;display:none;margin-top:10px;font-weight:600;}
 .note.on{display:block;}
-.note.warn{color:var(--full);background:#fdecec;}
-.note.ok{color:#15663f;background:#e7f6ee;}
+.note.warn{color:var(--full);background:var(--full-soft);}
+.note.ok{color:#15663f;background:var(--ok-soft);}
 .modalbtns{display:flex;gap:8px;margin-top:16px;}
 .modalbtns .btn{flex:1;}
-.cancelbtn{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #cdd9ef;}
-.cancelbtn:active{box-shadow:0 1px 0 #cdd9ef;}
+.cancelbtn{background:var(--soft);color:var(--primary-dd);box-shadow:0 3px 0 #d3dcf6;}
+.cancelbtn:active{box-shadow:0 1px 0 #d3dcf6;}
 </style></head><body><div class=wrap>
 
 <div class=topbar>
@@ -10325,13 +10911,13 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
 </div>
 
 <div class=monthbar>
-  <a class=navb href="/meal/team/{{team.id}}?ym={{prev_ym}}">‹</a>
+  <a class=navb href="/meal/team/{{team.id}}?ym={{prev_ym}}" onclick="mealLoading(true,'불러오는 중…')">‹</a>
   <span class=m>{{year}}년 {{month}}월</span>
-  <a class=navb href="/meal/team/{{team.id}}?ym={{next_ym}}">›</a>
+  <a class=navb href="/meal/team/{{team.id}}?ym={{next_ym}}" onclick="mealLoading(true,'불러오는 중…')">›</a>
 </div>
 
 <div class=teamtotal>
-  <div class=tot><div class=lab>이번 달 총 사용</div><div class=val>{{ "{:,}".format(team_total) }}원</div></div>
+  <div class="tot hl"><div class=lab>이번 달 총 사용</div><div class=val>{{ "{:,}".format(team_total) }}원</div></div>
   <div class=tot><div class=lab>한도 마감 인원</div><div class=val>{{full_people}}명</div></div>
 </div>
 
@@ -10342,7 +10928,7 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
   <tr>
     {% for c in week %}
       {% if c.in_month %}
-      <td class="{% if c.is_today %}today{% endif %}" onclick="openDay('{{c.date_str}}')">
+      <td class="{% if c.is_today %}today {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')">
         <span class=dn>{{c.day}}</span>
         {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
       </td>
@@ -10423,7 +11009,12 @@ input:focus,select:focus{outline:2px solid #bfd3f7;border-color:#bfd3f7;}
       <div class=memberchecks id=memberChecks></div>
 
       <label class=flabel>식당</label>
-      <input id=restaurantInput placeholder="예: ○○식당">
+      <select id=restaurantSel onchange="onRestaurantChange()">
+        <option value="">선택하세요</option>
+        {% for rname in restaurant_list %}<option value="{{rname}}">{{rname}}</option>{% endfor %}
+        <option value="__other__">그 외 (직접 입력)</option>
+      </select>
+      <input id=restaurantOther placeholder="식당명 직접 입력" style="display:none;margin-top:8px;">
 
       <label class=flabel>결재자</label>
       <select id=approverSel onchange="onApproverChange()">
@@ -10467,7 +11058,9 @@ function openDay(ds){
   entrySelMode=false;
   renderDayEntries();
   renderMemberChecks();
-  document.getElementById('restaurantInput').value='';
+  document.getElementById('restaurantSel').value='';
+  document.getElementById('restaurantOther').value='';
+  document.getElementById('restaurantOther').style.display='none';
   document.getElementById('approverSel').value='';
   document.getElementById('approverOther').value='';
   document.getElementById('approverOther').style.display='none';
@@ -10513,9 +11106,10 @@ async function delSelectedEntries(){
   const checked=Array.from(document.querySelectorAll('#dayEntries .entrychk:checked'));
   if(!checked.length){alert('삭제할 항목을 선택해 주세요.');return;}
   if(!confirm(`선택한 ${checked.length}건을 삭제할까요?`))return;
+  mealLoading(true,'삭제 중…');
   const ids=checked.map(c=>parseInt(c.value,10));
   const res=await api('/meal/api/entry/delete-many',{entry_ids:ids});
-  if(res.ok)location.reload(); else alert(res.error||'삭제 실패');
+  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'삭제 실패');}
 }
 
 function renderMemberChecks(){
@@ -10542,18 +11136,26 @@ function onApproverChange(){
   if(sel.value==='__other__'){other.style.display='block';other.focus();}
   else{other.style.display='none';}
 }
+function onRestaurantChange(){
+  const sel = document.getElementById('restaurantSel');
+  const other = document.getElementById('restaurantOther');
+  if(sel.value==='__other__'){other.style.display='block';other.focus();}
+  else{other.style.display='none';}
+}
 
 async function saveEntry(){
   const checks = document.querySelectorAll('#memberChecks input:checked');
   const ids = Array.from(checks).map(c=>parseInt(c.value,10));
   const note = document.getElementById('noteBox');
   if(!ids.length){note.className='note warn on';note.textContent='팀원을 한 명 이상 선택해 주세요.';return;}
-  const rest = document.getElementById('restaurantInput').value.trim();
-  if(!rest){note.className='note warn on';note.textContent='식당명을 입력해 주세요.';return;}
+  let rest = document.getElementById('restaurantSel').value;
+  if(rest==='__other__') rest = document.getElementById('restaurantOther').value.trim();
+  if(!rest){note.className='note warn on';note.textContent='식당을 선택하거나 직접 입력해 주세요.';return;}
   let appr = document.getElementById('approverSel').value;
   if(appr==='__other__') appr = document.getElementById('approverOther').value.trim();
   if(appr==='') appr='';
 
+  mealLoading(true,'저장 중…');
   const res = await api('/meal/api/entry',{team_id:TEAM_ID,member_ids:ids,date:curDate,
     restaurant:rest,approver:appr});
   if(res.ok){
@@ -10562,25 +11164,29 @@ async function saveEntry(){
     }
     location.reload();
   }else{
+    mealLoading(false);
     note.className='note warn on';note.textContent=res.error||'저장에 실패했어요.';
   }
 }
 async function delEntry(id){
   if(!confirm('이 입력을 삭제할까요?'))return;
+  mealLoading(true,'삭제 중…');
   const res = await api('/meal/api/entry/delete',{entry_id:id});
-  if(res.ok)location.reload();
+  if(res.ok)location.reload(); else mealLoading(false);
 }
 async function addMember(){
   const inp = document.getElementById('newMember');
   const name = inp.value.trim();
   if(!name){inp.focus();return;}
+  mealLoading(true,'추가 중…');
   const res = await api('/meal/api/member/add',{team_id:TEAM_ID,name:name});
-  if(res.ok)location.reload(); else alert(res.error||'추가 실패');
+  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'추가 실패');}
 }
 async function delMember(id,name){
   if(!confirm(`'${name}' 팀원을 명단에서 삭제할까요?\n\n지금까지 입력한 식비 기록은 그대로 남고,\n팀원 선택 명단에서만 빠집니다.`))return;
+  mealLoading(true,'삭제 중…');
   const res = await api('/meal/api/member/delete',{member_id:id});
-  if(res.ok)location.reload();
+  if(res.ok)location.reload(); else mealLoading(false);
 }
 let selMode=false;
 function toggleSelMode(){
@@ -10601,17 +11207,20 @@ async function delSelected(){
   if(!checked.length){alert('삭제할 팀원을 선택해 주세요.');return;}
   const names=checked.map(c=>c.dataset.name).join(', ');
   if(!confirm(`선택한 ${checked.length}명(${names})을 명단에서 삭제할까요?\n\n입력한 식비 기록은 그대로 남고, 팀원 명단에서만 빠집니다.`))return;
+  mealLoading(true,'삭제 중…');
   const ids=checked.map(c=>parseInt(c.value,10));
   const res=await api('/meal/api/member/delete-many',{member_ids:ids});
-  if(res.ok)location.reload(); else alert(res.error||'삭제 실패');
+  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'삭제 실패');}
 }
 async function renameTeam(){
   const name = prompt('팀 이름', document.getElementById('teamTitle').textContent);
   if(!name||!name.trim())return;
+  mealLoading(true,'변경 중…');
   const res = await api('/meal/api/team/rename',{team_id:TEAM_ID,name:name.trim()});
-  if(res.ok)location.reload(); else alert(res.error||'변경 실패');
+  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'변경 실패');}
 }
 </script>
+""" + MEAL_LOADER_HTML + """
 </div></body></html>"""
 # ================================================================
 # ===============  매식비 관리 모듈 끝  ==========================
