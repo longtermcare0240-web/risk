@@ -10809,16 +10809,18 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   border-radius:7px;padding:3px 7px;margin:0;display:inline-flex;align-items:center;gap:2px;
   white-space:nowrap;font-weight:700;box-shadow:0 1px 3px rgba(79,110,240,.3);}
 .sec-title{font-size:15px;font-weight:800;margin:22px 2px 11px;letter-spacing:-.3px;}
-.sumrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
+.sumrow{display:flex;flex-direction:column;gap:9px;padding:13px 4px;border-bottom:1px solid var(--line);}
 .sumrow:last-child{border-bottom:none;}
-.sumrow .nm{font-weight:700;min-width:64px;}
-.bar{flex:1;height:8px;background:#eaeef6;border-radius:5px;overflow:hidden;}
+.sumtop{display:flex;align-items:center;gap:10px;}
+.sumrow .nm{font-weight:700;flex:1;min-width:0;letter-spacing:-.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bar{width:100%;height:10px;background:#eaeef6;border-radius:6px;overflow:hidden;}
 .bar > i{display:block;height:100%;background:linear-gradient(90deg,#13b88f,var(--ok));
-  border-radius:5px;transition:width .3s;}
+  border-radius:6px;transition:width .3s;}
 .sumrow.full .bar > i{background:linear-gradient(90deg,#ef6a6f,var(--full));}
 .cntpill{font-size:12px;font-weight:800;min-width:34px;text-align:right;}
 .cntpill.full{color:var(--full);}
-.amt{font-size:12px;color:var(--muted);min-width:74px;text-align:right;font-weight:600;}
+.amt{font-size:12px;color:var(--muted);text-align:right;font-weight:600;flex:0 0 auto;}
 .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
 .badge.full{background:var(--full-soft);color:var(--full);}
 .badgeslot{flex:0 0 auto;width:42px;display:flex;justify-content:flex-end;}
@@ -10944,11 +10946,13 @@ select{appearance:none;-webkit-appearance:none;
 {% if summaries %}
   {% for s in summaries %}
   <div class="sumrow {{s.status}}">
-    <span class=nm>{{s.name}}</span>
-    <span class="cntpill {{s.status}}">{{s.count}}/{{monthly_count}}</span>
+    <div class=sumtop>
+      <span class=nm>{{s.name}}</span>
+      <span class="cntpill {{s.status}}">{{s.count}}/{{monthly_count}}</span>
+      <span class=amt>{{ "{:,}".format(s.total) }}원</span>
+      <span class=badgeslot>{% if s.status=='full' %}<span class="badge full">마감</span>{% endif %}</span>
+    </div>
     <span class=bar><i style="width:{{ (s.count*100//monthly_count) if s.count<monthly_count else 100 }}%"></i></span>
-    <span class=amt>{{ "{:,}".format(s.total) }}원</span>
-    <span class=badgeslot>{% if s.status=='full' %}<span class="badge full">마감</span>{% endif %}</span>
   </div>
   {% endfor %}
 {% else %}
