@@ -10583,7 +10583,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn .chev{display:none;}
 /* 통합돌봄팀(TF) = 맨 아래 한 줄 전체폭, 가운데 정렬 카드 */
 .team-btn.tf{grid-column:1 / -1;order:1;flex-direction:row;justify-content:center;gap:12px;
-  padding:16px;text-align:center;}
+  padding:22px 16px;text-align:center;}
 .team-btn.tf .nm{font-size:18px;}
 @media (hover:hover) and (pointer:fine){
   .team-btn:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:rgba(79,110,240,.35);}
