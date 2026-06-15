@@ -10581,15 +10581,12 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
 .team-btn .nm{font-size:15.5px;font-weight:800;letter-spacing:-.4px;color:var(--ink);word-break:keep-all;}
 .team-btn .chev{display:none;}
-/* 통합돌봄팀(TF) = 맨 위 한 줄 전체폭, 가로형 헤더 카드 */
-.team-btn.tf{grid-column:1 / -1;flex-direction:row;justify-content:flex-start;gap:14px;
-  padding:15px 16px;text-align:left;}
-.team-btn.tf .nm{flex:1;min-width:0;font-size:18px;}
-.team-btn.tf .chev{display:block;flex:0 0 auto;color:#c2c8d2;font-size:22px;font-weight:600;
-  transition:transform .15s,color .15s;}
+/* 통합돌봄팀(TF) = 맨 아래 한 줄 전체폭, 가운데 정렬 카드 */
+.team-btn.tf{grid-column:1 / -1;order:1;flex-direction:row;justify-content:center;gap:12px;
+  padding:16px;text-align:center;}
+.team-btn.tf .nm{font-size:18px;}
 @media (hover:hover) and (pointer:fine){
   .team-btn:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:rgba(79,110,240,.35);}
-  .team-btn.tf:hover .chev{transform:translateX(3px);color:var(--primary);}
 }
 .team-btn:active{transform:scale(.98);box-shadow:0 1px 4px rgba(27,36,54,.06);}
 .logout{font-size:13px;color:var(--muted);background:rgba(255,255,255,.7);border:1px solid var(--line);
