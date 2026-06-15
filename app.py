@@ -10571,15 +10571,15 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   box-shadow:0 0 0 3px rgba(79,110,240,.18);}
 
 .team-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.team-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
-  background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 12px;
+.team-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:13px 12px;
   box-shadow:var(--shadow-sm);position:relative;overflow:hidden;text-align:center;
   transition:transform .14s ease,box-shadow .2s ease,border-color .2s ease;}
-.team-btn .ava{width:46px;height:46px;border-radius:14px;flex:0 0 auto;display:flex;align-items:center;
-  justify-content:center;font-size:23px;color:#fff;
+.team-btn .ava{width:40px;height:40px;border-radius:12px;flex:0 0 auto;display:flex;align-items:center;
+  justify-content:center;font-size:20px;color:#fff;
   background:linear-gradient(135deg,#5b7bf5,#3f5bdc);box-shadow:0 5px 12px rgba(79,110,240,.30);}
 .team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
-.team-btn .nm{font-size:15.5px;font-weight:800;letter-spacing:-.4px;color:var(--ink);word-break:keep-all;}
+.team-btn .nm{font-size:15px;font-weight:800;letter-spacing:-.4px;color:var(--ink);word-break:keep-all;}
 .team-btn .chev{display:none;}
 /* 통합돌봄팀(TF) = 맨 아래 한 줄 전체폭, 가운데 정렬 카드 */
 .team-btn.tf{grid-column:1 / -1;order:1;flex-direction:row;justify-content:center;gap:12px;
