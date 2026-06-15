@@ -10542,7 +10542,7 @@ async function doLogin(){
 MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리</title><style>""" + MEAL_BASE_CSS + """
-.hero{position:relative;overflow:hidden;border-radius:18px;padding:14px 16px;margin-bottom:20px;
+.hero{position:relative;overflow:hidden;border-radius:18px;padding:14px 16px;margin:14px 0 20px;
   background:linear-gradient(135deg,#7e93f3 0%,#6478ea 100%);
   box-shadow:0 8px 22px rgba(100,120,234,.22);}
 .hero::before{content:"";position:absolute;width:150px;height:150px;border-radius:50%;
@@ -10565,7 +10565,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .lead{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0;word-break:keep-all;}
 .lead b{color:var(--primary-dd);font-weight:800;}
 
-.sec-title{font-size:14px;font-weight:800;margin:10px 2px 12px;letter-spacing:-.3px;color:var(--ink-soft);
+.sec-title{font-size:14px;font-weight:800;margin:20px 2px 12px;letter-spacing:-.3px;color:var(--ink-soft);
   display:flex;align-items:center;gap:7px;}
 .sec-title .dot{width:7px;height:7px;border-radius:50%;background:var(--primary);
   box-shadow:0 0 0 3px rgba(79,110,240,.18);}
