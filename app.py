@@ -10821,6 +10821,7 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .amt{font-size:12px;color:var(--muted);min-width:74px;text-align:right;font-weight:600;}
 .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
 .badge.full{background:var(--full-soft);color:var(--full);}
+.badgeslot{flex:0 0 auto;width:42px;display:flex;justify-content:flex-end;}
 .empty{color:var(--muted);font-size:13px;padding:14px 4px;}
 .restrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
 .restrow:last-child{border-bottom:none;}
@@ -10947,7 +10948,7 @@ select{appearance:none;-webkit-appearance:none;
     <span class="cntpill {{s.status}}">{{s.count}}/{{monthly_count}}</span>
     <span class=bar><i style="width:{{ (s.count*100//monthly_count) if s.count<monthly_count else 100 }}%"></i></span>
     <span class=amt>{{ "{:,}".format(s.total) }}원</span>
-    {% if s.status=='full' %}<span class="badge full">마감</span>{% endif %}
+    <span class=badgeslot>{% if s.status=='full' %}<span class="badge full">마감</span>{% endif %}</span>
   </div>
   {% endfor %}
 {% else %}
