@@ -10542,42 +10542,40 @@ async function doLogin(){
 MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>매식비 관리</title><style>""" + MEAL_BASE_CSS + """
-.hero{position:relative;overflow:hidden;border-radius:20px;padding:22px 20px;margin-bottom:16px;
-  background:linear-gradient(135deg,#5b7bf5 0%,#3f5bdc 55%,#2f47b8 100%);
-  box-shadow:0 12px 30px rgba(47,71,184,.28);}
-.hero::before{content:"";position:absolute;width:180px;height:180px;border-radius:50%;
-  right:-52px;top:-72px;background:rgba(255,255,255,.13);}
-.hero::after{content:"";position:absolute;width:120px;height:120px;border-radius:50%;
-  right:34px;bottom:-62px;background:rgba(255,255,255,.08);}
-.hero-row{position:relative;z-index:1;display:flex;align-items:center;gap:14px;}
-.hero-logo{width:54px;height:54px;border-radius:16px;flex:0 0 auto;
-  background:rgba(255,255,255,.20);display:flex;align-items:center;justify-content:center;font-size:27px;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.28);}
+.hero{position:relative;overflow:hidden;border-radius:18px;padding:14px 16px;margin-bottom:14px;
+  background:linear-gradient(135deg,#7e93f3 0%,#6478ea 100%);
+  box-shadow:0 8px 22px rgba(100,120,234,.22);}
+.hero::before{content:"";position:absolute;width:150px;height:150px;border-radius:50%;
+  right:-46px;top:-60px;background:rgba(255,255,255,.14);}
+.hero::after{content:"";position:absolute;width:100px;height:100px;border-radius:50%;
+  right:26px;bottom:-54px;background:rgba(255,255,255,.09);}
+.hero-row{position:relative;z-index:1;display:flex;align-items:center;gap:12px;}
+.hero-logo{width:42px;height:42px;border-radius:13px;flex:0 0 auto;
+  background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:22px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.30);}
 .hero-tt{flex:1;min-width:0;}
-.hero-tt h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.6px;color:#fff;}
-.hero-tt p{margin:3px 0 0;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.85);letter-spacing:-.2px;}
-.hero .logout{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);color:#fff;
+.hero-tt h1{margin:0;font-size:20px;font-weight:800;letter-spacing:-.5px;color:#fff;}
+.hero .logout{background:rgba(255,255,255,.20);border:1px solid rgba(255,255,255,.32);color:#fff;
   box-shadow:none;flex:0 0 auto;}
-.hero .logout:active{transform:scale(.95);background:rgba(255,255,255,.30);}
+.hero .logout:active{transform:scale(.95);background:rgba(255,255,255,.32);}
 
 .lead-card{position:relative;overflow:hidden;background:var(--surface);border:1px solid var(--line);
-  border-radius:var(--r);padding:15px 17px 15px 20px;box-shadow:var(--shadow-sm);margin-bottom:22px;}
+  border-radius:var(--r);padding:13px 15px 13px 18px;box-shadow:var(--shadow-sm);margin-bottom:16px;}
 .lead-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
-.lead{font-size:14px;color:var(--ink-soft);line-height:1.7;margin:0;word-break:keep-all;}
+.lead{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0;word-break:keep-all;}
 .lead b{color:var(--primary-dd);font-weight:800;}
-.lead-line{display:block;}
 
-.sec-title{font-size:14px;font-weight:800;margin:0 2px 12px;letter-spacing:-.3px;color:var(--ink-soft);
+.sec-title{font-size:14px;font-weight:800;margin:0 2px 10px;letter-spacing:-.3px;color:var(--ink-soft);
   display:flex;align-items:center;gap:7px;}
 .sec-title .dot{width:7px;height:7px;border-radius:50%;background:var(--primary);
   box-shadow:0 0 0 3px rgba(79,110,240,.18);}
 
-.team-grid{display:grid;gap:11px;}
-.team-btn{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);
-  border-radius:16px;padding:15px 16px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
+.team-grid{display:grid;gap:10px;}
+.team-btn{display:flex;align-items:center;gap:13px;background:var(--surface);border:1px solid var(--line);
+  border-radius:15px;padding:12px 14px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
   transition:transform .14s ease,box-shadow .2s ease,border-color .2s ease;}
-.team-btn .ava{width:46px;height:46px;border-radius:14px;flex:0 0 auto;display:flex;align-items:center;
-  justify-content:center;font-size:22px;color:#fff;
+.team-btn .ava{width:42px;height:42px;border-radius:13px;flex:0 0 auto;display:flex;align-items:center;
+  justify-content:center;font-size:20px;color:#fff;
   background:linear-gradient(135deg,#5b7bf5,#3f5bdc);box-shadow:0 5px 12px rgba(79,110,240,.30);}
 .team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
 .team-btn .nm{flex:1;min-width:0;font-size:17px;font-weight:800;letter-spacing:-.4px;text-align:left;}
@@ -10597,15 +10595,11 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
     <div class=hero-logo>&#127869;</div>
     <div class=hero-tt>
       <h1>매식비 관리</h1>
-      <p>1인 {{ "{:,}".format(amount) }}원 · 한 달 {{monthly_count}}회까지 기록</p>
     </div>
     <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
   </div>
 </div>
-<div class=lead-card><p class=lead>
-<span class=lead-line>팀을 선택한 뒤, 달력에서 <b>날짜를 누르고 팀원을 고르면</b></span>
-<span class=lead-line>식당·결재자를 입력해 1인 {{ "{:,}".format(amount) }}원씩 기록할 수 있어요.</span>
-<span class=lead-line>한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능하며, 초과 입력은 자동으로 막힙니다.</span></p></div>
+<div class=lead-card><p class=lead>팀을 고른 뒤 달력에서 <b>날짜·팀원을 선택</b>하고 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원씩 기록돼요. 한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능해요.</p></div>
 <div class=sec-title><span class=dot></span>팀 선택</div>
 <div class=team-grid>
 {% for t in teams %}
@@ -10806,12 +10800,13 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .cal td.has{box-shadow:inset 0 0 0 1.5px rgba(79,110,240,.25);}
 .cal td.out{background:transparent;border-color:transparent;color:#c2c8d2;cursor:default;}
 .cal td .dn{font-size:12px;font-weight:700;color:var(--ink-soft);}
+.cal td .cell{display:flex;flex-direction:column;align-items:flex-start;gap:5px;height:100%;}
 .cal td.today{background:#fff7ed;border-color:#fcd29a;box-shadow:inset 0 0 0 1.5px rgba(245,158,11,.45);}
 .cal td.today .dn{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#fff;border-radius:50%;
   width:21px;height:21px;display:inline-flex;align-items:center;justify-content:center;
   box-shadow:0 2px 6px rgba(245,158,11,.5);}
-.chip{font-size:10.5px;line-height:1.3;background:linear-gradient(135deg,#5b7bf5,#3f5bdc);color:#fff;
-  border-radius:6px;padding:2px 5px;margin-top:3px;display:inline-flex;align-items:center;gap:2px;
+.chip{font-size:11px;line-height:1.25;background:linear-gradient(135deg,#5b7bf5,#3f5bdc);color:#fff;
+  border-radius:7px;padding:3px 7px;margin:0;display:inline-flex;align-items:center;gap:2px;
   white-space:nowrap;font-weight:700;box-shadow:0 1px 3px rgba(79,110,240,.3);}
 .sec-title{font-size:15px;font-weight:800;margin:22px 2px 11px;letter-spacing:-.3px;}
 .sumrow{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
@@ -10929,8 +10924,10 @@ select{appearance:none;-webkit-appearance:none;
     {% for c in week %}
       {% if c.in_month %}
       <td class="{% if c.is_today %}today {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')">
-        <span class=dn>{{c.day}}</span>
-        {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
+        <div class=cell>
+          <span class=dn>{{c.day}}</span>
+          {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
+        </div>
       </td>
       {% else %}
       <td class=out><span class=dn>{{c.day}}</span></td>
