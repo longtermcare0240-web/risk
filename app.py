@@ -390,7 +390,9 @@ TYPE_COLORS = {
 
     "공중화장실": "#f59e0b",
 
-    "교통사고위험지역": "#ef4444"   # 추가
+    "교통사고위험지역": "#ef4444",   # 추가
+
+    "공영주차장": "#8b5cf6"
 
 }
 
@@ -466,6 +468,10 @@ def sample_desc(category, city, town, address):
 
         return f"{city} {town} 일대는 교통사고 발생률이 높은 구간입니다."
 
+    if category == "공영주차장":
+
+        return f"{city} {town} 인근 공영주차장 위치입니다."
+
 
 
     return f"{city} {town} 위치 정보입니다."
@@ -482,7 +488,9 @@ def sample_date(category):
 
         "공중화장실": "2025-01-01",
 
-        "교통사고위험지역": "2025-01-01"   # 추가
+        "교통사고위험지역": "2025-01-01",   # 추가
+
+        "공영주차장": "2025-01-01"
 
     }
 
@@ -1702,6 +1710,18 @@ html,body{
 
     </button>
 
+    <button class="mobile-pill" id="pc_pill_parking"
+
+      style="color:#1a202c;"
+
+      onclick="pcPillFilter('공영주차장')">
+
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+
+      공영주차장
+
+    </button>
+
   </div>
 
 
@@ -1760,6 +1780,14 @@ html,body{
 
     </div>
 
+    <div class="map-legend-item">
+
+      <span class="map-legend-dot" style="background:#8b5cf6"></span>
+
+      공영주차장
+
+    </div>
+
 
 
     <div class="map-legend-item">
@@ -1798,7 +1826,9 @@ const CATEGORY_COLORS = {
 
   "공중화장실": "#f59e0b",
 
-  "교통사고위험지역": "#ef4444"
+  "교통사고위험지역": "#ef4444",
+
+  "공영주차장": "#8b5cf6"
 
 };
 
@@ -1810,7 +1840,9 @@ const CATEGORY_LIST = [
 
   "공중화장실",
 
-  "교통사고위험지역"
+  "교통사고위험지역",
+
+  "공영주차장"
 
 ];
 
@@ -5915,11 +5947,13 @@ if(isMobile() && window.mobileLeafletMap){
 
   const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
 
+  const parkingCount = filtered.filter(x=>x.구분==="공영주차장").length;
+
 
 
   showMsg(
 
-      `경로 주변 시설\n\n공중화장실 ${toiletCount}개\n상습결빙지역 ${iceCount}개\n교통사고위험지역 ${accidentCount}개`
+      `경로 주변 시설\n\n공중화장실 ${toiletCount}개\n상습결빙지역 ${iceCount}개\n교통사고위험지역 ${accidentCount}개\n공영주차장 ${parkingCount}개`
 
   );
 
@@ -6239,6 +6273,8 @@ const PILL_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
+  "공영주차장": "#8b5cf6",
+
   "전체": "#475569"
 
 };
@@ -6251,7 +6287,9 @@ const PILL_IDS = {
 
   "공중화장실": "pill_toilet",
 
-  "교통사고위험지역": "pill_accident"
+  "교통사고위험지역": "pill_accident",
+
+  "공영주차장": "pill_parking"
 
 };
 
@@ -6391,6 +6429,8 @@ const PC_PILL_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
+  "공영주차장": "#8b5cf6",
+
   "전체": "#475569"
 
 };
@@ -6403,9 +6443,9 @@ function pcPillFilter(cat){
 
   pcPillActive = cat;
 
-  ["전체","상습결빙지역","공중화장실","교통사고위험지역"].forEach(k=>{
+  ["전체","상습결빙지역","공중화장실","교통사고위험지역","공영주차장"].forEach(k=>{
 
-    const id = "pc_pill_" + (k==="전체"?"all":k==="상습결빙지역"?"ice":k==="공중화장실"?"toilet":"accident");
+    const id = "pc_pill_" + (k==="전체"?"all":k==="상습결빙지역"?"ice":k==="공중화장실"?"toilet":k==="교통사고위험지역"?"accident":"parking");
 
     const el = document.getElementById(id);
 
@@ -7301,6 +7341,18 @@ window.addEventListener("load", function(){
 
     </button>
 
+    <button class="mobile-pill" id="pill_parking"
+
+      style="color:#1a202c;"
+
+      onclick="mobilePillFilter('공영주차장')">
+
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+
+      공영주차장
+
+    </button>
+
   </div>
 
 
@@ -7336,6 +7388,14 @@ window.addEventListener("load", function(){
   <span class="map-legend-dot" style="background:#ef4444"></span>
 
   교통사고위험지역
+
+</div>
+
+<div class="map-legend-item">
+
+  <span class="map-legend-dot" style="background:#8b5cf6"></span>
+
+  공영주차장
 
 </div>
 
