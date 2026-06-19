@@ -2634,9 +2634,9 @@ function initRoadview(containerId, lat, lng, category){
 
           roadview.setPanoId(panoId, position);
 
-          // 공중화장실: 로드뷰 위치 → 화장실 좌표 방향으로 카메라 회전
+          // 공중화장실/공영주차장: 로드뷰 위치 → 시설 좌표 방향으로 카메라 회전
 
-          if(category === "공중화장실"){
+          if(category === "공중화장실" || category === "공영주차장"){
 
             kakao.maps.event.addListener(roadview, 'init', function(){
 
