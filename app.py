@@ -2388,7 +2388,7 @@ function createCategoryChecks(){
 
       <span class="dot" style="background:${color}"></span>
 
-      <span>${cat === "주차장" ? '주차장<span style="font-size:11px;">(공영/민영)</span>' : cat}</span>
+      <span>${cat === "주차장" ? '주차장<span style="font-size:11px;color:#9ca3af;">(공영/민영)</span>' : cat}</span>
 
     `;
 
