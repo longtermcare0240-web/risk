@@ -392,7 +392,9 @@ TYPE_COLORS = {
 
     "교통사고위험지역": "#ef4444",   # 추가
 
-    "공영주차장": "#8b5cf6"
+    "공영주차장": "#8b5cf6",
+
+    "민영주차장": "#8b5cf6"
 
 }
 
@@ -468,9 +470,9 @@ def sample_desc(category, city, town, address):
 
         return f"{city} {town} 일대는 교통사고 발생률이 높은 구간입니다."
 
-    if category == "공영주차장":
+    if category in ("공영주차장", "민영주차장"):
 
-        return f"{city} {town} 인근 공영주차장 위치입니다."
+        return f"{city} {town} 인근 {category} 위치입니다."
 
 
 
@@ -490,7 +492,9 @@ def sample_date(category):
 
         "교통사고위험지역": "2025-01-01",   # 추가
 
-        "공영주차장": "2025-01-01"
+        "공영주차장": "2025-01-01",
+
+        "민영주차장": "2025-01-01"
 
     }
 
@@ -1714,11 +1718,11 @@ html,body{
 
       style="color:#1a202c;"
 
-      onclick="pcPillFilter('공영주차장')">
+      onclick="pcPillFilter('주차장')">
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
 
-      공영주차장
+      주차장
 
     </button>
 
@@ -1784,7 +1788,7 @@ html,body{
 
       <span class="map-legend-dot" style="background:#8b5cf6"></span>
 
-      공영주차장
+      주차장
 
     </div>
 
@@ -1828,7 +1832,7 @@ const CATEGORY_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
-  "공영주차장": "#8b5cf6"
+  "주차장": "#8b5cf6"
 
 };
 
@@ -1842,9 +1846,53 @@ const CATEGORY_LIST = [
 
   "교통사고위험지역",
 
-  "공영주차장"
+  "주차장"
 
 ];
+
+
+
+// "주차장" = 공영주차장 + 민영주차장 묶음 (화면엔 1개, 데이터/마커는 두 구분값)
+
+const CATEGORY_GROUP = { "주차장": ["공영주차장", "민영주차장"] };
+
+function expandCats(cats){
+
+  const out = [];
+
+  cats.forEach(function(c){ var g = CATEGORY_GROUP[c]; if(g){ g.forEach(function(x){ out.push(x); }); } else { out.push(c); } });
+
+  return out;
+
+}
+
+function catMatch(gubun, cat){
+
+  var g = CATEGORY_GROUP[cat];
+
+  return g ? (g.indexOf(gubun) >= 0) : (gubun === cat);
+
+}
+
+
+
+// 목록용: 주차장이면 "주차장 + 공영/민영 배지" 로, 그 외는 구분 그대로
+
+function gubunLabel(g){
+
+  if(g === "공영주차장" || g === "민영주차장"){
+
+    var t = g.substring(0,2);
+
+    var c = (t === "공영") ? "#2563eb" : "#db2777";
+
+    return '주차장<sup style="background:' + c + ';color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;margin-left:4px;vertical-align:super;white-space:nowrap;'+'">' + t + '</sup>';
+
+  }
+
+  return g;
+
+}
 
 
 
@@ -2229,7 +2277,7 @@ function showMobileResults(items, userLat, userLng){
 
     el.innerHTML = `
 
-      <b>${item.구분}</b><br>
+      <b>${gubunLabel(item.구분)}</b><br>
 
       ${item.시군구} ${item.읍면동}<br>
 
@@ -2634,9 +2682,9 @@ function initRoadview(containerId, lat, lng, category){
 
           roadview.setPanoId(panoId, position);
 
-          // 공중화장실/공영주차장: 로드뷰 위치 → 시설 좌표 방향으로 카메라 회전
+          // 공중화장실/주차장: 로드뷰 위치 → 시설 좌표 방향으로 카메라 회전
 
-          if(category === "공중화장실" || category === "공영주차장"){
+          if(category === "공중화장실" || category === "공영주차장" || category === "민영주차장"){
 
             kakao.maps.event.addListener(roadview, 'init', function(){
 
@@ -3100,7 +3148,7 @@ map.once("moveend", () => {
 
   towns.forEach(t => params.append("town", t));
 
-  categories.forEach(cat => params.append("category", cat));
+  expandCats(categories).forEach(cat => params.append("category", cat));
 
 
 
@@ -4607,7 +4655,7 @@ function showResultList(items, userLat, userLng){
 
     el.innerHTML = `
 
-      <b>${item.구분}</b><br>
+      <b>${gubunLabel(item.구분)}</b><br>
 
       ${item.시군구} ${item.읍면동}<br>
 
@@ -5961,13 +6009,13 @@ if(isMobile() && window.mobileLeafletMap){
 
   const accidentCount = filtered.filter(x=>x.구분==="교통사고위험지역").length;
 
-  const parkingCount = filtered.filter(x=>x.구분==="공영주차장").length;
+  const parkingCount = filtered.filter(x=>x.구분==="공영주차장"||x.구분==="민영주차장").length;
 
 
 
   showMsg(
 
-      `경로 주변 시설\n\n공중화장실 ${toiletCount}개\n상습결빙지역 ${iceCount}개\n교통사고위험지역 ${accidentCount}개\n공영주차장 ${parkingCount}개`
+      `경로 주변 시설\n\n공중화장실 ${toiletCount}개\n상습결빙지역 ${iceCount}개\n교통사고위험지역 ${accidentCount}개\n주차장 ${parkingCount}개`
 
   );
 
@@ -6287,7 +6335,7 @@ const PILL_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
-  "공영주차장": "#8b5cf6",
+  "주차장": "#8b5cf6",
 
   "전체": "#475569"
 
@@ -6303,7 +6351,7 @@ const PILL_IDS = {
 
   "교통사고위험지역": "pill_accident",
 
-  "공영주차장": "pill_parking"
+  "주차장": "pill_parking"
 
 };
 
@@ -6365,7 +6413,7 @@ function mobilePillFilter(cat){
 
       } else {
 
-        if(layer.itemData.구분 === cat){
+        if(catMatch(layer.itemData.구분, cat)){
 
           layer._icon && (layer._icon.style.display="");
 
@@ -6443,7 +6491,7 @@ const PC_PILL_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
-  "공영주차장": "#8b5cf6",
+  "주차장": "#8b5cf6",
 
   "전체": "#475569"
 
@@ -6457,7 +6505,7 @@ function pcPillFilter(cat){
 
   pcPillActive = cat;
 
-  ["전체","상습결빙지역","공중화장실","교통사고위험지역","공영주차장"].forEach(k=>{
+  ["전체","상습결빙지역","공중화장실","교통사고위험지역","주차장"].forEach(k=>{
 
     const id = "pc_pill_" + (k==="전체"?"all":k==="상습결빙지역"?"ice":k==="공중화장실"?"toilet":k==="교통사고위험지역"?"accident":"parking");
 
@@ -6505,7 +6553,7 @@ function pcPillFilter(cat){
 
     } else {
 
-      if(layer._icon) layer._icon.style.display = layer.itemData.구분===cat ? "" : "none";
+      if(layer._icon) layer._icon.style.display = catMatch(layer.itemData.구분, cat) ? "" : "none";
 
     }
 
@@ -7359,11 +7407,11 @@ window.addEventListener("load", function(){
 
       style="color:#1a202c;"
 
-      onclick="mobilePillFilter('공영주차장')">
+      onclick="mobilePillFilter('주차장')">
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
 
-      공영주차장
+      주차장
 
     </button>
 
@@ -7409,7 +7457,7 @@ window.addEventListener("load", function(){
 
   <span class="map-legend-dot" style="background:#8b5cf6"></span>
 
-  공영주차장
+  주차장
 
 </div>
 
