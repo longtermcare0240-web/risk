@@ -2275,6 +2275,8 @@ function showMobileResults(items, userLat, userLng){
 
     el.className = "mobile-result-item";
 
+    el.dataset.gubun = item.구분;
+
     el.innerHTML = `
 
       <b>${gubunLabel(item.구분)}</b><br>
@@ -2386,7 +2388,7 @@ function createCategoryChecks(){
 
       <span class="dot" style="background:${color}"></span>
 
-      <span>${cat}</span>
+      <span>${cat === "주차장" ? "주차장(공영/민영)" : cat}</span>
 
     `;
 
@@ -2576,7 +2578,7 @@ function buildPopupHtml(item){
 
 
 
-  <div class="popup-title">${escapeHtml(item.구분)}</div>
+  <div class="popup-title">${gubunLabel(item.구분)}</div>
 
   <div class="popup-meta">
 
@@ -4651,6 +4653,8 @@ function showResultList(items, userLat, userLng){
 
     el.className = "mobile-result-item";
 
+    el.dataset.gubun = item.구분;
+
 
 
     el.innerHTML = `
@@ -6447,9 +6451,7 @@ function mobilePillFilter(cat){
 
     } else {
 
-      const title = el.querySelector("b");
-
-      if(title && title.textContent === cat){
+      if(catMatch(el.dataset.gubun || "", cat)){
 
         el.style.display = "";
 
@@ -6571,7 +6573,7 @@ function pcPillFilter(cat){
 
     const b = el.querySelector("b");
 
-    el.style.display = (cat==="전체" || (b && b.textContent===cat)) ? "" : "none";
+    el.style.display = (cat==="전체" || catMatch(el.dataset.gubun || "", cat)) ? "" : "none";
 
   });
 
