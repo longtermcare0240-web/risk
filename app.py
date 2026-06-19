@@ -1886,7 +1886,7 @@ function gubunLabel(g){
 
     var c = (t === "공영") ? "#2563eb" : "#db2777";
 
-    return '주차장<sup style="background:' + c + ';color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;margin-left:4px;vertical-align:super;white-space:nowrap;'+'">' + t + '</sup>';
+    return '주차장<sup style="background:' + c + ';color:#fff;font-size:7px;font-weight:700;padding:1px 5px;border-radius:8px;margin-left:4px;vertical-align:super;white-space:nowrap;'+'">' + t + '</sup>';
 
   }
 
