@@ -3709,6 +3709,18 @@ function openMobileMap(){
 
 
 
+  // 뒤로가기 시 홈(조건 선택 화면)으로 돌아오도록 히스토리 상태 push
+
+  if(!window._mobileMapHist){
+
+    window._mobileMapHist = true;
+
+    history.pushState({mobileMap:true}, "", location.href);
+
+  }
+
+
+
   const mapDiv = document.getElementById("mobileMap");
 
 
@@ -4985,6 +4997,8 @@ err=>{
 });
 
 window.addEventListener("popstate", function(){
+
+window._mobileMapHist = false;
 
 clearRoute();   // ⭐ 추가
 
