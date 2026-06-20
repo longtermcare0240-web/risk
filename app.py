@@ -1570,10 +1570,17 @@ html,body{
 
           <div style="position:relative;">
             <button id="facilityFabBtn" class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 찾기</button>
-            <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;flex-direction:column;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);z-index:1200;">
-              <button class="btn-action" onclick="findNearestFacility('공중화장실')">화장실</button>
-              <button class="btn-action" onclick="findNearestFacility('위험지역')">위험지역</button>
-              <button class="btn-action" onclick="findNearestFacility('주차장')">주차장</button>
+            <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 8px);left:0;right:0;flex-direction:column;gap:7px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,0.22);z-index:1200;">
+              <div style="font-size:11px;font-weight:700;color:#9ca3af;padding:2px 4px 4px;">내 주변에서 찾기</div>
+              <button onclick="findNearestFacility('공중화장실')" style="display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;">
+                <span style="width:11px;height:11px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>화장실
+              </button>
+              <button onclick="findNearestFacility('주차장')" style="display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;">
+                <span style="width:11px;height:11px;border-radius:50%;background:#8b5cf6;flex-shrink:0;"></span>주차장
+              </button>
+              <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;">
+                <span style="width:11px;height:11px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역
+              </button>
             </div>
           </div>
 
