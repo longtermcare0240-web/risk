@@ -5308,6 +5308,26 @@ function activateIme(inputId){
     setTimeout(function(){ inp.focus(); }, 50);
   }, 30);
 }
+// 자판이 뜨면 경로/주소 팝업 카드를 자판 위로 올리고, 자판 끄면 다시 중앙
+(function(){
+  if(!window.visualViewport) return;
+  var vv = window.visualViewport;
+  function adjustPopupForKeyboard(){
+    var kb = window.innerHeight - vv.height - vv.offsetTop;
+    var shift = (kb > 80) ? -Math.round(kb/2) : 0;
+    ["routePopup","addrSearchPopup"].forEach(function(id){
+      var p = document.getElementById(id);
+      if(!p || getComputedStyle(p).display === "none") return;
+      var card = p.firstElementChild;
+      if(card){ card.style.transition = "transform .2s ease"; card.style.transform = "translateY(" + shift + "px)"; }
+    });
+  }
+  vv.addEventListener("resize", adjustPopupForKeyboard);
+  vv.addEventListener("scroll", adjustPopupForKeyboard);
+})();
+
+
+
 function openRouteSearch(){
 
   var popup = document.getElementById("routePopup");
