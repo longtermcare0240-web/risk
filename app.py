@@ -2618,31 +2618,15 @@ function buildPopupHtml(item){
 
 
 
-  <!-- 5번: 코멘트 버튼 -->
+  <!-- 코멘트 + 공유 (한 줄) -->
 
-  <button onclick="openComments('${sid}')" style="
+  <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
 
-    margin-top:6px;width:100%;height:32px;border:1px solid #e2e8f0;
+    <button onclick="openComments('${sid}')" style="height:34px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:13px;cursor:pointer;font-weight:600;color:#374151;">💬 코멘트</button>
 
-    border-radius:8px;background:#f8fafc;font-size:13px;cursor:pointer;font-weight:600;color:#374151;">
+    <button onclick="shareSpot('${sid}')" style="height:34px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:13px;cursor:pointer;font-weight:600;color:#374151;">🔗 공유</button>
 
-    코멘트 보기 / 작성
-
-  </button>
-
-
-
-  <!-- 공유 버튼 -->
-
-  <button onclick="shareSpot('${sid}')" style="
-
-    margin-top:6px;width:100%;height:32px;border:1px solid #bfdbfe;
-
-    border-radius:8px;background:#eff6ff;font-size:13px;cursor:pointer;font-weight:600;color:#1e40af;">
-
-    🔗 공유하기
-
-  </button>
+  </div>
 
 
 
