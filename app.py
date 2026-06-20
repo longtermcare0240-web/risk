@@ -2544,6 +2544,10 @@ function buildMarkerIcon(color){
 
 function buildPopupHtml(item){
 
+  if(!window._popupItems) window._popupItems = {};
+
+  window._popupItems[item.순번] = item;
+
   const addr = encodeURIComponent(item.주소);
 
   const tmapBtn = isMobile() ? `
@@ -2628,6 +2632,20 @@ function buildPopupHtml(item){
 
 
 
+  <!-- 공유 버튼 -->
+
+  <button onclick="shareSpot('${sid}')" style="
+
+    margin-top:6px;width:100%;height:32px;border:1px solid #bfdbfe;
+
+    border-radius:8px;background:#eff6ff;font-size:13px;cursor:pointer;font-weight:600;color:#1e40af;">
+
+    🔗 공유하기
+
+  </button>
+
+
+
   <div style="margin-top:8px;display:grid;grid-template-columns:${gridCols};gap:6px;">
 
   <a href="https://map.naver.com/v5/search/${addr}" target="_blank"
@@ -2652,6 +2670,23 @@ function buildPopupHtml(item){
 
   </div>`;
 
+}
+
+
+
+async function shareSpot(sid){
+  const item = (window._popupItems || {})[sid];
+  if(!item) return;
+  const name = item.구분 || "위치";
+  const addr = item.주소 || ((item.시군구||"") + " " + (item.읍면동||""));
+  const mapUrl = "https://map.kakao.com/link/map/" + encodeURIComponent(name) + "," + item.위도 + "," + item.경도;
+  if(navigator.share){
+    try { await navigator.share({ title: "안전로드 - " + name, text: name + "\n" + addr, url: mapUrl }); } catch(e) {}
+  } else {
+    const t = name + "\n" + addr + "\n" + mapUrl;
+    try { await navigator.clipboard.writeText(t); showMsg("공유 링크가 복사되었습니다."); }
+    catch(e){ showMsg(t); }
+  }
 }
 
 
