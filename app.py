@@ -1568,18 +1568,16 @@ html,body{
 
           <button class="btn-action btn-kakao" onclick="openAddressSearch()">주소로 찾기</button>
 
-          <div style="position:relative;">
-            <button id="facilityFabBtn" class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 찾기</button>
-            <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 8px);left:0;right:0;flex-direction:column;gap:7px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,0.22);z-index:1200;">
-              <div style="font-size:11px;font-weight:700;color:#9ca3af;padding:2px 4px 4px;">내 주변에서 찾기</div>
-              <button onclick="findNearestFacility('공중화장실')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">화장실</button>
-              <button onclick="findNearestFacility('주차장')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">주차장</button>
-              <button onclick="findNearestFacility('위험지역')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">위험지역</button>
-            </div>
-          </div>
+          <button id="facilityFabBtn" class="btn-action" onclick="toggleFacilityFab()">내 주변 찾기</button>
 
           <button class="btn-action sexoffender-btn" onclick="openSexOffenderApp()">성범죄자 알림e</button>
 
+        </div>
+
+        <div id="facilityFabMenu" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+          <button onclick="findNearestFacility('공중화장실')" style="height:40px;border-radius:9px;font-size:13px;font-weight:700;background:#eff6ff;border:1.5px solid #bfdbfe;color:#1e40af;cursor:pointer;">화장실</button>
+          <button onclick="findNearestFacility('주차장')" style="height:40px;border-radius:9px;font-size:13px;font-weight:700;background:#eff6ff;border:1.5px solid #bfdbfe;color:#1e40af;cursor:pointer;">주차장</button>
+          <button onclick="findNearestFacility('위험지역')" style="height:40px;border-radius:9px;font-size:13px;font-weight:700;background:#eff6ff;border:1.5px solid #bfdbfe;color:#1e40af;cursor:pointer;">위험지역</button>
         </div>
 
         <button id="apkDownloadBtn" class="btn-action btn-green" style="display:none;" onclick="downloadApk()">안전로드 앱 다운로드 (Android)</button>
@@ -4278,21 +4276,18 @@ async function findNearestFacility(targetType){
 function toggleFacilityFab(){
   const m = document.getElementById("facilityFabMenu");
   if(!m) return;
-  const willOpen = (m.style.display !== "flex");
-  m.style.display = willOpen ? "flex" : "none";
-  document.body.style.overflow = willOpen ? "hidden" : "";
+  m.style.display = (m.style.display === "grid") ? "none" : "grid";
 }
 
 function closeFacilityFab(){
   const m = document.getElementById("facilityFabMenu");
   if(m) m.style.display = "none";
-  document.body.style.overflow = "";
 }
 
-// 플로팅 메뉴 바깥 클릭 시 닫기
+// 메뉴 바깥 클릭 시 닫기
 document.addEventListener("click", function(e){
   const m = document.getElementById("facilityFabMenu");
-  if(!m || m.style.display !== "flex") return;
+  if(!m || m.style.display !== "grid") return;
   if(e.target.closest("#facilityFabMenu") || e.target.closest("#facilityFabBtn")) return;
   closeFacilityFab();
 });
