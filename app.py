@@ -1572,9 +1572,9 @@ html,body{
             <button id="facilityFabBtn" class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 찾기</button>
             <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 8px);left:0;right:0;flex-direction:column;gap:7px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,0.22);z-index:1200;">
               <div style="font-size:11px;font-weight:700;color:#9ca3af;padding:2px 4px 4px;">내 주변에서 찾기</div>
-              <button onclick="findNearestFacility('공중화장실')" style="width:100%;padding:12px;background:#f59e0b;border:none;border-radius:10px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;">화장실</button>
-              <button onclick="findNearestFacility('주차장')" style="width:100%;padding:12px;background:#8b5cf6;border:none;border-radius:10px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;">주차장</button>
-              <button onclick="findNearestFacility('위험지역')" style="width:100%;padding:12px;background:#ef4444;border:none;border-radius:10px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;">위험지역</button>
+              <button onclick="findNearestFacility('공중화장실')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">화장실</button>
+              <button onclick="findNearestFacility('주차장')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">주차장</button>
+              <button onclick="findNearestFacility('위험지역')" style="width:100%;padding:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;font-size:14px;font-weight:700;color:#1e40af;cursor:pointer;">위험지역</button>
             </div>
           </div>
 
@@ -8090,7 +8090,7 @@ text-align:center;
 
     const modal = document.getElementById("privacyNoticeModal");
 
-    if(modal) modal.style.display = "flex";
+    if(modal){ modal.style.display = "flex"; document.body.style.overflow = "hidden"; }
 
   }
 
@@ -8103,6 +8103,8 @@ function closePrivacyNotice(){
   const modal = document.getElementById("privacyNoticeModal");
 
   if(modal) modal.style.display = "none";
+
+  document.body.style.overflow = "";
 
 }
 
