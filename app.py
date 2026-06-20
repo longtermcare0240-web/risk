@@ -1569,7 +1569,7 @@ html,body{
           <button class="btn-action btn-kakao" onclick="openAddressSearch()">주소로 찾기</button>
 
           <div style="position:relative;">
-            <button class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 시설</button>
+            <button id="facilityFabBtn" class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 찾기</button>
             <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;flex-direction:column;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);z-index:1200;">
               <button class="btn-action" onclick="findNearestFacility('공중화장실')">화장실</button>
               <button class="btn-action" onclick="findNearestFacility('위험지역')">위험지역</button>
@@ -4257,13 +4257,25 @@ async function findNearestFacility(targetType){
 
 function toggleFacilityFab(){
   const m = document.getElementById("facilityFabMenu");
-  if(m) m.style.display = (m.style.display === "flex") ? "none" : "flex";
+  if(!m) return;
+  const willOpen = (m.style.display !== "flex");
+  m.style.display = willOpen ? "flex" : "none";
+  document.body.style.overflow = willOpen ? "hidden" : "";
 }
 
 function closeFacilityFab(){
   const m = document.getElementById("facilityFabMenu");
   if(m) m.style.display = "none";
+  document.body.style.overflow = "";
 }
+
+// 플로팅 메뉴 바깥 클릭 시 닫기
+document.addEventListener("click", function(e){
+  const m = document.getElementById("facilityFabMenu");
+  if(!m || m.style.display !== "flex") return;
+  if(e.target.closest("#facilityFabMenu") || e.target.closest("#facilityFabBtn")) return;
+  closeFacilityFab();
+});
 
 
 
