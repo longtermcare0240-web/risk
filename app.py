@@ -1074,6 +1074,8 @@ html,body{
 
 .btn-action.fab-on{background:#3b82f6;border-color:#3b82f6;color:#fff;}
 
+#facilityFabMenu.fab-dim{position:relative;z-index:30;box-shadow:0 0 0 100vmax rgba(15,23,42,0.5);}
+
 
 
 .btn-kakao{
@@ -4283,13 +4285,14 @@ function toggleFacilityFab(){
   if(!m) return;
   const open = (m.style.display !== "block");
   m.style.display = open ? "block" : "none";
+  m.classList.toggle("fab-dim", open);
   const b = document.getElementById("facilityFabBtn");
   if(b) b.classList.toggle("fab-on", open);
 }
 
 function closeFacilityFab(){
   const m = document.getElementById("facilityFabMenu");
-  if(m) m.style.display = "none";
+  if(m){ m.style.display = "none"; m.classList.remove("fab-dim"); }
   const b = document.getElementById("facilityFabBtn");
   if(b) b.classList.remove("fab-on");
 }
