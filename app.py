@@ -1568,13 +1568,18 @@ html,body{
 
           <button class="btn-action btn-kakao" onclick="openAddressSearch()">주소로 찾기</button>
 
-          <button class="btn-action" onclick="findNearestToilet()">내 주변 화장실</button>
+          <div style="position:relative;">
+            <button class="btn-action" style="width:100%;" onclick="toggleFacilityFab()">내 주변 시설</button>
+            <div id="facilityFabMenu" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;flex-direction:column;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);z-index:1200;">
+              <button class="btn-action" onclick="findNearestFacility('공중화장실')">화장실</button>
+              <button class="btn-action" onclick="findNearestFacility('위험지역')">위험지역</button>
+              <button class="btn-action" onclick="findNearestFacility('주차장')">주차장</button>
+            </div>
+          </div>
 
-          <button class="btn-action" onclick="findNearestDanger()">내 주변 위험지역</button>
+          <button class="btn-action sexoffender-btn" onclick="openSexOffenderApp()">성범죄자 알림e</button>
 
         </div>
-
-        <button class="btn-action sexoffender-btn" style="margin-bottom:6px;" onclick="openSexOffenderApp()">성범죄자 알림e</button>
 
         <button id="apkDownloadBtn" class="btn-action btn-green" style="display:none;" onclick="downloadApk()">안전로드 앱 다운로드 (Android)</button>
 
@@ -1854,7 +1859,7 @@ const CATEGORY_LIST = [
 
 // "주차장" = 공영주차장 + 민영주차장 묶음 (화면엔 1개, 데이터/마커는 두 구분값)
 
-const CATEGORY_GROUP = { "주차장": ["공영주차장", "민영주차장"] };
+const CATEGORY_GROUP = { "주차장": ["공영주차장", "민영주차장"], "위험지역": ["상습결빙지역", "교통사고위험지역"] };
 
 function expandCats(cats){
 
@@ -4233,6 +4238,35 @@ async function findNearestToilet(){
 
 
 
+async function findNearestFacility(targetType){
+  clearRoute();
+  showLoadingLocation();
+  if(!navigator.geolocation){ showMsg("GPS를 지원하지 않는 기기입니다."); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      userLat = lat; userLng = lng;
+      runNearestSearch(lat,lng,targetType);
+      closeFacilityFab();
+    },
+    err=>{ closeMsg(); showMsg("위치를 가져올 수 없습니다."); },
+    { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+  );
+}
+
+function toggleFacilityFab(){
+  const m = document.getElementById("facilityFabMenu");
+  if(m) m.style.display = (m.style.display === "flex") ? "none" : "flex";
+}
+
+function closeFacilityFab(){
+  const m = document.getElementById("facilityFabMenu");
+  if(m) m.style.display = "none";
+}
+
+
+
 async function findNearestDanger(){
 
 
@@ -4349,7 +4383,7 @@ const data = ALL_DATA_CACHE;
 
 
 
-    if(item.구분 !== targetType) return;
+    if(!catMatch(item.구분, targetType)) return;
 
 
 
