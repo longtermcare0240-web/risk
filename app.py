@@ -4255,6 +4255,7 @@ async function findNearestToilet(){
 
 
 async function findNearestFacility(targetType){
+  closeFacilityFab();
   clearRoute();
   showLoadingLocation();
   if(!navigator.geolocation){ showMsg("GPS를 지원하지 않는 기기입니다."); return; }
@@ -4264,7 +4265,6 @@ async function findNearestFacility(targetType){
       const lng = pos.coords.longitude;
       userLat = lat; userLng = lng;
       runNearestSearch(lat,lng,targetType);
-      closeFacilityFab();
     },
     err=>{ closeMsg(); showMsg("위치를 가져올 수 없습니다."); },
     { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
@@ -7643,10 +7643,12 @@ backdrop-filter:blur(4px);">
     <div style="font-size:12px;color:#64748b;">찾을 시설을 선택하세요</div>
   </div>
   <div style="padding:16px 20px 18px;">
-  <button onclick="findNearestFacility('공중화장실')" style="display:flex;align-items:center;gap:10px;width:100%;height:48px;padding:0 14px;margin-bottom:8px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>화장실</button>
-  <button onclick="findNearestFacility('주차장')" style="display:flex;align-items:center;gap:10px;width:100%;height:48px;padding:0 14px;margin-bottom:8px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:10px;height:10px;border-radius:50%;background:#8b5cf6;flex-shrink:0;"></span>주차장</button>
-  <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;gap:10px;width:100%;height:48px;padding:0 14px;margin-bottom:8px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역</button>
-    <button onclick="closeFacilityFab()" style="width:100%;height:42px;margin-top:6px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+      <button onclick="findNearestFacility('공중화장실')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>화장실</button>
+      <button onclick="findNearestFacility('주차장')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#8b5cf6;flex-shrink:0;"></span>주차장</button>
+      <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역</button>
+    </div>
+    <button onclick="closeFacilityFab()" style="width:100%;height:42px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
   </div>
 </div>
 </div>
