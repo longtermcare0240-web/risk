@@ -2660,13 +2660,39 @@ async function shareSpot(sid){
   const name = item.구분 || "위치";
   const addr = item.주소 || ((item.시군구||"") + " " + (item.읍면동||""));
   const mapUrl = "https://map.kakao.com/link/map/" + encodeURIComponent(name) + "," + item.위도 + "," + item.경도;
-  if(navigator.share){
-    try { await navigator.share({ title: "안전로드 - " + name, text: name + "\n" + addr, url: mapUrl }); } catch(e) {}
-  } else {
-    const t = name + "\n" + addr + "\n" + mapUrl;
-    try { await navigator.clipboard.writeText(t); showMsg("공유 링크가 복사되었습니다."); }
-    catch(e){ showMsg(t); }
+  const shareText = name + "\n" + addr + "\n" + mapUrl;
+  const canNativeShare = navigator.share && navigator.maxTouchPoints > 0;
+  if(canNativeShare){
+    try {
+      await navigator.share({ title: "안전로드 - " + name, text: name + "\n" + addr, url: mapUrl });
+      return;
+    } catch(e){
+      if(e && e.name === "AbortError") return;
+    }
   }
+  copyShareText(shareText);
+}
+
+function copyShareText(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ showMsg("공유 링크가 복사되었습니다."); }).catch(function(){ legacyCopyText(text); });
+  } else {
+    legacyCopyText(text);
+  }
+}
+
+function legacyCopyText(text){
+  try {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    showMsg("공유 링크가 복사되었습니다.");
+  } catch(e){ showMsg(text); }
 }
 
 
