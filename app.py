@@ -6730,6 +6730,8 @@ function pcPillFilter(cat){
 
 function onPopupOpen(e){
 
+  var __mlb=document.getElementById('mobileLocBtn'); if(__mlb) __mlb.style.display='none';
+
   const popup = e.popup;
 
   const marker = popup._source;
@@ -6810,6 +6812,8 @@ function onPopupOpen(e){
 
 
 function onPopupClose(e){
+
+  var __mlb=document.getElementById('mobileLocBtn'); if(__mlb) __mlb.style.display='flex';
 
   // 팝업 닫히면 결과 패널 복원
 
