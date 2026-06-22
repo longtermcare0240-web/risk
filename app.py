@@ -2325,27 +2325,23 @@ function showMobileResults(items, userLat, userLng){
 
       // 팝업이 화면 중앙에 오도록 지도 오른쪽으로 이동
       if(window.mobileMarkerGroup){
-
-
-
+        var __found = false;
         window.mobileMarkerGroup.eachLayer(function(layer){
-
-
-
           if(layer.itemData && layer.itemData.순번 === item.순번){
-
+            __found = true;
             window._skipPopupAutoPan = true;
-
             layer.openPopup();
-
           }
-
-
-
         });
-
-
-
+        if(!__found){
+          // 위치찾기 등으로 결과 마커가 지워진 경우 다시 만들어 팝업 표시
+          var __mk = L.marker([item.위도,item.경도],{icon: buildMarkerIcon(item.마커색상)});
+          __mk.itemData = item;
+          __mk.bindPopup(buildPopupHtml(item),{maxWidth: isMobile() ? 310 : 650, autoPan: false});
+          window.mobileMarkerGroup.addLayer(__mk);
+          window._skipPopupAutoPan = true;
+          setTimeout(function(){ __mk.openPopup(); }, 0);
+        }
       }
 
 
