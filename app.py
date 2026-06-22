@@ -394,7 +394,9 @@ TYPE_COLORS = {
 
     "공영주차장": "#8b5cf6",
 
-    "민영주차장": "#8b5cf6"
+    "민영주차장": "#8b5cf6",
+
+    "자동심장충격기": "#16a34a"
 
 }
 
@@ -1834,7 +1836,9 @@ const CATEGORY_COLORS = {
 
   "교통사고위험지역": "#ef4444",
 
-  "주차장": "#8b5cf6"
+  "주차장": "#8b5cf6",
+
+  "자동심장충격기": "#16a34a"
 
 };
 
@@ -2733,7 +2737,7 @@ function initRoadview(containerId, lat, lng, category){
 
           // 공중화장실/주차장: 로드뷰 위치 → 시설 좌표 방향으로 카메라 회전
 
-          if(category === "공중화장실" || category === "공영주차장" || category === "민영주차장"){
+          if(true){   // 모든 시설: 로드뷰 카메라가 해당 시설 방향을 바라보도록 회전
 
             kakao.maps.event.addListener(roadview, 'init', function(){
 
@@ -7689,10 +7693,11 @@ backdrop-filter:blur(4px);">
     <div style="font-size:12px;color:#64748b;">찾을 시설을 선택하세요</div>
   </div>
   <div style="padding:16px 20px 18px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
       <button onclick="findNearestFacility('공중화장실')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>화장실</button>
       <button onclick="findNearestFacility('주차장')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#8b5cf6;flex-shrink:0;"></span>주차장</button>
       <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역</button>
+      <button onclick="findNearestFacility('자동심장충격기')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;flex-shrink:0;"></span>AED</button>
     </div>
     <button onclick="closeFacilityFab()" style="width:100%;height:42px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
   </div>
