@@ -3995,7 +3995,6 @@ function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
 
 
   if(!isMobile()) return;
-  var __ccB=document.getElementById('ccbyBadge'); if(__ccB) __ccB.style.display='none';
 
 
 
@@ -4493,7 +4492,6 @@ const data = ALL_DATA_CACHE;
 if(isMobile()){
 
   syncToMobileMap(filtered,lat,lng,5000);
-  { var __ccS=document.getElementById('ccbyBadge'); if(__ccS) __ccS.style.display=(targetType==='주차장')?'flex':'none'; }
 
   closeMsg();   // ⭐ 이거 추가
 
@@ -4602,7 +4600,6 @@ markerGroup.addLayer(marker);
 
 
 showResultList(filtered,lat,lng);
-  { var __ccS=document.getElementById('ccbyBadge'); if(__ccS) __ccS.style.display=(targetType==='주차장')?'flex':'none'; }
 
 
 
@@ -4695,6 +4692,34 @@ async function findRadius(km){
 
 
 
+
+/* CC BY (주차장 출처) 배지: 결과 목록이 전부 주차장일 때만 표시 */
+function updateCcbyBadge(){
+  var el = document.getElementById('ccbyBadge');
+  if(!el) return;
+  var nodes = document.querySelectorAll('#mobileResultList .mobile-result-item');
+  var hasVisible = false, allParking = true;
+  nodes.forEach(function(n){
+    if(n.style.display === 'none') return;
+    hasVisible = true;
+    if(!catMatch(n.dataset.gubun || '', '주차장')) allParking = false;
+  });
+  el.style.display = (hasVisible && allParking) ? 'flex' : 'none';
+}
+(function(){
+  function setup(){
+    var list = document.getElementById('mobileResultList');
+    if(!list){ setTimeout(setup, 300); return; }
+    try{
+      var obs = new MutationObserver(function(){ updateCcbyBadge(); });
+      obs.observe(list, {childList:true, subtree:true, attributes:true, attributeFilter:['style']});
+    }catch(e){}
+    updateCcbyBadge();
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', setup);
+  } else { setup(); }
+}());
 
 function showResultList(items, userLat, userLng){
 
