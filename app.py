@@ -5078,7 +5078,10 @@ if(isMobile() && window.mobileLeafletMap){
 
 if(window.mobileMarkerGroup){
 
-  window.mobileMarkerGroup.clearLayers();
+  // 결과 마커(itemData 있는 것)는 유지하고, 이전 '내 위치' 표시만 제거
+  var __rm = [];
+  window.mobileMarkerGroup.eachLayer(function(l){ if(!l.itemData) __rm.push(l); });
+  __rm.forEach(function(l){ window.mobileMarkerGroup.removeLayer(l); });
 
 
 
