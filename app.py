@@ -378,6 +378,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FILE_PATH = "mapdata_geocoded.xlsx"
 
+# 항목별 엑셀(공중화장실.xlsx 등)을 각각 읽어 합친다. mapdata 폴더 우선, 없으면 앱 루트.
+
+DATA_DIR = os.path.join(BASE_DIR, "mapdata") if os.path.isdir(os.path.join(BASE_DIR, "mapdata")) else BASE_DIR
+
+SPLIT_FILES = ["공중화장실.xlsx", "상습결빙지역.xlsx", "교통사고위험지역.xlsx", "주차장.xlsx", "자동심장충격기.xlsx"]
+
 DATA_CACHE = None
 
 
@@ -552,13 +558,27 @@ def load_df():
 
 
 
-    if not os.path.exists(FILE_PATH):
+    frames = []
 
-        raise FileNotFoundError(f"{FILE_PATH} 파일이 없습니다.")
+    for _fn in SPLIT_FILES:
 
+        _fp = os.path.join(DATA_DIR, _fn)
 
+        if os.path.exists(_fp):
 
-    df = pd.read_excel(FILE_PATH)
+            frames.append(pd.read_excel(_fp))
+
+    if frames:
+
+        df = pd.concat(frames, ignore_index=True)
+
+    elif os.path.exists(FILE_PATH):
+
+        df = pd.read_excel(FILE_PATH)
+
+    else:
+
+        raise FileNotFoundError("지도 데이터 엑셀이 없습니다. (항목별 .xlsx 또는 mapdata_geocoded.xlsx)")
 
     
 
@@ -620,7 +640,11 @@ def load_df():
 
     df = df[df["위도"].notna() & df["경도"].notna()].copy()
 
+    # 항목별 파일을 합치면 순번이 겹치므로 전체 다시 매김 (고유 id 보장)
 
+    df = df.reset_index(drop=True)
+
+    df["순번"] = range(1, len(df) + 1)
 
     DATA_CACHE = df
 
