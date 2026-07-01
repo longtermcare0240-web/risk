@@ -3712,7 +3712,7 @@ function submitAdminPw(){
 
 
 
-  if(input.value !== "1234"){
+  if(input.value !== "qwer"){
 
     if(msg){
 
