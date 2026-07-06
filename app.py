@@ -8315,7 +8315,11 @@ def download_apk():
 
     try:
 
-        if SUPABASE_URL and SUPABASE_KEY:
+        now_time = time.time()
+        last_dl_at = session.get("last_download_counted_at", 0)
+        is_range_request = bool(request.headers.get("Range"))
+
+        if SUPABASE_URL and SUPABASE_KEY and not is_range_request and now_time - float(last_dl_at) > 10:
 
             requests.post(
                 f"{SUPABASE_URL}/rest/v1/download_logs",
@@ -8326,6 +8330,8 @@ def download_apk():
                 },
                 json={"downloaded_at": datetime.now().isoformat()}
             )
+
+            session["last_download_counted_at"] = now_time
 
     except Exception as e:
 
@@ -9001,6 +9007,9 @@ def stats():
         .pg-nav{
           font-weight:700;
           color:#2563eb;
+          padding-left:6px;
+          padding-right:6px;
+          min-width:26px;
         }
         .pg-num:disabled{
           opacity:0.35;
