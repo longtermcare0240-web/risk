@@ -36,6 +36,10 @@ import json
 
 from datetime import date, datetime
 
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
+
 from io import BytesIO
 
 
@@ -120,7 +124,7 @@ def update_visitors():
 
         total = int(row.get("total_count", 0))
 
-        today = str(row.get("today_date", date.today()))
+        today = str(row.get("today_date", datetime.now(KST).date()))
 
         today_count = int(row.get("today_count", 0))
 
@@ -148,7 +152,7 @@ def update_visitors():
 
 
 
-        now_day = str(date.today())
+        now_day = str(datetime.now(KST).date())
 
 
 
@@ -176,7 +180,7 @@ def update_visitors():
 
             "today_count": today_count,
 
-            "updated_at": datetime.now().isoformat()
+            "updated_at": datetime.now(KST).isoformat()
 
         }
 
@@ -206,7 +210,7 @@ def update_visitors():
 
             json={
 
-                "visited_at": datetime.now().isoformat()
+                "visited_at": datetime.now(KST).isoformat()
 
             }
 
@@ -8328,7 +8332,7 @@ def download_apk():
                     "Authorization": f"Bearer {SUPABASE_KEY}",
                     "Content-Type": "application/json"
                 },
-                json={"downloaded_at": datetime.now().isoformat()}
+                json={"downloaded_at": datetime.now(KST).isoformat()}
             )
 
             session["last_download_counted_at"] = now_time
@@ -8939,6 +8943,64 @@ def stats():
             print("download_logs 조회 실패:", e)
             download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
 
+        # 총/오늘 방문자 수 (읽기 전용 조회, 카운트 증가 없음)
+        try:
+            vs_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/visit_stats?id=eq.1",
+                headers=headers
+            )
+            vs_rows = vs_res.json() if vs_res.status_code < 400 else []
+            if isinstance(vs_rows, list) and vs_rows:
+                total_visit_count = int(vs_rows[0].get("total_count", 0))
+                today_visit_count = int(vs_rows[0].get("today_count", 0))
+            else:
+                total_visit_count = 0
+                today_visit_count = 0
+        except Exception as e:
+            print("visit_stats 조회 실패:", e)
+            total_visit_count = 0
+            today_visit_count = 0
+
+        # 일자별 방문자수 (visit_logs)
+        try:
+            vl_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/visit_logs?select=visited_at&order=visited_at.desc&limit=10000",
+                headers=headers
+            )
+            if vl_res.status_code >= 400:
+                visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+            else:
+                vl_logs = vl_res.json()
+                if not isinstance(vl_logs, list) or len(vl_logs) == 0:
+                    visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+                else:
+                    vldf = pd.DataFrame(vl_logs)
+                    if "visited_at" not in vldf.columns:
+                        visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+                    else:
+                        vldf["day"] = pd.to_datetime(vldf["visited_at"], errors="coerce").dt.strftime("%Y-%m-%d")
+                        vldf["day"] = vldf["day"].fillna("날짜없음")
+                        visit_daily_df = vldf.groupby("day", dropna=False).size().reset_index(name="방문수")
+                        visit_daily_df.columns = ["날짜", "방문수"]
+        except Exception as e:
+            print("visit_logs 조회 실패:", e)
+            visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+
+        def _daily_chart_json(df, value_cols, limit_days=30):
+            if df is None or df.empty:
+                return "[]"
+            d = df[df["날짜"] != "날짜없음"].copy()
+            d = d.sort_values("날짜").tail(limit_days)
+            records = []
+            for _, row in d.iterrows():
+                rec = {"date": row["날짜"]}
+                for col in value_cols:
+                    rec[col] = row[col]
+                records.append(rec)
+            return json.dumps(records, ensure_ascii=False)
+
+        visit_chart_data = _daily_chart_json(visit_daily_df, ["방문수"])
+
         return render_template_string("""
         <!DOCTYPE html>
         <html lang="ko">
@@ -9108,7 +9170,42 @@ def stats():
         .page-panel.active{
           display:block;
         }
+        .stat-cards{
+          display:flex;
+          gap:14px;
+          margin-bottom:18px;
+          flex-wrap:wrap;
+        }
+        .stat-card{
+          flex:1 1 140px;
+          background:white;
+          border:1px solid #e2e8f0;
+          border-radius:10px;
+          padding:14px 16px;
+          text-align:center;
+        }
+        .stat-card .num{
+          font-size:24px;
+          font-weight:800;
+          color:#2563eb;
+        }
+        .stat-card .lbl{
+          font-size:12.5px;
+          color:#64748b;
+          margin-top:2px;
+        }
+        .chart-box{
+          background:white;
+          border:1px solid #e2e8f0;
+          border-radius:10px;
+          padding:16px;
+          margin-bottom:22px;
+        }
+        .chart-box canvas{
+          max-height:280px;
+        }
         </style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
         </head>
         <body>
 
@@ -9118,14 +9215,32 @@ def stats():
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
         <div class="page-nav">
-          <button class="page-btn active" data-page="1" onclick="goToPage(1)">1.지역</button>
+          <button class="page-btn active" data-page="0" onclick="goToPage(0)">0.방문자</button>
+          <button class="page-btn" data-page="1" onclick="goToPage(1)">1.지역</button>
           <button class="page-btn" data-page="2" onclick="goToPage(2)">2.위험</button>
           <button class="page-btn" data-page="3" onclick="goToPage(3)">3.코멘트</button>
           <button class="page-btn" data-page="4" onclick="goToPage(4)">4.별점</button>
           <button class="page-btn" data-page="5" onclick="goToPage(5)">5.다운</button>
         </div>
 
-        <div class="page-panel active" data-page="1">
+        <div class="page-panel active" data-page="0">
+          <h3>👥 방문자 통계</h3>
+          <div class="stat-cards">
+            <div class="stat-card">
+              <div class="num">{{ total_visit_count }}</div>
+              <div class="lbl">총 방문자</div>
+            </div>
+            <div class="stat-card">
+              <div class="num">{{ today_visit_count }}</div>
+              <div class="lbl">오늘 방문자</div>
+            </div>
+          </div>
+          <div class="chart-box">
+            <canvas id="visitChart"></canvas>
+          </div>
+        </div>
+
+        <div class="page-panel" data-page="1">
           <h3>날짜별·지역별 조회 수</h3>
           <div class="table-wrap">{{ region_table|safe }}</div>
           <div class="pg-controls" id="pg-regionTable"></div>
@@ -9161,6 +9276,11 @@ def stats():
           document.querySelectorAll('.page-panel').forEach(p=>{
             p.classList.toggle('active', p.dataset.page == n);
           });
+          setTimeout(()=>{
+            if(window._dailyCharts){
+              Object.values(window._dailyCharts).forEach(c=>{ try{ c.resize(); }catch(e){} });
+            }
+          }, 0);
         }
 
         function paginateTable(tableId, pageSize){
@@ -9310,11 +9430,45 @@ def stats():
           }
         }
 
+        window._dailyCharts = {};
+
+        function renderDailyChart(canvasId, labels, dataSets, chartType){
+          const el = document.getElementById(canvasId);
+          if(!el || typeof Chart === 'undefined') return;
+          if(!labels.length){
+            el.parentElement.innerHTML = '<p style="color:#94a3b8;">표시할 데이터가 없습니다.</p>';
+            return;
+          }
+          window._dailyCharts[canvasId] = new Chart(el, {
+            type: chartType || 'bar',
+            data: {
+              labels: labels,
+              datasets: dataSets
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: dataSets.length > 1 } },
+              scales: { y: { beginAtZero: true } }
+            }
+          });
+        }
+
+        function initCharts(){
+          const visitData = {{ visit_chart_data|safe }};
+          renderDailyChart(
+            'visitChart',
+            visitData.map(r => r.date),
+            [{ label: '방문수', data: visitData.map(r => r['방문수']), backgroundColor: '#2563eb' }]
+          );
+        }
+
         paginateTable('regionTable', 10);
         paginateTable('categoryTable', 10);
         paginateTable('downloadTable', 10);
         loadAdminComments();
         loadAdminRatings();
+        initCharts();
         </script>
 
         </body>
@@ -9322,7 +9476,10 @@ def stats():
         """,
         region_table=region_stats.to_html(index=False, table_id="regionTable"),
         category_table=category_stats.to_html(index=False, table_id="categoryTable"),
-        download_table=download_stats.to_html(index=False, table_id="downloadTable")
+        download_table=download_stats.to_html(index=False, table_id="downloadTable"),
+        total_visit_count=total_visit_count,
+        today_visit_count=today_visit_count,
+        visit_chart_data=visit_chart_data
         )
 
     except Exception as e:
@@ -9592,7 +9749,7 @@ def stats_excel():
 
 
 
-        filename = "safety_map_stats_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".xlsx"
+        filename = "safety_map_stats_" + datetime.now(KST).strftime("%Y%m%d_%H%M%S") + ".xlsx"
 
 
 
