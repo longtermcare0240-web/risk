@@ -8988,6 +8988,23 @@ def stats():
             justify-content:center;
           }
         }
+        @media (max-width:480px){
+          body{
+            padding:12px;
+          }
+          .pg-controls{
+            gap:4px;
+          }
+          .pg-num{
+            padding:5px 7px;
+            font-size:12px;
+          }
+          .pg-nav{
+            padding-left:4px;
+            padding-right:4px;
+            min-width:20px;
+          }
+        }
         .pg-num{
           flex:0 0 auto;
           padding:6px 12px;
@@ -9189,6 +9206,8 @@ def stats():
 
               controls.appendChild(makeBtn('›', Math.min(totalPages, windowEnd+1), windowEnd===totalPages, 'pg-nav'));
               controls.appendChild(makeBtn('»', totalPages, windowEnd===totalPages, 'pg-nav'));
+
+              controls.scrollLeft = 0;
             }
           }
           render();
