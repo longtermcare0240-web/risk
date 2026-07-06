@@ -8954,14 +8954,40 @@ def stats():
           margin-bottom:30px;
         }
         .table-wrap{
-          max-height:600px;
-          overflow-y:auto;
-          margin-bottom:30px;
+          overflow-x:auto;
+          margin-bottom:12px;
           border:1px solid #ddd;
           border-radius:6px;
         }
         .table-wrap table{
           margin-bottom:0;
+        }
+        .table-wrap table tbody tr{
+          display:none;
+        }
+        .table-wrap table tbody tr.pg-visible{
+          display:table-row;
+        }
+        .pg-controls{
+          display:flex;
+          gap:6px;
+          margin:0 0 26px;
+          flex-wrap:wrap;
+        }
+        .pg-num{
+          padding:6px 12px;
+          border:1px solid #cbd5e1;
+          background:white;
+          color:#334155;
+          border-radius:6px;
+          cursor:pointer;
+          font-size:13px;
+        }
+        .pg-num.active{
+          background:#2563eb;
+          border-color:#2563eb;
+          color:white;
+          font-weight:700;
         }
         th,td{
           border:1px solid #ddd;
@@ -9054,11 +9080,13 @@ def stats():
         <div class="page-panel active" data-page="1">
           <h3>날짜별·지역별 조회 수</h3>
           <div class="table-wrap">{{ region_table|safe }}</div>
+          <div class="pg-controls" id="pg-regionTable"></div>
         </div>
 
         <div class="page-panel" data-page="2">
           <h3>날짜별·위험지역 체크 수</h3>
           <div class="table-wrap">{{ category_table|safe }}</div>
+          <div class="pg-controls" id="pg-categoryTable"></div>
         </div>
 
         <div class="page-panel" data-page="3">
@@ -9074,6 +9102,7 @@ def stats():
         <div class="page-panel" data-page="5">
           <h3>📥 날짜별 앱 다운로드 수</h3>
           <div class="table-wrap">{{ download_table|safe }}</div>
+          <div class="pg-controls" id="pg-downloadTable"></div>
         </div>
 
         <script>
@@ -9086,6 +9115,35 @@ def stats():
           });
         }
 
+        function paginateTable(tableId, pageSize){
+          pageSize = pageSize || 10;
+          const table = document.getElementById(tableId);
+          if(!table) return;
+          const tbody = table.querySelector('tbody');
+          if(!tbody) return;
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          const controls = document.getElementById('pg-' + tableId);
+          const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+          let currentPage = 1;
+
+          function render(){
+            rows.forEach((r,i)=>{
+              r.classList.toggle('pg-visible', i >= (currentPage-1)*pageSize && i < currentPage*pageSize);
+            });
+            if(controls){
+              controls.innerHTML = '';
+              for(let p=1;p<=totalPages;p++){
+                const btn = document.createElement('button');
+                btn.textContent = p;
+                btn.className = 'pg-num' + (p===currentPage ? ' active' : '');
+                btn.onclick = ()=>{ currentPage = p; render(); };
+                controls.appendChild(btn);
+              }
+            }
+          }
+          render();
+        }
+
         async function loadAdminComments(){
           const res = await fetch('/api/admin/comments');
           const d = await res.json();
@@ -9094,7 +9152,7 @@ def stats():
             area.innerHTML='<p style="color:#94a3b8;">등록된 코멘트가 없습니다.</p>';
             return;
           }
-          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
+          let html = '<div class="table-wrap"><table id="commentsTable"><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
           d.comments.forEach(c=>{
             html += `<tr>
               <td>${c.id}</td>
@@ -9107,8 +9165,9 @@ def stats():
               </td>
             </tr>`;
           });
-          html += '</tbody></table></div>';
+          html += '</tbody></table></div><div class="pg-controls" id="pg-commentsTable"></div>';
           area.innerHTML = html;
+          paginateTable('commentsTable', 10);
         }
 
         async function deleteComment(id, btn){
@@ -9118,7 +9177,7 @@ def stats():
           const res = await fetch('/api/admin/comments/' + id, {method:'DELETE'});
           const d = await res.json();
           if(d.ok){
-            btn.closest('tr').remove();
+            loadAdminComments();
           } else {
             btn.disabled = false;
             btn.textContent = '삭제';
@@ -9134,7 +9193,7 @@ def stats():
             area.innerHTML='<p style="color:#94a3b8;">등록된 별점이 없습니다.</p>';
             return;
           }
-          let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
+          let html = '<div class="table-wrap"><table id="ratingsTable"><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
           d.ratings.forEach(r=>{
             const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
             html += `<tr>
@@ -9148,8 +9207,9 @@ def stats():
               </td>
             </tr>`;
           });
-          html += '</tbody></table></div>';
+          html += '</tbody></table></div><div class="pg-controls" id="pg-ratingsTable"></div>';
           area.innerHTML = html;
+          paginateTable('ratingsTable', 10);
         }
 
         async function deleteRating(id, btn){
@@ -9159,7 +9219,7 @@ def stats():
           const res = await fetch('/api/admin/ratings/' + id, {method:'DELETE'});
           const d = await res.json();
           if(d.ok){
-            btn.closest('tr').remove();
+            loadAdminRatings();
           } else {
             btn.disabled = false;
             btn.textContent = '삭제';
@@ -9181,6 +9241,9 @@ def stats():
           }
         }
 
+        paginateTable('regionTable', 10);
+        paginateTable('categoryTable', 10);
+        paginateTable('downloadTable', 10);
         loadAdminComments();
         loadAdminRatings();
         </script>
@@ -9188,9 +9251,9 @@ def stats():
         </body>
         </html>
         """,
-        region_table=region_stats.to_html(index=False),
-        category_table=category_stats.to_html(index=False),
-        download_table=download_stats.to_html(index=False)
+        region_table=region_stats.to_html(index=False, table_id="regionTable"),
+        category_table=category_stats.to_html(index=False, table_id="categoryTable"),
+        download_table=download_stats.to_html(index=False, table_id="downloadTable")
         )
 
     except Exception as e:
