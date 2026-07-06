@@ -8972,9 +8972,13 @@ def stats():
           display:flex;
           gap:6px;
           margin:0 0 26px;
-          flex-wrap:wrap;
+          flex-wrap:nowrap;
+          overflow-x:auto;
+          -webkit-overflow-scrolling:touch;
+          padding-bottom:6px;
         }
         .pg-num{
+          flex:0 0 auto;
           padding:6px 12px;
           border:1px solid #cbd5e1;
           background:white;
@@ -8988,6 +8992,14 @@ def stats():
           border-color:#2563eb;
           color:white;
           font-weight:700;
+        }
+        .pg-nav{
+          font-weight:700;
+          color:#2563eb;
+        }
+        .pg-num:disabled{
+          opacity:0.35;
+          cursor:default;
         }
         th,td{
           border:1px solid #ddd;
@@ -9035,19 +9047,24 @@ def stats():
         }
         .page-nav{
           display:flex;
-          gap:8px;
+          gap:6px;
           margin:18px 0 22px;
-          flex-wrap:wrap;
+          flex-wrap:nowrap;
         }
         .page-btn{
-          padding:10px 18px;
+          flex:1 1 0;
+          min-width:0;
+          padding:10px 4px;
           border:1px solid #cbd5e1;
           background:white;
           color:#334155;
           border-radius:8px;
           cursor:pointer;
-          font-size:14px;
+          font-size:12px;
           font-weight:600;
+          white-space:nowrap;
+          overflow:hidden;
+          text-overflow:ellipsis;
         }
         .page-btn.active{
           background:#2563eb;
@@ -9070,11 +9087,11 @@ def stats():
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
         <div class="page-nav">
-          <button class="page-btn active" data-page="1" onclick="goToPage(1)">1. 지역별 조회</button>
-          <button class="page-btn" data-page="2" onclick="goToPage(2)">2. 위험지역 체크</button>
-          <button class="page-btn" data-page="3" onclick="goToPage(3)">3. 코멘트 관리</button>
-          <button class="page-btn" data-page="4" onclick="goToPage(4)">4. 별점 관리</button>
-          <button class="page-btn" data-page="5" onclick="goToPage(5)">5. 앱 다운로드</button>
+          <button class="page-btn active" data-page="1" onclick="goToPage(1)">1.지역</button>
+          <button class="page-btn" data-page="2" onclick="goToPage(2)">2.위험</button>
+          <button class="page-btn" data-page="3" onclick="goToPage(3)">3.코멘트</button>
+          <button class="page-btn" data-page="4" onclick="goToPage(4)">4.별점</button>
+          <button class="page-btn" data-page="5" onclick="goToPage(5)">5.다운로드</button>
         </div>
 
         <div class="page-panel active" data-page="1">
@@ -9117,6 +9134,7 @@ def stats():
 
         function paginateTable(tableId, pageSize){
           pageSize = pageSize || 10;
+          const windowSize = 10;
           const table = document.getElementById(tableId);
           if(!table) return;
           const tbody = table.querySelector('tbody');
@@ -9126,19 +9144,37 @@ def stats():
           const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
           let currentPage = 1;
 
+          function makeBtn(label, page, disabled, extraClass){
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.className = 'pg-num' + (extraClass ? ' ' + extraClass : '');
+            if(disabled){
+              b.disabled = true;
+            } else {
+              b.onclick = ()=>{ currentPage = page; render(); };
+            }
+            return b;
+          }
+
           function render(){
             rows.forEach((r,i)=>{
               r.classList.toggle('pg-visible', i >= (currentPage-1)*pageSize && i < currentPage*pageSize);
             });
             if(controls){
               controls.innerHTML = '';
-              for(let p=1;p<=totalPages;p++){
-                const btn = document.createElement('button');
-                btn.textContent = p;
-                btn.className = 'pg-num' + (p===currentPage ? ' active' : '');
-                btn.onclick = ()=>{ currentPage = p; render(); };
-                controls.appendChild(btn);
+
+              const windowStart = Math.floor((currentPage-1)/windowSize) * windowSize + 1;
+              const windowEnd = Math.min(windowStart + windowSize - 1, totalPages);
+
+              controls.appendChild(makeBtn('«', 1, currentPage===1, 'pg-nav'));
+              controls.appendChild(makeBtn('‹', Math.max(1, windowStart-1), windowStart===1, 'pg-nav'));
+
+              for(let p=windowStart; p<=windowEnd; p++){
+                controls.appendChild(makeBtn(String(p), p, false, p===currentPage ? 'active' : ''));
               }
+
+              controls.appendChild(makeBtn('›', Math.min(totalPages, windowEnd+1), windowEnd===totalPages, 'pg-nav'));
+              controls.appendChild(makeBtn('»', totalPages, windowEnd===totalPages, 'pg-nav'));
             }
           }
           render();
