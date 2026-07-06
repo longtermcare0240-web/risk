@@ -8313,6 +8313,24 @@ def download_apk():
 
         return "APK 파일 없음 - safeload.apk를 app.py와 같은 폴더에 넣어주세요.", 404
 
+    try:
+
+        if SUPABASE_URL and SUPABASE_KEY:
+
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/download_logs",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={"downloaded_at": datetime.now().isoformat()}
+            )
+
+    except Exception as e:
+
+        print("download_logs 기록 실패:", e)
+
     return send_file(apk_path, as_attachment=True, download_name="safeload.apk", mimetype="application/vnd.android.package-archive")
 
 
@@ -8770,647 +8788,418 @@ def admin_delete_rating(rating_id):
 
 
 @app.route("/stats")
-
 def stats():
 
-
-
     try:
-
         if not SUPABASE_URL or not SUPABASE_KEY:
-
             return """
-
             <h2>조회 통계</h2>
-
             <p>Supabase 환경변수가 없습니다.</p>
-
             <p><a href="/">돌아가기</a></p>
-
             """
 
-
-
         headers = {
-
             "apikey": SUPABASE_KEY,
-
             "Authorization": f"Bearer {SUPABASE_KEY}",
-
             "Content-Type": "application/json"
-
         }
 
-
-
         res = requests.get(
-
             f"{SUPABASE_URL}/rest/v1/search_logs?select=*&order=created_at.desc&limit=10000",
-
             headers=headers
-
         )
-
-
 
         print("Supabase 관리자페이지 조회 상태:", res.status_code, res.text)
 
-
-
         if res.status_code >= 400:
-
             return f"""
-
             <h2>조회 통계 오류</h2>
-
             <p>Supabase 조회 실패</p>
-
             <pre>{res.status_code}</pre>
-
             <pre>{res.text}</pre>
-
             <p><a href="/">돌아가기</a></p>
-
             """
-
-
 
         logs = res.json()
 
-
-
         if not isinstance(logs, list) or len(logs) == 0:
-
-            return """
-
-            <h2>조회 통계</h2>
-
-            <p>아직 조회 기록이 없습니다.</p>
-
-            <p><a href="/">돌아가기</a></p>
-
-            """
-
-
-
-        df = pd.DataFrame(logs)
-
-
-
-        if df.empty or "created_at" not in df.columns:
-
-            return """
-
-            <h2>조회 통계</h2>
-
-            <p>조회 기록 형식이 올바르지 않습니다.</p>
-
-            <p><a href="/">돌아가기</a></p>
-
-            """
-
-
-
-        for col in ["province", "city", "town", "categories", "result_count"]:
-
-            if col not in df.columns:
-
-                df[col] = ""
-
-
-
-        df["day"] = pd.to_datetime(
-
-            df["created_at"],
-
-            errors="coerce"
-
-        ).dt.strftime("%Y-%m-%d")
-
-
-
-        df["day"] = df["day"].fillna("날짜없음")
-
-
-
-        region_stats = (
-
-            df.groupby(["day", "province", "city", "town"], dropna=False)
-
-            .size()
-
-            .reset_index(name="조회수")
-
-            .sort_values(["day", "조회수"], ascending=[False, False])
-
-        )
-
-
-
-        region_stats.columns = ["날짜", "시도", "시군구", "읍면동", "조회수"]
-
-
-
-        category_rows = []
-
-
-
-        for _, row in df.iterrows():
-
-            categories = row.get("categories", [])
-
-
-
-            if isinstance(categories, str):
-
-                try:
-
-                    categories = json.loads(categories)
-
-                except Exception:
-
-                    categories = [categories] if categories else []
-
-
-
-            if not categories:
-
-                category_rows.append({
-
-                    "day": row.get("day", ""),
-
-                    "category": "전체",
-
-                    "search_count": 1
-
-                })
-
-            else:
-
-                for cat in categories:
-
-                    category_rows.append({
-
-                        "day": row.get("day", ""),
-
-                        "category": cat,
-
-                        "search_count": 1
-
-                    })
-
-
-
-        category_df = pd.DataFrame(category_rows)
-
-
-
-        if category_df.empty:
-
-            category_stats = pd.DataFrame(
-
-                columns=["날짜", "위험지역 구분", "체크 수"]
-
-            )
-
+            region_stats = pd.DataFrame(columns=["날짜", "시도", "시군구", "읍면동", "조회수"])
+            category_stats = pd.DataFrame(columns=["날짜", "위험지역 구분", "체크 수"])
         else:
+            df = pd.DataFrame(logs)
 
-            category_stats = (
+            if df.empty or "created_at" not in df.columns:
+                region_stats = pd.DataFrame(columns=["날짜", "시도", "시군구", "읍면동", "조회수"])
+                category_stats = pd.DataFrame(columns=["날짜", "위험지역 구분", "체크 수"])
+            else:
+                for col in ["province", "city", "town", "categories", "result_count"]:
+                    if col not in df.columns:
+                        df[col] = ""
 
-                category_df.groupby(["day", "category"], dropna=False)["search_count"]
+                df["day"] = pd.to_datetime(
+                    df["created_at"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
 
-                .sum()
+                df["day"] = df["day"].fillna("날짜없음")
 
-                .reset_index()
+                region_stats = (
+                    df.groupby(["day", "province", "city", "town"], dropna=False)
+                    .size()
+                    .reset_index(name="조회수")
+                    .sort_values(["day", "조회수"], ascending=[False, False])
+                )
 
-                .sort_values(["day", "search_count"], ascending=[False, False])
+                region_stats.columns = ["날짜", "시도", "시군구", "읍면동", "조회수"]
 
+                category_rows = []
+
+                for _, row in df.iterrows():
+                    categories = row.get("categories", [])
+
+                    if isinstance(categories, str):
+                        try:
+                            categories = json.loads(categories)
+                        except Exception:
+                            categories = [categories] if categories else []
+
+                    if not categories:
+                        category_rows.append({
+                            "day": row.get("day", ""),
+                            "category": "전체",
+                            "search_count": 1
+                        })
+                    else:
+                        for cat in categories:
+                            category_rows.append({
+                                "day": row.get("day", ""),
+                                "category": cat,
+                                "search_count": 1
+                            })
+
+                category_df = pd.DataFrame(category_rows)
+
+                if category_df.empty:
+                    category_stats = pd.DataFrame(
+                        columns=["날짜", "위험지역 구분", "체크 수"]
+                    )
+                else:
+                    category_stats = (
+                        category_df.groupby(["day", "category"], dropna=False)["search_count"]
+                        .sum()
+                        .reset_index()
+                        .sort_values(["day", "search_count"], ascending=[False, False])
+                    )
+
+                    category_stats.columns = ["날짜", "위험지역 구분", "체크 수"]
+
+        # 날짜별 앱 다운로드 수
+        try:
+            dl_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/download_logs?select=*&order=downloaded_at.desc&limit=10000",
+                headers=headers
             )
 
+            if dl_res.status_code >= 400:
+                download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+            else:
+                dl_logs = dl_res.json()
 
+                if not isinstance(dl_logs, list) or len(dl_logs) == 0:
+                    download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+                else:
+                    dl_df = pd.DataFrame(dl_logs)
 
-            category_stats.columns = ["날짜", "위험지역 구분", "체크 수"]
+                    if "downloaded_at" not in dl_df.columns:
+                        download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+                    else:
+                        dl_df["day"] = pd.to_datetime(
+                            dl_df["downloaded_at"],
+                            errors="coerce"
+                        ).dt.strftime("%Y-%m-%d")
 
+                        dl_df["day"] = dl_df["day"].fillna("날짜없음")
 
+                        download_stats = (
+                            dl_df.groupby("day", dropna=False)
+                            .size()
+                            .reset_index(name="다운로드 수")
+                            .sort_values("day", ascending=False)
+                        )
+
+                        download_stats.columns = ["날짜", "다운로드 수"]
+
+        except Exception as e:
+            print("download_logs 조회 실패:", e)
+            download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
 
         return render_template_string("""
-
         <!DOCTYPE html>
-
         <html lang="ko">
-
         <head>
-
         <meta charset="UTF-8">
-
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
-
         <title>조회 통계</title>
-
         <style>
-
         *{ touch-action: pan-x pan-y pinch-zoom; }
-
         body{
-
           font-family:Malgun Gothic, sans-serif;
-
           padding:24px;
-
           background:#f8fafc;
-
         }
-
         table{
-
           border-collapse:collapse;
-
           width:100%;
-
           background:white;
-
           margin-bottom:30px;
-
         }
-
         .table-wrap{
-
-          max-height:400px;
-
+          max-height:600px;
           overflow-y:auto;
-
           margin-bottom:30px;
-
           border:1px solid #ddd;
-
           border-radius:6px;
-
         }
-
         .table-wrap table{
-
           margin-bottom:0;
-
         }
-
         th,td{
-
           border:1px solid #ddd;
-
           padding:8px;
-
           font-size:14px;
-
           text-align:left;
-
         }
-
         th{
-
           background:#e5e7eb;
-
         }
-
         .btn{
-
           display:inline-block;
-
           padding:10px 14px;
-
           background:#2563eb;
-
           color:white;
-
           text-decoration:none;
-
           border-radius:8px;
-
           margin-bottom:18px;
-
         }
-
         .btn-del{
-
           padding:4px 10px;
-
           background:#ef4444;
-
           color:white;
-
           border:none;
-
           border-radius:6px;
-
           cursor:pointer;
-
           font-size:13px;
-
           margin-right:4px;
-
         }
-
         .btn-goto{
-
           padding:4px 10px;
-
           background:#2563eb;
-
           color:white;
-
           border:none;
-
           border-radius:6px;
-
           cursor:pointer;
-
           font-size:13px;
-
         }
-
         pre{
-
           white-space:pre-wrap;
-
           background:#111827;
-
           color:#f9fafb;
-
           padding:12px;
-
           border-radius:8px;
-
         }
-
+        .page-nav{
+          display:flex;
+          gap:8px;
+          margin:18px 0 22px;
+          flex-wrap:wrap;
+        }
+        .page-btn{
+          padding:10px 18px;
+          border:1px solid #cbd5e1;
+          background:white;
+          color:#334155;
+          border-radius:8px;
+          cursor:pointer;
+          font-size:14px;
+          font-weight:600;
+        }
+        .page-btn.active{
+          background:#2563eb;
+          border-color:#2563eb;
+          color:white;
+        }
+        .page-panel{
+          display:none;
+        }
+        .page-panel.active{
+          display:block;
+        }
         </style>
-
         </head>
-
         <body>
-
-
 
         <h2>조회 통계</h2>
 
-
-
         <a class="btn" href="/">돌아가기</a>
-
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
+        <div class="page-nav">
+          <button class="page-btn active" data-page="1" onclick="goToPage(1)">1. 지역별 조회</button>
+          <button class="page-btn" data-page="2" onclick="goToPage(2)">2. 위험지역 체크</button>
+          <button class="page-btn" data-page="3" onclick="goToPage(3)">3. 코멘트 관리</button>
+          <button class="page-btn" data-page="4" onclick="goToPage(4)">4. 별점 관리</button>
+          <button class="page-btn" data-page="5" onclick="goToPage(5)">5. 앱 다운로드</button>
+        </div>
 
+        <div class="page-panel active" data-page="1">
+          <h3>날짜별·지역별 조회 수</h3>
+          <div class="table-wrap">{{ region_table|safe }}</div>
+        </div>
 
-        <h3>날짜별·지역별 조회 수</h3>
+        <div class="page-panel" data-page="2">
+          <h3>날짜별·위험지역 체크 수</h3>
+          <div class="table-wrap">{{ category_table|safe }}</div>
+        </div>
 
-        <div class="table-wrap">{{ region_table|safe }}</div>
+        <div class="page-panel" data-page="3">
+          <h3>💬 코멘트 관리</h3>
+          <div id="commentAdminArea">불러오는 중...</div>
+        </div>
 
+        <div class="page-panel" data-page="4">
+          <h3>⭐ 별점 관리</h3>
+          <div id="ratingAdminArea">불러오는 중...</div>
+        </div>
 
-
-        <h3>날짜별·위험지역 체크 수</h3>
-
-        <div class="table-wrap">{{ category_table|safe }}</div>
-
-
-
-        <h3>💬 코멘트 관리</h3>
-
-        <div id="commentAdminArea">불러오는 중...</div>
-
-
-
-        <h3 style="margin-top:32px;">⭐ 별점 관리</h3>
-
-        <div id="ratingAdminArea">불러오는 중...</div>
-
-
+        <div class="page-panel" data-page="5">
+          <h3>📥 날짜별 앱 다운로드 수</h3>
+          <div class="table-wrap">{{ download_table|safe }}</div>
+        </div>
 
         <script>
+        function goToPage(n){
+          document.querySelectorAll('.page-btn').forEach(b=>{
+            b.classList.toggle('active', b.dataset.page == n);
+          });
+          document.querySelectorAll('.page-panel').forEach(p=>{
+            p.classList.toggle('active', p.dataset.page == n);
+          });
+        }
 
         async function loadAdminComments(){
-
           const res = await fetch('/api/admin/comments');
-
           const d = await res.json();
-
           const area = document.getElementById('commentAdminArea');
-
           if(!d.comments || d.comments.length===0){
-
             area.innerHTML='<p style="color:#94a3b8;">등록된 코멘트가 없습니다.</p>';
-
             return;
-
           }
-
           let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
-
           d.comments.forEach(c=>{
-
             html += `<tr>
-
               <td>${c.id}</td>
-
               <td>${c.spot_id}</td>
-
               <td style="max-width:300px;word-break:break-all;">${c.content}</td>
-
               <td>${c.created_at ? c.created_at.slice(0,16).replace('T',' ') : ''}</td>
-
               <td style="white-space:nowrap;">
-
                 <button class="btn-del" onclick="deleteComment(${c.id}, this)">삭제</button>
-
                 <button class="btn-goto" onclick="gotoSpot('${c.spot_id}')">이동</button>
-
               </td>
-
             </tr>`;
-
           });
-
           html += '</tbody></table></div>';
-
           area.innerHTML = html;
-
         }
-
-
 
         async function deleteComment(id, btn){
-
           if(!confirm('이 코멘트를 삭제하시겠습니까?')) return;
-
           btn.disabled = true;
-
           btn.textContent = '삭제중...';
-
           const res = await fetch('/api/admin/comments/' + id, {method:'DELETE'});
-
           const d = await res.json();
-
           if(d.ok){
-
             btn.closest('tr').remove();
-
           } else {
-
             btn.disabled = false;
-
             btn.textContent = '삭제';
-
             alert('삭제 실패');
-
           }
-
         }
-
-
 
         async function loadAdminRatings(){
-
           const res = await fetch('/api/admin/ratings');
-
           const d = await res.json();
-
           const area = document.getElementById('ratingAdminArea');
-
           if(!d.ratings || d.ratings.length===0){
-
             area.innerHTML='<p style="color:#94a3b8;">등록된 별점이 없습니다.</p>';
-
             return;
-
           }
-
           let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>지점번호</th><th>별점</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
-
           d.ratings.forEach(r=>{
-
             const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
-
             html += `<tr>
-
               <td>${r.id}</td>
-
               <td>${r.spot_id}</td>
-
               <td style="color:#f59e0b;font-weight:700;letter-spacing:1px;">${stars} (${r.score}점)</td>
-
               <td>${r.created_at ? r.created_at.slice(0,16).replace('T',' ') : ''}</td>
-
               <td style="white-space:nowrap;">
-
                 <button class="btn-del" onclick="deleteRating(${r.id}, this)">삭제</button>
-
                 <button class="btn-goto" onclick="gotoSpot('${r.spot_id}')">이동</button>
-
               </td>
-
             </tr>`;
-
           });
-
           html += '</tbody></table></div>';
-
           area.innerHTML = html;
-
         }
-
-
 
         async function deleteRating(id, btn){
-
           if(!confirm('이 별점을 삭제하시겠습니까?')) return;
-
           btn.disabled = true;
-
           btn.textContent = '삭제중...';
-
           const res = await fetch('/api/admin/ratings/' + id, {method:'DELETE'});
-
           const d = await res.json();
-
           if(d.ok){
-
             btn.closest('tr').remove();
-
           } else {
-
             btn.disabled = false;
-
             btn.textContent = '삭제';
-
             alert('삭제 실패');
-
           }
-
         }
-
-
 
         async function gotoSpot(spotId){
-
           try{
-
             const res = await fetch('/api/spot_location?spot_id=' + encodeURIComponent(spotId));
-
             const d = await res.json();
-
             if(d.lat && d.lng){
-
               window.location.href = '/?goto_spot=' + encodeURIComponent(spotId) + '&lat=' + d.lat + '&lng=' + d.lng;
-
             } else {
-
               alert('해당 지점의 좌표를 찾을 수 없습니다. (지점번호: ' + spotId + ')');
-
             }
-
           }catch(e){
-
             alert('이동 오류: ' + e.message);
-
           }
-
         }
 
-
-
         loadAdminComments();
-
         loadAdminRatings();
-
         </script>
 
-
-
         </body>
-
         </html>
-
         """,
-
         region_table=region_stats.to_html(index=False),
-
-        category_table=category_stats.to_html(index=False)
-
+        category_table=category_stats.to_html(index=False),
+        download_table=download_stats.to_html(index=False)
         )
 
-
-
     except Exception as e:
-
         return f"""
-
         <h2>조회 통계 오류</h2>
-
         <p>관리자페이지 처리 중 오류가 발생했습니다.</p>
-
         <pre>{str(e)}</pre>
-
         <p><a href="/">돌아가기</a></p>
-
         """
-
 
 
 @app.route("/stats_excel")
