@@ -210,7 +210,8 @@ def update_visitors():
 
             json={
 
-                "visited_at": datetime.now(KST).isoformat()
+                "created_at": datetime.now(KST).isoformat(),
+                "ip": request.headers.get("X-Forwarded-For", request.remote_addr or "")
 
             }
 
@@ -8964,7 +8965,7 @@ def stats():
         # 일자별 방문자수 (visit_logs)
         try:
             vl_res = requests.get(
-                f"{SUPABASE_URL}/rest/v1/visit_logs?select=visited_at&order=visited_at.desc&limit=10000",
+                f"{SUPABASE_URL}/rest/v1/visit_logs?select=created_at&order=created_at.desc&limit=10000",
                 headers=headers
             )
             if vl_res.status_code >= 400:
@@ -8975,10 +8976,10 @@ def stats():
                     visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
                 else:
                     vldf = pd.DataFrame(vl_logs)
-                    if "visited_at" not in vldf.columns:
+                    if "created_at" not in vldf.columns:
                         visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
                     else:
-                        vldf["day"] = pd.to_datetime(vldf["visited_at"], errors="coerce").dt.strftime("%Y-%m-%d")
+                        vldf["day"] = pd.to_datetime(vldf["created_at"], errors="coerce").dt.strftime("%Y-%m-%d")
                         vldf["day"] = vldf["day"].fillna("날짜없음")
                         visit_daily_df = vldf.groupby("day", dropna=False).size().reset_index(name="방문수")
                         visit_daily_df.columns = ["날짜", "방문수"]
