@@ -8977,6 +8977,11 @@ def stats():
           -webkit-overflow-scrolling:touch;
           padding-bottom:6px;
         }
+        @media (min-width:769px){
+          .pg-controls{
+            justify-content:center;
+          }
+        }
         .pg-num{
           flex:0 0 auto;
           padding:6px 12px;
@@ -9091,7 +9096,7 @@ def stats():
           <button class="page-btn" data-page="2" onclick="goToPage(2)">2.위험</button>
           <button class="page-btn" data-page="3" onclick="goToPage(3)">3.코멘트</button>
           <button class="page-btn" data-page="4" onclick="goToPage(4)">4.별점</button>
-          <button class="page-btn" data-page="5" onclick="goToPage(5)">5.다운로드</button>
+          <button class="page-btn" data-page="5" onclick="goToPage(5)">5.다운</button>
         </div>
 
         <div class="page-panel active" data-page="1">
@@ -9134,7 +9139,7 @@ def stats():
 
         function paginateTable(tableId, pageSize){
           pageSize = pageSize || 10;
-          const windowSize = 10;
+          const windowSize = window.innerWidth <= 480 ? 5 : 10;
           const table = document.getElementById(tableId);
           if(!table) return;
           const tbody = table.querySelector('tbody');
