@@ -8988,7 +8988,7 @@ def stats():
             print("visit_logs 조회 실패:", e)
             visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
 
-        def _daily_chart_json(df, value_cols, limit_days=30):
+        def _daily_chart_json(df, value_cols, limit_days=10):
             if df is None or df.empty:
                 return "[]"
             d = df[df["날짜"] != "날짜없음"].copy()
