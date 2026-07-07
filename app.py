@@ -8979,7 +8979,8 @@ def stats():
                     if "created_at" not in vldf.columns:
                         visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
                     else:
-                        vldf["day"] = pd.to_datetime(vldf["created_at"], errors="coerce").dt.strftime("%Y-%m-%d")
+                        dt_utc = pd.to_datetime(vldf["created_at"], errors="coerce", utc=True)
+                        vldf["day"] = dt_utc.dt.tz_convert(KST).dt.strftime("%Y-%m-%d")
                         vldf["day"] = vldf["day"].fillna("날짜없음")
                         visit_daily_df = vldf.groupby("day", dropna=False).size().reset_index(name="방문수")
                         visit_daily_df.columns = ["날짜", "방문수"]
@@ -9144,6 +9145,9 @@ def stats():
           gap:6px;
           margin:18px 0 22px;
           flex-wrap:nowrap;
+          overflow-x:auto;
+          -webkit-overflow-scrolling:touch;
+          padding-bottom:4px;
         }
         .page-btn{
           flex:1 1 0;
@@ -9175,10 +9179,11 @@ def stats():
           display:flex;
           gap:14px;
           margin-bottom:18px;
-          flex-wrap:wrap;
+          flex-wrap:nowrap;
         }
         .stat-card{
-          flex:1 1 140px;
+          flex:1 1 0;
+          min-width:0;
           background:white;
           border:1px solid #e2e8f0;
           border-radius:10px;
@@ -9194,6 +9199,32 @@ def stats():
           font-size:12.5px;
           color:#64748b;
           margin-top:2px;
+        }
+        @media (max-width:600px){
+          .page-nav{
+            flex-wrap:nowrap;
+            gap:4px;
+          }
+          .page-btn{
+            flex:0 0 auto;
+            padding:8px 10px;
+            font-size:11.5px;
+            overflow:visible;
+            text-overflow:clip;
+          }
+          .stat-cards{
+            gap:8px;
+          }
+          .stat-card{
+            padding:10px 6px;
+          }
+          .stat-card .num{
+            font-size:19px;
+          }
+          .stat-card .lbl{
+            font-size:11px;
+            white-space:nowrap;
+          }
         }
         .chart-box{
           background:white;
