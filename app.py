@@ -9176,6 +9176,9 @@ def stats():
           <div class="chart-box">
             <canvas id="visitChart"></canvas>
           </div>
+          <h3>📅 일자별 방문자 수</h3>
+          <div class="table-wrap">{{ visit_daily_table|safe }}</div>
+          <div class="pg-controls" id="pg-visitDailyTable"></div>
         </div>
 
         <div class="page-panel" data-page="1">
@@ -9401,6 +9404,7 @@ def stats():
           );
         }
 
+        paginateTable('visitDailyTable', 10);
         paginateTable('regionTable', 10);
         paginateTable('categoryTable', 10);
         paginateTable('downloadTable', 10);
@@ -9415,6 +9419,7 @@ def stats():
         region_table=region_stats.to_html(index=False, table_id="regionTable"),
         category_table=category_stats.to_html(index=False, table_id="categoryTable"),
         download_table=download_stats.to_html(index=False, table_id="downloadTable"),
+        visit_daily_table=visit_daily_df.to_html(index=False, table_id="visitDailyTable"),
         total_visit_count=total_visit_count,
         today_visit_count=today_visit_count,
         visit_chart_data=visit_chart_data
@@ -9669,17 +9674,99 @@ def stats_excel():
 
 
 
+        # 방문자 통계 (총/오늘 + 일자별) — 0.방문자 탭과 동일한 수치, 그래프 제외
+        try:
+            vs_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/visit_stats?id=eq.1",
+                headers=headers
+            )
+            vs_rows = vs_res.json() if vs_res.status_code < 400 else []
+            if isinstance(vs_rows, list) and vs_rows:
+                total_visit_count = int(vs_rows[0].get("total_count", 0))
+                today_visit_count = int(vs_rows[0].get("today_count", 0))
+            else:
+                total_visit_count = 0
+                today_visit_count = 0
+        except Exception as e:
+            print("visit_stats 조회 실패:", e)
+            total_visit_count = 0
+            today_visit_count = 0
+
+        visit_summary_df = pd.DataFrame({
+            "항목": ["총 방문자", "오늘 방문자"],
+            "값": [total_visit_count, today_visit_count]
+        })
+
+        try:
+            vl_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/visit_daily_counts?select=visit_date,count&order=visit_date.desc&limit=10000",
+                headers=headers
+            )
+            if vl_res.status_code >= 400:
+                visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+            else:
+                vl_logs = vl_res.json()
+                if not isinstance(vl_logs, list) or len(vl_logs) == 0:
+                    visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+                else:
+                    vldf = pd.DataFrame(vl_logs)
+                    visit_daily_df = vldf.rename(columns={"visit_date": "날짜", "count": "방문수"})[["날짜", "방문수"]]
+        except Exception as e:
+            print("visit_daily_counts 조회 실패:", e)
+            visit_daily_df = pd.DataFrame(columns=["날짜", "방문수"])
+
+        # 날짜별 앱 다운로드 수 — 5.다운 탭과 동일
+        try:
+            dl_res = requests.get(
+                f"{SUPABASE_URL}/rest/v1/download_logs?select=*&order=downloaded_at.desc&limit=10000",
+                headers=headers
+            )
+            if dl_res.status_code >= 400:
+                download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+            else:
+                dl_logs = dl_res.json()
+                if not isinstance(dl_logs, list) or len(dl_logs) == 0:
+                    download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+                else:
+                    dl_df = pd.DataFrame(dl_logs)
+                    if "downloaded_at" not in dl_df.columns:
+                        download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+                    else:
+                        dl_df["day"] = pd.to_datetime(
+                            dl_df["downloaded_at"],
+                            errors="coerce"
+                        ).dt.strftime("%Y-%m-%d")
+                        dl_df["day"] = dl_df["day"].fillna("날짜없음")
+                        download_stats = (
+                            dl_df.groupby("day", dropna=False)
+                            .size()
+                            .reset_index(name="다운로드 수")
+                            .sort_values("day", ascending=False)
+                        )
+                        download_stats.columns = ["날짜", "다운로드 수"]
+        except Exception as e:
+            print("download_logs 조회 실패:", e)
+            download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
+
         output = BytesIO()
 
 
 
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
 
+            visit_summary_df.to_excel(writer, index=False, sheet_name="방문자 통계", startrow=0)
+
+            visit_daily_df.to_excel(writer, index=False, sheet_name="방문자 통계", startrow=5)
+
+            writer.sheets["방문자 통계"].cell(row=5, column=1, value="일자별 방문자 수")
+
             raw_df.to_excel(writer, index=False, sheet_name="전체 조회기록")
 
             region_stats.to_excel(writer, index=False, sheet_name="지역별 통계")
 
             category_stats.to_excel(writer, index=False, sheet_name="구분별 통계")
+
+            download_stats.to_excel(writer, index=False, sheet_name="다운로드 통계")
 
 
 
