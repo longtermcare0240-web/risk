@@ -3444,17 +3444,7 @@ window.addEventListener("load", function(){
 
 window.addEventListener("DOMContentLoaded", function(){
 
-  // WebView IME 강제 활성화
-  setTimeout(function(){
-    var tmp = document.createElement("input");
-    tmp.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
-    document.body.appendChild(tmp);
-    tmp.focus();
-    setTimeout(function(){
-      tmp.blur();
-      document.body.removeChild(tmp);
-    }, 300);
-  }, 1000);
+  // (입장 시 IME 예열 제거 — 이제 버튼 클릭 시 제스처 안에서 바로 focus하므로 불필요)
 
   preloadLocation();
 
@@ -3586,11 +3576,7 @@ function openAdminStats(){
 
 
 
-  setTimeout(()=>{
-
-    activateIme("adminPwInput");
-
-  },100);
+  activateIme("adminPwInput");
 
 
 
@@ -5305,11 +5291,10 @@ let loadingStartTime = 0;
 function activateIme(inputId){
   var inp = document.getElementById(inputId);
   if(!inp) return;
-  inp.focus();
-  setTimeout(function(){
-    inp.blur();
-    setTimeout(function(){ inp.focus(); }, 50);
-  }, 30);
+  // 방금 보여진 요소의 레이아웃을 확정시킨 뒤(안드로이드 크롬/웨일 대비),
+  // 사용자 탭 제스처 안에서 곧바로 focus → 웨일/크롬/삼성/사파리 모두 자판이 뜬다.
+  void inp.offsetHeight;
+  inp.focus({ preventScroll: true });
 }
 // 자판이 뜨면 경로/주소 팝업 카드를 자판 위로 올리고, 자판 끄면 다시 중앙
 (function(){
@@ -5335,19 +5320,13 @@ function openRouteSearch(){
 
   var popup = document.getElementById("routePopup");
 
-  popup.style.display = "none";
+  popup.style.display = "flex";
 
-  setTimeout(function(){
+  document.getElementById("startInput").value = "";
 
-    popup.style.display = "flex";
+  document.getElementById("destInput").value = "";
 
-    document.getElementById("startInput").value = "";
-
-    document.getElementById("destInput").value = "";
-
-    activateIme("startInput");
-
-  }, 200);
+  activateIme("startInput");
 
 }
 
@@ -6150,7 +6129,7 @@ function openAddressSearch(){
 
   document.getElementById("addrSuggestBox").innerHTML="";
 
-  setTimeout(()=>activateIme("addrSearchInput"),100);
+  activateIme("addrSearchInput");
 
 }
 
