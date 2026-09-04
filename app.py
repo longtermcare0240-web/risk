@@ -10089,7 +10089,7 @@ def open_preferred_browser(url):
 # ===============  매식비 관리 모듈 (/meal)  =====================
 #   - 기존 지도앱 코드와 완전히 분리, /meal 하위 경로로만 동작
 #   - 저장소: Supabase REST (meal_teams / meal_members / meal_entries)
-#   - 로그인: 비밀번호 7788 (session['meal_authed'])
+#   - 로그인: 비밀번호 3333 (session['meal_authed'])
 # ================================================================
 import calendar as _meal_calendar
 import functools as _meal_functools
@@ -10631,7 +10631,7 @@ def meal_add_entry():
     if not restaurant:
         return jsonify(ok=False, error="식당명을 입력해 주세요."), 400
     if not approver:
-        return jsonify(ok=False, error="결재자를 선택하거나 입력해 주세요."), 400
+        return jsonify(ok=False, error="결제자를 선택하거나 입력해 주세요."), 400
 
     members = _meal_get(f"meal_members?team_id=eq.{team_id}&select=id,name")
     name_of = {m["id"]: m["name"] for m in members}
@@ -10994,7 +10994,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
     <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
   </div>
 </div>
-<div class=lead-card><p class=lead>팀을 고른 뒤 달력에서 <b>날짜·팀원을 선택</b>하고 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원씩 기록돼요. 한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능해요.</p></div>
+<div class=lead-card><p class=lead>팀을 고른 뒤 달력에서 <b>날짜·팀원을 선택</b>하고 식당·결제자를 입력하면 1인 {{ "{:,}".format(amount) }}원씩 기록돼요. 한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능해요.</p></div>
 <div class=sec-title><span class=dot></span>팀 선택</div>
 <div class=team-grid>
 {% for t in teams %}
@@ -11399,7 +11399,7 @@ select{appearance:none;-webkit-appearance:none;
 <div class=mask id=mask>
   <div class=modal>
     <h3 id=modalDate></h3>
-    <p class=hint>팀원을 고르고 식당·결재자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.</p>
+    <p class=hint>팀원을 고르고 식당·결제자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.</p>
     <div class=dayentries id=dayEntries></div>
     <div class=addform>
       <label class=flabel>팀원 선택 (여러 명 가능)</label>
@@ -11411,15 +11411,15 @@ select{appearance:none;-webkit-appearance:none;
         {% for rname in restaurant_list %}<option value="{{rname}}">{{rname}}</option>{% endfor %}
         <option value="__other__">그 외 (직접 입력)</option>
       </select>
-      <input id=restaurantOther placeholder="식당명 직접 입력" style="display:none;margin-top:8px;">
+      <input id=restaurantOther placeholder="식당명 직접 입력" style="display:none;margin-top:8px;" onkeydown="if(event.key=='Enter')saveEntry()">
 
-      <label class=flabel>결재자</label>
+      <label class=flabel>결제자</label>
       <select id=approverSel onchange="onApproverChange()">
         <option value="">선택 안 함</option>
         {% for m in members %}<option value="{{m.name}}">{{m.name}}</option>{% endfor %}
         <option value="__other__">그 외 (직접 입력)</option>
       </select>
-      <input id=approverOther placeholder="결재자 이름" style="display:none;margin-top:8px;">
+      <input id=approverOther placeholder="결제자 이름" style="display:none;margin-top:8px;" onkeydown="if(event.key=='Enter')saveEntry()">
 
       <div class=note id=noteBox></div>
       <div class=modalbtns>
@@ -11476,7 +11476,7 @@ function renderDayEntries(){
   const rows = list.map(e=>{
     let meta = [];
     if(e.rest) meta.push(e.rest);
-    if(e.appr) meta.push('결재 '+e.appr);
+    if(e.appr) meta.push('결제 '+e.appr);
     return `<div class=de>`+
       `<input type=checkbox class=entrychk value="${e.id}" onchange="updateEntrySelCount()" style="display:${entrySelMode?'block':'none'}">`+
       `<span class=nm>${e.name}</span>`+
@@ -11550,7 +11550,7 @@ async function saveEntry(){
   if(!rest){note.className='note warn on';note.textContent='식당을 선택하거나 직접 입력해 주세요.';return;}
   let appr = document.getElementById('approverSel').value;
   if(appr==='__other__') appr = document.getElementById('approverOther').value.trim();
-  if(!appr){note.className='note warn on';note.textContent='결재자를 선택하거나 직접 입력해 주세요.';return;}
+  if(!appr){note.className='note warn on';note.textContent='결제자를 선택하거나 직접 입력해 주세요.';return;}
 
   mealLoading(true,'저장 중…');
   const res = await api('/meal/api/entry',{team_id:TEAM_ID,member_ids:ids,date:curDate,
