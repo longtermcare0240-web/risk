@@ -10089,7 +10089,7 @@ def open_preferred_browser(url):
 # ===============  매식비 관리 모듈 (/meal)  =====================
 #   - 기존 지도앱 코드와 완전히 분리, /meal 하위 경로로만 동작
 #   - 저장소: Supabase REST (meal_teams / meal_members / meal_entries)
-#   - 로그인: 비밀번호 3333 (session['meal_authed'])
+#   - 로그인: 비밀번호 7788 (session['meal_authed'])
 # ================================================================
 import calendar as _meal_calendar
 import functools as _meal_functools
@@ -10630,6 +10630,8 @@ def meal_add_entry():
         return jsonify(ok=False, error="팀원과 날짜를 선택해 주세요."), 400
     if not restaurant:
         return jsonify(ok=False, error="식당명을 입력해 주세요."), 400
+    if not approver:
+        return jsonify(ok=False, error="결재자를 선택하거나 입력해 주세요."), 400
 
     members = _meal_get(f"meal_members?team_id=eq.{team_id}&select=id,name")
     name_of = {m["id"]: m["name"] for m in members}
@@ -11548,7 +11550,7 @@ async function saveEntry(){
   if(!rest){note.className='note warn on';note.textContent='식당을 선택하거나 직접 입력해 주세요.';return;}
   let appr = document.getElementById('approverSel').value;
   if(appr==='__other__') appr = document.getElementById('approverOther').value.trim();
-  if(appr==='') appr='';
+  if(!appr){note.className='note warn on';note.textContent='결재자를 선택하거나 직접 입력해 주세요.';return;}
 
   mealLoading(true,'저장 중…');
   const res = await api('/meal/api/entry',{team_id:TEAM_ID,member_ids:ids,date:curDate,
