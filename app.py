@@ -10488,6 +10488,39 @@ def meal_admin_restore_file():
 @meal_login_required
 def meal_home():
     teams = meal_ensure_teams()
+
+    # 팀별 변경 알림용 현재 상태 지문.
+    # 별도 DB 스키마를 건드리지 않고, 매식비 팀/팀원/입력내역만 기준으로 계산한다.
+    import hashlib as _meal_hashlib
+    all_members = _meal_get(
+        "meal_members?select=id,team_id,name,active&order=id.asc")
+    all_entries = _meal_get(
+        "meal_entries?select=id,team_id,member_id,d,amount,restaurant,approver,created_at&order=id.asc")
+
+    members_by_team = {}
+    for m in all_members:
+        members_by_team.setdefault(m.get("team_id"), []).append(m)
+
+    entries_by_team = {}
+    for e in all_entries:
+        entries_by_team.setdefault(e.get("team_id"), []).append(e)
+
+    for t in teams:
+        tid = t.get("id")
+        state = {
+            "team": {
+                "id": tid,
+                "name": t.get("name") or "",
+                "sort_order": t.get("sort_order"),
+            },
+            "members": members_by_team.get(tid, []),
+            "entries": entries_by_team.get(tid, []),
+        }
+        raw = json.dumps(state, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), default=str)
+        t["change_rev"] = _meal_hashlib.sha1(
+            raw.encode("utf-8")).hexdigest()
+
     return render_template_string(MEAL_HOME_HTML, teams=teams,
                                   monthly_count=MEAL_MONTHLY_COUNT,
                                   cap=MEAL_MONTHLY_CAP, amount=MEAL_FIXED_AMOUNT)
@@ -10955,6 +10988,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   border-radius:var(--r);padding:13px 15px 13px 18px;box-shadow:var(--shadow-sm);margin-bottom:16px;}
 .lead-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip);}
 .lead{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0;word-break:keep-all;}
+.lead .lead-word{display:inline-block;white-space:nowrap;}
 .lead b{color:var(--primary-dd);font-weight:800;}
 
 .sec-title{font-size:14px;font-weight:800;margin:20px 2px 12px;letter-spacing:-.3px;color:var(--ink-soft);
@@ -10973,6 +11007,8 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
 .team-btn .nm{font-size:15px;font-weight:800;letter-spacing:-.4px;color:var(--ink);word-break:keep-all;}
 .team-btn .chev{display:none;}
+.team-change-dot{position:absolute;top:10px;right:10px;width:10px;height:10px;border-radius:50%;
+  background:#e2555a;border:2px solid #fff;box-shadow:0 1px 5px rgba(226,85,90,.45);display:none;z-index:2;}
 /* 통합돌봄팀(TF) = 맨 아래 한 줄 전체폭, 가운데 정렬 카드 */
 .team-btn.tf{grid-column:1 / -1;order:1;flex-direction:row;justify-content:center;gap:12px;
   padding:22px 16px;text-align:center;}
@@ -10994,18 +11030,50 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
     <button class=logout onclick="location.href='/meal/logout'">로그아웃</button>
   </div>
 </div>
-<div class=lead-card><p class=lead>팀을 고른 뒤 달력에서 <b>날짜·팀원을 선택</b>하고 식당·결제자를 입력하면 1인 {{ "{:,}".format(amount) }}원씩 기록돼요. 한 사람당 한 달 <b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만 가능해요.</p></div>
+<div class=lead-card><p class=lead><span class=lead-word>팀을</span> <span class=lead-word>고른</span> <span class=lead-word>뒤</span> <span class=lead-word>달력에서</span> <b><span class=lead-word>날짜·팀원을</span></b> <span class=lead-word><b>선택</b>하고</span> <span class=lead-word>식당·결제자를</span> <span class=lead-word>입력하면</span> <span class=lead-word>1인</span> <span class=lead-word>{{ "{:,}".format(amount) }}원씩</span> <span class=lead-word>기록돼요.</span> <span class=lead-word>한</span> <span class=lead-word>사람당</span> <span class=lead-word>한</span> <span class=lead-word>달</span> <span class=lead-word><b>{{monthly_count}}회({{ "{:,}".format(cap) }}원)</b>까지만</span> <span class=lead-word>가능해요.</span></p></div>
 <div class=sec-title><span class=dot></span>팀 선택</div>
 <div class=team-grid>
 {% for t in teams %}
   <a class="team-btn{% if '통합돌봄' in t.name %} tf{% endif %}" href="/meal/team/{{t.id}}"
-     onclick="mealLoading(true,'불러오는 중…')">
+     data-team-id="{{t.id}}" data-change-rev="{{t.change_rev}}"
+     onclick="mealMarkTeamSeen(this);mealLoading(true,'불러오는 중…')">
+    <span class=team-change-dot aria-hidden=true></span>
     <span class=ava>&#127869;</span>
     <span class=nm>{{t.name}}</span>
     <span class=chev>›</span>
   </a>
 {% endfor %}
 </div>
+<script>
+(function(){
+  const keyPrefix='meal_team_seen_rev_';
+  const cards=document.querySelectorAll('.team-btn[data-team-id]');
+
+  cards.forEach(function(card){
+    const key=keyPrefix+card.dataset.teamId;
+    const current=card.dataset.changeRev||'';
+    const dot=card.querySelector('.team-change-dot');
+    try{
+      const seen=localStorage.getItem(key);
+      if(seen===null){
+        // 기능을 처음 쓰는 기기에서는 현재 상태를 기준점으로 잡아 기존 데이터가 전부 새 알림으로 뜨지 않게 한다.
+        localStorage.setItem(key,current);
+      }else if(seen!==current && dot){
+        dot.style.display='block';
+      }
+    }catch(e){}
+  });
+
+  window.mealMarkTeamSeen=function(card){
+    if(!card)return;
+    const key=keyPrefix+card.dataset.teamId;
+    const current=card.dataset.changeRev||'';
+    try{localStorage.setItem(key,current);}catch(e){}
+    const dot=card.querySelector('.team-change-dot');
+    if(dot)dot.style.display='none';
+  };
+})();
+</script>
 </div>""" + MEAL_LOADER_HTML + """</body></html>"""
 
 MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
