@@ -11007,7 +11007,7 @@ MEAL_HOME_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .team-btn.tf .ava{background:linear-gradient(135deg,#ef8585,#dd6b6b);box-shadow:0 5px 12px rgba(221,107,107,.30);}
 .team-btn .nm{font-size:15px;font-weight:800;letter-spacing:-.4px;color:var(--ink);word-break:keep-all;}
 .team-btn .chev{display:none;}
-.team-change-dot{position:absolute;top:10px;right:10px;width:10px;height:10px;border-radius:50%;
+.team-change-dot{position:absolute;top:10px;left:10px;width:10px;height:10px;border-radius:50%;
   background:#e2555a;border:2px solid #fff;box-shadow:0 1px 5px rgba(226,85,90,.45);display:none;z-index:2;}
 /* 통합돌봄팀(TF) = 맨 아래 한 줄 전체폭, 가운데 정렬 카드 */
 .team-btn.tf{grid-column:1 / -1;order:1;flex-direction:row;justify-content:center;gap:12px;
