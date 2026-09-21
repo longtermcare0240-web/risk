@@ -10104,6 +10104,13 @@ MEAL_PASSWORD = "7788"
 MEAL_ADMIN_PASSWORD = "qwer"   # 백업/복원 관리자 화면 비밀번호
 MEAL_BACKUP_SLOTS = 3          # 수동 저장 슬롯 개수 (1~3)
 MEAL_AUTO_SLOT = 0             # 복원 직전 자동저장 슬롯
+# 공휴일은 기존 meal_backups 테이블의 예약 슬롯에 별도 보관한다.
+# 기존 사용자 백업 슬롯(0~3), 매식비 기록 및 안전로드 테이블에는 영향을 주지 않는다.
+MEAL_HOLIDAY_MANUAL_SLOT = 9999
+MEAL_HOLIDAY_YEAR_SLOT_BASE = 10000
+MEAL_HOLIDAY_API_KEY = os.environ.get("MEAL_HOLIDAY_API_KEY", "").strip()
+_MEAL_HOLIDAY_LOCK = threading.RLock()
+_MEAL_HOLIDAY_RETRY_AFTER = {}
 
 
 # ---------------------------------------------------------------- Supabase REST
@@ -10307,6 +10314,234 @@ def meal_ensure_teams():
     return _meal_get("meal_teams?select=*&order=sort_order.asc,id.asc")
 
 
+# ---------------------------------------------------------------- 공휴일 자동 동기화 + 관리자 추가
+# 월별 화면/서버 입력 검사 모두 공유하는 저장 데이터: meal_backups 예약 슬롯.
+# 공공데이터포털 키가 있으면 한국천문연구원 특일정보를 우선 사용하며,
+# 키가 없는 경우 별도 인증키가 필요 없는 Nager.Date 공개 공휴일 API를 사용한다.
+# 공개 API는 정부 공식 데이터가 아니므로 임시공휴일 등 업데이트 시차가 있을 수 있다.
+def meal_holiday_read_slot(slot):
+    rows = _meal_get(f"meal_backups?slot=eq.{slot}&select=slot,payload")
+    if rows and isinstance(rows[0].get("payload"), dict):
+        return rows[0]["payload"], True
+    return {}, False
+
+
+def meal_holiday_write_slot(slot, payload):
+    """기존 백업 API용 테이블을 이용해 서버 재시작 후에도 휴일 데이터를 유지."""
+    old, exists = meal_holiday_read_slot(slot)
+    now = datetime.now(MEAL_KST).isoformat()
+    label = "[시스템] 수동 공휴일" if slot == MEAL_HOLIDAY_MANUAL_SLOT else "[시스템] 공휴일 자동 캐시"
+    if exists:
+        resp = _meal_patch("meal_backups", f"slot=eq.{slot}",
+                           {"payload": payload, "created_at": now})
+    else:
+        resp = _meal_post("meal_backups", {"slot": slot, "label": label,
+                                           "created_at": now, "payload": payload})
+    if not resp.ok:
+        raise RuntimeError("공휴일 저장소 접근 실패: " + str(resp.status_code))
+    return True
+
+
+def meal_holiday_fetch_official(year):
+    """한국천문연구원 특일 정보 제공 서비스: 공휴일 조회(getRestDeInfo)."""
+    if not MEAL_HOLIDAY_API_KEY:
+        raise RuntimeError("공공데이터 인증키가 설정되지 않았습니다.")
+    url = "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    res = requests.get(url, params={"serviceKey": MEAL_HOLIDAY_API_KEY,
+                                    "solYear": str(year), "numOfRows": "200",
+                                    "pageNo": "1", "_type": "json"}, timeout=9)
+    res.raise_for_status()
+    try:
+        data = res.json()
+        reply = data["response"]
+        if str(reply["header"]["resultCode"]).strip() not in ("00", "0"):
+            raise ValueError("공휴일 API 응답 오류")
+        body = reply["body"]
+        if int(body.get("totalCount", 0)) > 200:
+            raise ValueError("공휴일 결과가 한 페이지를 초과했습니다.")
+        items = (body.get("items") or {}).get("item", [])
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise RuntimeError("공공데이터 응답 형식 오류") from exc
+    if isinstance(items, dict):
+        items = [items]
+    days = {}
+    for item in items:
+        if str(item.get("isHoliday", "Y")).upper() != "Y":
+            continue
+        raw = str(item.get("locdate", ""))
+        try:
+            d = datetime.strptime(raw, "%Y%m%d").date().isoformat()
+        except ValueError:
+            continue
+        if d[:4] == str(year):
+            name = str(item.get("dateName") or "공휴일").strip()[:60]
+            days[d] = name or "공휴일"
+    if not days:
+        raise RuntimeError("공공데이터에서 해당 연도 공휴일을 받지 못했습니다.")
+    return days, "한국천문연구원(공공데이터포털)"
+
+
+def meal_holiday_fetch_public(year):
+    """공공데이터 키가 없는 경우 사용할 수 있는 공개 연간 공휴일 데이터."""
+    url = f"https://nagerholidays.com/api/v4/Holidays/KR/{year}"
+    res = requests.get(url, timeout=9)
+    res.raise_for_status()
+    records = res.json()
+    if not isinstance(records, list):
+        raise RuntimeError("공휴일 조회 응답 형식이 올바르지 않습니다.")
+    names_ko = {
+        "New Year's Day": "신정", "Independence Movement Day": "삼일절",
+        "Children's Day": "어린이날", "Memorial Day": "현충일",
+        "Liberation Day": "광복절", "National Foundation Day": "개천절",
+        "Hangul Day": "한글날", "Christmas Day": "성탄절",
+        "Lunar New Year": "설날", "Seollal": "설날",
+        "Chuseok": "추석", "Buddha's Birthday": "부처님오신날",
+        "Substitute Holiday": "대체공휴일", "Election Day": "선거일",
+    }
+    days = {}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        types = item.get("holidayTypes") or []
+        if "Public" not in types or item.get("subdivisionCodes"):
+            continue
+        d = str(item.get("date") or "")
+        try:
+            if date.fromisoformat(d).year != year:
+                continue
+        except ValueError:
+            continue
+        name = str(item.get("name") or "공휴일").strip()
+        days[d] = names_ko.get(name, name)[:60] or "공휴일"
+    if not days:
+        raise RuntimeError("공개 서비스에서 해당 연도 공휴일을 받지 못했습니다.")
+    return days, "Nager.Date(공개 서비스, 정부 공식 데이터 아님)"
+
+
+def meal_holiday_ensure_year(year, force=False):
+    """최초 조회 후 DB 캐시 사용; 올해/내년은 KST 기준 하루 한 번 새로 조회."""
+    year = int(year)
+    if not 1900 <= year <= 2100:
+        return {"days": {}, "checked_at": "", "error": "지원하지 않는 연도"}
+    slot = MEAL_HOLIDAY_YEAR_SLOT_BASE + year
+    with _MEAL_HOLIDAY_LOCK:
+        payload, _ = meal_holiday_read_slot(slot)
+        today = meal_today_kst().isoformat()
+        checked = str(payload.get("checked_at") or "")[:10]
+        attempted = str(payload.get("attempted_at") or "")[:10]
+        # 지난 연도의 유효한 공휴일 기록은 재조회하지 않는다.
+        if not force and ((checked == today) or
+                          (year < meal_today_kst().year and payload.get("days") and checked)):
+            return payload
+        # 실패 시에도 날짜 화면을 열 때마다 외부 서비스를 연속 호출하지 않음.
+        if not force and (attempted == today or
+                          _MEAL_HOLIDAY_RETRY_AFTER.get(year, 0) > time.monotonic()):
+            return payload
+        try:
+            if MEAL_HOLIDAY_API_KEY:
+                days, source = meal_holiday_fetch_official(year)
+            else:
+                days, source = meal_holiday_fetch_public(year)
+            next_payload = {"days": days, "checked_at": today,
+                            "attempted_at": today, "source": source, "error": ""}
+            meal_holiday_write_slot(slot, next_payload)
+            _MEAL_HOLIDAY_RETRY_AFTER.pop(year, None)
+            return next_payload
+        except Exception as exc:
+            print("meal holiday refresh error:", type(exc).__name__, str(exc)[:200])
+            _MEAL_HOLIDAY_RETRY_AFTER[year] = time.monotonic() + 1200
+            # 기존 정상 공휴일 목록은 지우지 않고, 수동 공휴일도 별도 슬롯에 남긴다.
+            payload = dict(payload)
+            payload["attempted_at"] = today
+            payload["error"] = "자동 조회 실패: 이전 저장 데이터를 사용 중입니다."
+            try:
+                meal_holiday_write_slot(slot, payload)
+            except Exception:
+                pass
+            return payload
+
+
+def meal_holiday_manual_days():
+    payload, _ = meal_holiday_read_slot(MEAL_HOLIDAY_MANUAL_SLOT)
+    days = payload.get("days")
+    return days if isinstance(days, dict) else {}
+
+
+def meal_holiday_year_view(year, refresh=True):
+    auto = meal_holiday_ensure_year(year) if refresh else meal_holiday_read_slot(MEAL_HOLIDAY_YEAR_SLOT_BASE + year)[0]
+    days = dict(auto.get("days") or {})
+    # 수동 등록이 자동 조회보다 우선한다. 삭제하면 자동 공휴일이 다시 보인다.
+    days.update({d: name for d, name in meal_holiday_manual_days().items()
+                 if d[:4] == f"{year:04d}"})
+    return days, auto
+
+
+def meal_holiday_name(d):
+    """서버 측 입력/수정 검증에서도 동일한 공휴일 데이터를 조회한다."""
+    days, _ = meal_holiday_year_view(date.fromisoformat(d).year)
+    return days.get(d)
+
+
+def meal_holiday_js_json(data):
+    """관리자가 입력한 공휴일 이름이 script 태그를 종료하지 못하게 보호."""
+    return (json.dumps(data, ensure_ascii=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
+
+
+@app.route("/meal/api/admin/holiday/add", methods=["POST"])
+@meal_admin_required
+def meal_admin_holiday_add():
+    data = request.get_json(silent=True) or {}
+    d = str(data.get("date") or "").strip()
+    name = str(data.get("name") or "").strip()
+    try:
+        selected = date.fromisoformat(d)
+        if selected.isoformat() != d or not 1900 <= selected.year <= 2100:
+            raise ValueError()
+    except ValueError:
+        return jsonify(ok=False, error="날짜를 올바르게 선택해 주세요."), 400
+    if not name or len(name) > 60:
+        return jsonify(ok=False, error="공휴일 이름을 1~60자로 입력해 주세요."), 400
+    with _MEAL_HOLIDAY_LOCK:
+        days = dict(meal_holiday_manual_days())
+        days[d] = name
+        try:
+            meal_holiday_write_slot(MEAL_HOLIDAY_MANUAL_SLOT, {"days": days})
+        except Exception:
+            return jsonify(ok=False, error="공휴일을 저장하지 못했습니다. 저장소 설정을 확인해 주세요."), 500
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/admin/holiday/delete", methods=["POST"])
+@meal_admin_required
+def meal_admin_holiday_delete():
+    data = request.get_json(silent=True) or {}
+    d = str(data.get("date") or "").strip()
+    with _MEAL_HOLIDAY_LOCK:
+        days = dict(meal_holiday_manual_days())
+        if d not in days:
+            return jsonify(ok=False, error="수동으로 등록된 공휴일이 아닙니다."), 404
+        days.pop(d)
+        try:
+            meal_holiday_write_slot(MEAL_HOLIDAY_MANUAL_SLOT, {"days": days})
+        except Exception:
+            return jsonify(ok=False, error="공휴일 삭제를 저장하지 못했습니다."), 500
+    return jsonify(ok=True)
+
+
+@app.route("/meal/api/admin/holiday/refresh", methods=["POST"])
+@meal_admin_required
+def meal_admin_holiday_refresh():
+    today = meal_today_kst()
+    results = {str(y): meal_holiday_ensure_year(y, force=True)
+               for y in (today.year, today.year + 1)}
+    errors = [f"{y}년: {p.get('error')}" for y, p in results.items() if p.get("error")]
+    return jsonify(ok=not errors, errors=errors,
+                   error=" / ".join(errors), years={y: len(p.get("days") or {})
+                                                for y, p in results.items()})
+
+
 # ---------------------------------------------------------------- login guard
 def meal_login_required(fn):
     @_meal_functools.wraps(fn)
@@ -10383,6 +10618,10 @@ def meal_admin_logout():
 def meal_admin_page():
     backups = meal_backup_list()
     now = meal_make_snapshot()["counts"]
+    holiday_today = meal_today_kst()
+    holiday_years = {y: meal_holiday_ensure_year(y)
+                     for y in (holiday_today.year, holiday_today.year + 1)}
+    manual_holidays = sorted(meal_holiday_manual_days().items())
     return render_template_string(
         MEAL_ADMIN_HTML,
         slots=list(range(1, MEAL_BACKUP_SLOTS + 1)),
@@ -10390,6 +10629,8 @@ def meal_admin_page():
         auto=backups.get(MEAL_AUTO_SLOT),
         auto_slot=MEAL_AUTO_SLOT,
         now=now,
+        holiday_years=holiday_years, manual_holidays=manual_holidays,
+        holiday_today=holiday_today,
     )
 
 
@@ -10487,6 +10728,10 @@ def meal_admin_restore_file():
 @app.route("/meal")
 @meal_login_required
 def meal_home():
+    # 해당 날짜에 첫 매식비 화면을 열 때 올해/내년 공휴일을 한 번씩 갱신.
+    today = meal_today_kst()
+    meal_holiday_ensure_year(today.year)
+    meal_holiday_ensure_year(today.year + 1)
     teams = meal_ensure_teams()
 
     # 팀별 변경 알림용 현재 상태 지문.
@@ -10593,6 +10838,7 @@ def meal_team_page(team_id):
          for v in rest_map.values()],
         key=lambda x: x["total"], reverse=True)
 
+    holiday_days, holiday_status = meal_holiday_year_view(year)
     cal = _meal_calendar.Calendar(firstweekday=6)
     today = meal_today_kst()
     weeks = []
@@ -10605,15 +10851,17 @@ def meal_team_page(team_id):
                 "date_str": ds,
                 "in_month": dt.month == month,
                 "is_today": dt == today,
+                "is_weekend": dt.weekday() >= 5,
+                "holiday_name": holiday_days.get(ds, ""),
                 "entries": by_date.get(ds, []),
             })
         weeks.append(wk)
 
     member_info = {}
-    for m in members:
+    for m in summary_members:
         days = sorted(per_member_days.get(m["id"], []))
         member_info[m["id"]] = {"name": m["name"], "days": days,
-                                "count": len(days)}
+                                "count": len(days), "active": m["id"] in active_ids}
 
     py, pm = meal_shift_month(year, month, -1)
     ny, nm = meal_shift_month(year, month, 1)
@@ -10639,9 +10887,27 @@ def meal_team_page(team_id):
         amount=MEAL_FIXED_AMOUNT, monthly_count=MEAL_MONTHLY_COUNT,
         cap=MEAL_MONTHLY_CAP,
         member_info_json=json.dumps(member_info, ensure_ascii=False),
-        restaurant_list=restaurant_list,
+        restaurant_list=restaurant_list, holiday_days_json=meal_holiday_js_json(holiday_days),
+        holiday_status=holiday_status,
         weekdays=["일", "월", "화", "수", "목", "금", "토"],
     )
+
+
+def meal_entry_date_error(d):
+    try:
+        selected = date.fromisoformat(d)
+        if selected.isoformat() != d:
+            raise ValueError("Invalid date format")
+    except (TypeError, ValueError):
+        return "올바른 날짜를 선택해 주세요."
+    if selected.weekday() >= 5:
+        return "주말에는 매식비를 입력하거나 수정할 수 없습니다. 평일 날짜를 선택해 주세요."
+    if selected > meal_today_kst():
+        return "미래 날짜에는 매식비를 입력하거나 수정할 수 없습니다. 오늘 또는 지난 날짜를 선택해 주세요."
+    holiday = meal_holiday_name(d)
+    if holiday:
+        return f"{holiday} 공휴일에는 매식비를 입력하거나 수정할 수 없습니다."
+    return None
 
 
 @app.route("/meal/api/entry", methods=["POST"])
@@ -10661,6 +10927,9 @@ def meal_add_entry():
 
     if not (team_id and member_ids and d):
         return jsonify(ok=False, error="팀원과 날짜를 선택해 주세요."), 400
+    date_error = meal_entry_date_error(d)
+    if date_error:
+        return jsonify(ok=False, error=date_error), 400
     if not restaurant:
         return jsonify(ok=False, error="식당명을 입력해 주세요."), 400
     if not approver:
@@ -10700,6 +10969,76 @@ def meal_add_entry():
         return jsonify(ok=False,
                        error="추가된 인원이 없어요. " + ", ".join(skipped)), 400
     return jsonify(ok=True, added=added, skipped=skipped)
+
+
+@app.route("/meal/api/entry/edit", methods=["POST"])
+@meal_login_required
+def meal_edit_entry():
+    data = request.get_json(force=True)
+    try:
+        team_id = int(data.get("team_id", 0))
+        selected_ids = [int(mid) for mid in (data.get("member_ids") or [])]
+    except (ValueError, TypeError):
+        return jsonify(ok=False, error="올바른 팀원 정보를 선택해 주세요."), 400
+    d = str(data.get("date") or "").strip()
+    restaurant = str(data.get("restaurant") or "").strip()
+    approver = str(data.get("approver") or "").strip()
+    if not team_id or not selected_ids or len(set(selected_ids)) != len(selected_ids):
+        return jsonify(ok=False, error="팀원을 한 명 이상 선택해 주세요."), 400
+    date_error = meal_entry_date_error(d)
+    if date_error:
+        return jsonify(ok=False, error=date_error), 400
+    if not restaurant:
+        return jsonify(ok=False, error="식당명을 입력해 주세요."), 400
+    if not approver:
+        return jsonify(ok=False, error="결제자를 선택하거나 입력해 주세요."), 400
+
+    member_rows = _meal_get(f"meal_members?team_id=eq.{team_id}&select=id,name,active")
+    members = {int(m["id"]): m for m in member_rows}
+    month_rows = _meal_get(
+        f"meal_entries?team_id=eq.{team_id}&d=like.{d[:7]}*&select=*")
+    day_rows = [r for r in month_rows if r["d"] == d]
+    if not day_rows:
+        return jsonify(ok=False, error="수정할 기존 입력 내역이 없습니다. 화면을 새로고침해 주세요."), 409
+    existing = {int(r["member_id"]): r for r in day_rows}
+    if any(mid not in members or
+           (members[mid].get("active", True) is False and mid not in existing)
+           for mid in selected_ids):
+        return jsonify(ok=False, error="이 팀의 등록된 팀원만 선택할 수 있습니다."), 400
+    for mid in selected_ids:
+        # 수정 중인 날짜는 월 한도 계산에서 제외하여 6회째 기록도 수정 가능.
+        other_days = {r["d"] for r in month_rows
+                      if int(r["member_id"]) == mid and r["d"] != d}
+        if len(other_days) >= MEAL_MONTHLY_COUNT:
+            return jsonify(ok=False,
+                           error=f"{members[mid]['name']}님의 이번 달 입력 한도를 초과합니다."), 400
+
+    ids_to_keep = [int(existing[mid]["id"]) for mid in selected_ids if mid in existing]
+    new_ids = [mid for mid in selected_ids if mid not in existing]
+    ids_to_remove = [int(r["id"]) for mid, r in existing.items()
+                     if mid not in selected_ids]
+    if ids_to_keep:
+        kept = ",".join(str(i) for i in ids_to_keep)
+        response = _meal_patch("meal_entries", f"team_id=eq.{team_id}&d=eq.{d}&id=in.({kept})",
+                               {"restaurant": restaurant, "approver": approver})
+        if not response.ok:
+            return jsonify(ok=False, error="기존 내역 수정에 실패했습니다. 다시 시도해 주세요."), 500
+    if new_ids:
+        now_iso = datetime.now(MEAL_KST).isoformat()
+        response = _meal_post("meal_entries", [
+            {"team_id": team_id, "member_id": mid, "d": d,
+             "amount": MEAL_FIXED_AMOUNT, "restaurant": restaurant,
+             "approver": approver, "created_at": now_iso}
+            for mid in new_ids])
+        if not response.ok:
+            return jsonify(ok=False, error="팀원 추가에 실패했습니다. 일부 내용이 수정되었을 수 있으니 화면을 새로고침해 주세요."), 500
+    if ids_to_remove:
+        removed = ",".join(str(i) for i in ids_to_remove)
+        response = _meal_delete("meal_entries",
+                                f"team_id=eq.{team_id}&d=eq.{d}&id=in.({removed})")
+        if not response.ok:
+            return jsonify(ok=False, error="선택 해제한 팀원 내역의 삭제에 실패했습니다. 화면을 새로고침해 주세요."), 500
+    return jsonify(ok=True)
 
 
 @app.route("/meal/api/entry/delete", methods=["POST"])
@@ -11123,7 +11462,15 @@ MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .file-row input[type=file]{font-size:13px;flex:1;min-width:0;}
 .logout{font-size:13px;color:var(--muted);background:rgba(255,255,255,.7);border:1px solid var(--line);
   border-radius:10px;padding:7px 13px;cursor:pointer;font-weight:600;box-shadow:var(--shadow-sm);}
-</style></head><body><div class=wrap>
+ .holiday-admin{background:#fff;border:1px solid var(--line);border-radius:15px;padding:16px;margin-bottom:15px;}
+ .holiday-admin p{font-size:12px;color:var(--muted);line-height:1.65;margin:7px 0;}
+ .holiday-admin .holiday-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;}
+ .holiday-admin input{border:1px solid var(--line);border-radius:9px;padding:10px;max-width:100%;}
+ .holiday-admin .holiday-form input[type=date]{width:175px;}
+ .holiday-admin .holiday-form input[type=text]{flex:1;min-width:180px;}
+ .holiday-admin .holiday-row{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px;}
+ .holiday-admin .holiday-row span{flex:1;}
+ </style></head><body><div class=wrap>
 <div class=topbar>
   <a class=back href="/meal/login">‹</a>
   <h1>백업 · 복원</h1>
@@ -11183,6 +11530,34 @@ MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
   {% endif %}
 {% endfor %}
 
+<div class=sec-title>📅 공휴일 관리</div>
+<div class=holiday-admin>
+  <b>공휴일 자동 반영 (올해·내년)</b>
+  <p>매식비 화면을 열면 저장된 정보를 사용하며 한국 시간 기준 하루 한 번 갱신합니다.
+  관리자가 직접 추가한 날짜는 자동 갱신 후에도 유지됩니다.</p>
+  <p>{% for y, info in holiday_years.items() %}
+    {{y}}년: {{info.days|length if info.days else 0}}일 저장 ·
+    {% if info.checked_at %}최근 정상 조회 {{info.checked_at}}{% else %}아직 정상 조회되지 않음{% endif %}
+    {% if info.source %} · {{info.source}}{% endif %}
+    {% if info.error %} · ⚠ {{info.error}}{% endif %}<br>
+  {% endfor %}</p>
+  <button type=button class="sbtn dl" onclick="admHolidayRefresh()">지금 공휴일 다시 조회</button>
+  <p>인증키를 설정하면 한국천문연구원 데이터를 사용합니다. 인증키가 없으면 공개 공휴일 서비스를 사용하며, 새 임시공휴일은 제공처에 반영되기 전까지 자동으로 표시되지 않을 수 있습니다.</p>
+  <div class=sec-title style="margin-top:16px">임시공휴일 수동 등록</div>
+  <div class=holiday-form>
+    <input type=date id=holidayDate aria-label="등록할 공휴일 날짜">
+    <input type=text id=holidayName maxlength=60 placeholder="공휴일 이름 (예: 임시공휴일)" aria-label="공휴일 이름">
+    <button class="sbtn save" onclick="admHolidayAdd()">등록</button>
+  </div>
+  {% if manual_holidays %}
+    {% for d, name in manual_holidays %}
+    <div class=holiday-row><span>{{d}} · {{name}}</span>
+      <button class="sbtn rm" data-day="{{d}}" onclick="admHolidayDelete(this.dataset.day)">삭제</button></div>
+    {% endfor %}
+  {% else %}<p>관리자가 직접 등록한 공휴일이 없습니다.</p>{% endif %}
+  <p>수동 등록을 삭제해도 같은 날이 자동 공휴일이라면 입력 불가는 유지됩니다.</p>
+</div>
+
 <div class=sec-title>&#128193; 파일에서 복원</div>
 <div class=file-card>
   <p>내려받아 둔 백업 JSON 파일로도 복원할 수 있어요. (복원 전 현재 상태는 자동 저장됩니다.)</p>
@@ -11197,6 +11572,26 @@ MEAL_ADMIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 async function admApi(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   return r.json();
+}
+async function admHolidayAdd(){
+  const d=document.getElementById('holidayDate').value;
+  const name=document.getElementById('holidayName').value.trim();
+  if(!d||!name){alert('날짜와 공휴일 이름을 입력해 주세요.');return;}
+  const result=await admApi('/meal/api/admin/holiday/add',{date:d,name:name});
+  if(result.ok){location.reload();}else{alert(result.error||'공휴일을 등록하지 못했습니다.');}
+}
+async function admHolidayDelete(d){
+  if(!confirm(d+'에 수동 등록한 공휴일을 삭제할까요?'))return;
+  const result=await admApi('/meal/api/admin/holiday/delete',{date:d});
+  if(result.ok){location.reload();}else{alert(result.error||'삭제하지 못했습니다.');}
+}
+async function admHolidayRefresh(){
+  mealLoading(true,'공휴일 정보를 확인 중…');
+  try{
+    const result=await admApi('/meal/api/admin/holiday/refresh',{});
+    if(!result.ok){alert(result.error||'일부 연도의 공휴일을 갱신하지 못했습니다.');}
+    location.reload();
+  }catch(e){mealLoading(false);alert('공휴일 조회 중 네트워크 오류가 발생했습니다.');}
 }
 async function admSave(slot){
   const label = prompt('이 백업에 붙일 이름 (선택):', '');
@@ -11262,6 +11657,18 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .cal td:active{background:var(--soft);transform:scale(.96);}
 .cal td.has{box-shadow:inset 0 0 0 1.5px rgba(79,110,240,.25);}
 .cal td.out{background:transparent;border-color:transparent;color:#c2c8d2;cursor:default;}
+.cal td.weekend{background:#f0f2f6;border-color:#dfe3eb;cursor:not-allowed;}
+.cal td.weekend:active{background:#e8ebf1;transform:none;}
+.cal td.weekend .dn{color:#929aaa;}
+.cal td.weekend .daylocked{font-size:9px;line-height:1.35;color:#8992a3;font-weight:700;}
+.cal td.weekend.has .chip{opacity:.75;}
+.cal td.holiday{background:#fff0f1;border-color:#f8ccd0;cursor:not-allowed;}
+.cal td.holiday:active{background:#ffe8eb;transform:none;}
+.cal td.holiday .dn,.cal td.holiday .daylocked{color:#ad3445;}
+.cal td.holiday .holidayname{font-size:10px;color:#a52e41;font-weight:800;line-height:1.3;word-break:keep-all;}
+.cal td.holiday.has .chip{opacity:.75;}
+.cal td.today.holiday{background:#fff0f1;border-color:#f8ccd0;}
+.holiday-note{font-size:12px;color:#7b8499;margin:2px 0 10px;line-height:1.55;}
 .cal td .dn{font-size:12px;font-weight:700;color:var(--ink-soft);}
 .cal td .cell{display:flex;flex-direction:column;align-items:flex-start;gap:5px;height:100%;}
 .cal td.today{background:#fff7ed;border-color:#fcd29a;box-shadow:inset 0 0 0 1.5px rgba(245,158,11,.45);}
@@ -11332,6 +11739,10 @@ select{appearance:none;-webkit-appearance:none;
   max-height:88vh;overflow-y:auto;animation:pop .18s cubic-bezier(.2,.8,.3,1);box-shadow:var(--shadow-lg);}
 @keyframes pop{from{transform:scale(.94) translateY(8px);opacity:0}to{transform:none;opacity:1}}
 .modal h3{margin:0 0 4px;font-size:18px;font-weight:800;letter-spacing:-.4px;}
+.daymodal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;}
+.day-edit-btn{border:1px solid #d9e1f1;background:#f7f9fd;color:var(--primary-dd);
+  border-radius:10px;padding:8px 13px;font-size:13px;font-weight:800;cursor:pointer;}
+.editmode-label{margin:4px 0 0;font-size:12px;color:var(--primary-d);font-weight:800;}
 .modal .hint{font-size:13px;color:var(--muted);margin:0 0 14px;}
 .dayentries{margin:0 0 6px;}
 .de{display:flex;align-items:flex-start;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);}
@@ -11382,6 +11793,7 @@ select{appearance:none;-webkit-appearance:none;
   <div class=tot><div class=lab>한도 마감 인원</div><div class=val>{{full_people}}명</div></div>
 </div>
 
+<div class=holiday-note>회색 🔒 주말 · 연분홍 🔒 공휴일은 입력할 수 없습니다.{% if holiday_status.error %} ⚠ 공휴일 최신정보를 확인하지 못했습니다. {% if not holiday_status.days %}자동 공휴일 차단이 완전하지 않을 수 있습니다.{% else %}이전에 저장한 공휴일 정보만 표시 중입니다.{% endif %}{% endif %}</div>
 <div class=card style="padding:8px">
 <table class=cal>
   <tr>{% for w in weekdays %}<th class="{% if loop.index0==0 %}sun{% elif loop.index0==6 %}sat{% endif %}">{{w}}</th>{% endfor %}</tr>
@@ -11389,9 +11801,10 @@ select{appearance:none;-webkit-appearance:none;
   <tr>
     {% for c in week %}
       {% if c.in_month %}
-      <td class="{% if c.is_today %}today {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')">
+      <td class="{% if c.is_today %}today {% endif %}{% if c.is_weekend %}weekend {% endif %}{% if c.holiday_name %}holiday {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')" {% if c.holiday_name %}title="{{c.holiday_name}} · 입력 불가" aria-label="{{c.date_str}} {{c.holiday_name}} 입력 불가"{% elif c.is_weekend %}title="주말 · 입력 불가" aria-label="{{c.date_str}} 주말 입력 불가"{% endif %}>
         <div class=cell>
           <span class=dn>{{c.day}}</span>
+          {% if c.holiday_name %}<span class=holidayname>{{c.holiday_name}}</span><span class=daylocked>🔒 입력 불가</span>{% elif c.is_weekend %}<span class=daylocked>🔒<br>입력 불가</span>{% endif %}
           {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
         </div>
       </td>
@@ -11466,8 +11879,11 @@ select{appearance:none;-webkit-appearance:none;
 
 <div class=mask id=mask>
   <div class=modal>
-    <h3 id=modalDate></h3>
-    <p class=hint>팀원을 고르고 식당·결제자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.</p>
+    <div class=daymodal-head>
+      <div><h3 id=modalDate></h3><p class=editmode-label id=editModeLabel style="display:none">입력 내역 수정 중</p></div>
+      <button type=button class=day-edit-btn id=dayEditBtn onclick="editDay()" style="display:none">수정</button>
+    </div>
+    <p class=hint id=dayModalHint>팀원을 고르고 식당·결제자를 입력하면 1인 {{ "{:,}".format(amount) }}원이 기록돼요.</p>
     <div class=dayentries id=dayEntries></div>
     <div class=addform>
       <label class=flabel>팀원 선택 (여러 명 가능)</label>
@@ -11503,12 +11919,14 @@ const TEAM_ID = {{team.id}};
 const AMOUNT = {{amount}};
 const MONTHLY_COUNT = {{monthly_count}};
 const MONTHLY_CAP = {{cap}};
+const HOLIDAY_DAYS = {{ holiday_days_json | safe }};
 const MEMBER_INFO = {{ member_info_json | safe }};
 const DAY_ENTRIES = {
 {% for week in weeks %}{% for c in week %}{% if c.in_month and c.entries %}"{{c.date_str}}":[{% for e in c.entries %}{id:{{e.id}},mid:{{e.member_id}},name:"{{e.name}}",rest:"{{e.restaurant}}",appr:"{{e.approver}}"},{% endfor %}],{% endif %}{% endfor %}{% endfor %}
 };
-const HAS_MEMBERS = {{ 'true' if members else 'false' }};
+const HAS_MEMBERS = {{ 'true' if members or summaries else 'false' }};
 let curDate = null;
+let dayEditMode = false;
 
 function fmt(n){return n.toLocaleString('ko-KR');}
 async function api(url, body){
@@ -11517,10 +11935,22 @@ async function api(url, body){
 }
 
 function openDay(ds){
+  if(HOLIDAY_DAYS[ds]){
+    alert(HOLIDAY_DAYS[ds]+' 공휴일에는 매식비를 입력하거나 수정할 수 없습니다.');return;
+  }
+  const dayOfWeek = new Date(ds+'T12:00:00').getDay();
+  if(dayOfWeek===0 || dayOfWeek===6){
+    alert('주말에는 매식비를 입력하거나 수정할 수 없습니다.\\n평일 날짜를 선택해 주세요.');return;
+  }
+  // 한국 시간 기준으로 자정을 지난 직후에도 미래 날짜 선택을 막는다.
+  const todayKst = new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
+  if(ds>todayKst){alert('미래 날짜에는 매식비를 입력할 수 없습니다.\\n오늘 또는 지난 날짜를 선택해 주세요.');return;}
   if(!HAS_MEMBERS){alert('먼저 팀원을 추가해 주세요.');return;}
+  dayEditMode=false;
   curDate = ds;
   document.getElementById('modalDate').textContent = ds.replace(/-/g,'.');
   entrySelMode=false;
+  updateDayEditUI();
   renderDayEntries();
   renderMemberChecks();
   document.getElementById('restaurantSel').value='';
@@ -11533,8 +11963,48 @@ function openDay(ds){
   document.getElementById('mask').classList.add('on');
   document.body.style.overflow='hidden';
 }
-function closeDay(){document.getElementById('mask').classList.remove('on');document.body.style.overflow='';}
+function closeDay(){dayEditMode=false;document.getElementById('mask').classList.remove('on');document.body.style.overflow='';}
 document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='mask')closeDay();});
+
+function updateDayEditUI(){
+  const hasEntries=(DAY_ENTRIES[curDate]||[]).length>0;
+  const editBtn=document.getElementById('dayEditBtn');
+  editBtn.style.display=hasEntries?'':'none';
+  editBtn.textContent=dayEditMode?'수정 취소':'수정';
+  document.getElementById('editModeLabel').style.display=dayEditMode?'':'none';
+  document.getElementById('dayEntries').style.display=dayEditMode?'none':'';
+  document.getElementById('addBtn').textContent=dayEditMode?'수정 저장':'추가하기';
+  document.getElementById('dayModalHint').textContent=dayEditMode
+    ? '기존 입력값을 불러왔습니다. 팀원·식당·결제자를 변경한 후 수정 저장을 눌러 주세요.'
+    : '팀원을 고르고 식당·결제자를 입력하면 1인 '+fmt(AMOUNT)+'원이 기록돼요.';
+}
+function setDaySelect(id, value){
+  const select=document.getElementById(id);
+  const exists=Array.from(select.options).some(o=>o.value===value);
+  select.value=exists?value:'__other__';
+  const other=document.getElementById(id==='restaurantSel'?'restaurantOther':'approverOther');
+  if(!exists)other.value=value;
+  other.style.display=exists?'none':'block';
+}
+function editDay(){
+  dayEditMode=!dayEditMode;
+  entrySelMode=false;
+  renderDayEntries();
+  renderMemberChecks();
+  if(dayEditMode){
+    const first=(DAY_ENTRIES[curDate]||[])[0];
+    if(first){setDaySelect('restaurantSel',first.rest||'');setDaySelect('approverSel',first.appr||'');}
+  }else{
+    document.getElementById('restaurantSel').value='';
+    document.getElementById('approverSel').value='';
+    document.getElementById('restaurantOther').value='';
+    document.getElementById('approverOther').value='';
+    document.getElementById('restaurantOther').style.display='none';
+    document.getElementById('approverOther').style.display='none';
+  }
+  document.getElementById('noteBox').className='note';
+  updateDayEditUI();
+}
 
 let entrySelMode=false;
 function renderDayEntries(){
@@ -11582,16 +12052,18 @@ function renderMemberChecks(){
   let html='';
   for(const mid in MEMBER_INFO){
     const info = MEMBER_INFO[mid];
-    if(info.days.includes(curDate)) continue; // 그 날 이미 입력한 사람은 숨김(위 내역에 표시됨)
-    const full = info.count >= MONTHLY_COUNT;
+    const existing = info.days.includes(curDate);
+    if(!info.active && (!dayEditMode || !existing)) continue;
+    if(!dayEditMode && existing) continue; // 추가 모드에서는 기존 입력을 중복 표시하지 않음
+    const full = info.count >= MONTHLY_COUNT && !existing;
     const tag = full ? '<span class=mtag>한도초과</span>' : '';
     html += `<label class="mcheck ${full?'disabled':''}">`+
-      `<input type=checkbox value="${mid}" ${full?'disabled':''}>`+
+      `<input type=checkbox value="${mid}" ${dayEditMode&&existing?'checked':''} ${full?'disabled':''}>`+
       `<span class=mname>${info.name}</span>`+
       `<span class=mcount>${info.count}/${MONTHLY_COUNT}</span>`+
       `${tag}</label>`;
   }
-  if(!html) html='<div class=muted style="padding:14px;text-align:center;font-size:13px">오늘 추가할 수 있는 팀원이 없어요.</div>';
+  if(!html) html='<div class=muted style="padding:14px;text-align:center;font-size:13px">이 날짜에 추가할 수 있는 팀원이 없어요.</div>';
   box.innerHTML = html;
 }
 
@@ -11620,9 +12092,9 @@ async function saveEntry(){
   if(appr==='__other__') appr = document.getElementById('approverOther').value.trim();
   if(!appr){note.className='note warn on';note.textContent='결제자를 선택하거나 직접 입력해 주세요.';return;}
 
-  mealLoading(true,'저장 중…');
-  const res = await api('/meal/api/entry',{team_id:TEAM_ID,member_ids:ids,date:curDate,
-    restaurant:rest,approver:appr});
+  mealLoading(true,dayEditMode?'수정 중…':'저장 중…');
+  const res = await api(dayEditMode?'/meal/api/entry/edit':'/meal/api/entry',
+    {team_id:TEAM_ID,member_ids:ids,date:curDate,restaurant:rest,approver:appr});
   if(res.ok){
     if(res.skipped && res.skipped.length){
       alert('추가: '+res.added.join(', ')+'\\n제외: '+res.skipped.join(', '));
