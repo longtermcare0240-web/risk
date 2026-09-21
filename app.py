@@ -10489,6 +10489,29 @@ def meal_holiday_js_json(data):
             .replace("&", "\\u0026"))
 
 
+# ---------------------------------------------------------------- login guard
+def meal_login_required(fn):
+    @_meal_functools.wraps(fn)
+    def _wrap(*a, **k):
+        if not session.get("meal_authed"):
+            if request.path.startswith("/meal/api/"):
+                return jsonify(ok=False, error="로그인이 필요해요."), 401
+            return _meal_redirect("/meal/login")
+        return fn(*a, **k)
+    return _wrap
+
+
+def meal_admin_required(fn):
+    @_meal_functools.wraps(fn)
+    def _wrap(*a, **k):
+        if not session.get("meal_admin_authed"):
+            if request.path.startswith("/meal/api/"):
+                return jsonify(ok=False, error="관리자 인증이 필요해요."), 401
+            return _meal_redirect("/meal/admin/login")
+        return fn(*a, **k)
+    return _wrap
+
+
 @app.route("/meal/api/admin/holiday/add", methods=["POST"])
 @meal_admin_required
 def meal_admin_holiday_add():
@@ -10540,29 +10563,6 @@ def meal_admin_holiday_refresh():
     return jsonify(ok=not errors, errors=errors,
                    error=" / ".join(errors), years={y: len(p.get("days") or {})
                                                 for y, p in results.items()})
-
-
-# ---------------------------------------------------------------- login guard
-def meal_login_required(fn):
-    @_meal_functools.wraps(fn)
-    def _wrap(*a, **k):
-        if not session.get("meal_authed"):
-            if request.path.startswith("/meal/api/"):
-                return jsonify(ok=False, error="로그인이 필요해요."), 401
-            return _meal_redirect("/meal/login")
-        return fn(*a, **k)
-    return _wrap
-
-
-def meal_admin_required(fn):
-    @_meal_functools.wraps(fn)
-    def _wrap(*a, **k):
-        if not session.get("meal_admin_authed"):
-            if request.path.startswith("/meal/api/"):
-                return jsonify(ok=False, error="관리자 인증이 필요해요."), 401
-            return _meal_redirect("/meal/admin/login")
-        return fn(*a, **k)
-    return _wrap
 
 
 # ---------------------------------------------------------------- routes
