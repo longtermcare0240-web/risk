@@ -11184,6 +11184,30 @@ a{color:inherit;text-decoration:none}
   border:3.5px solid var(--soft);border-top-color:var(--primary);animation:mspin .7s linear infinite;}
 @keyframes mspin{to{transform:rotate(360deg)}}
 .mloader-txt{font-size:13.5px;font-weight:700;color:var(--ink);letter-spacing:-.2px;}
+
+/* ── 공통 앱 팝업 ── */
+.mdialog-mask{position:fixed;inset:0;z-index:400;display:none;align-items:center;justify-content:center;
+  background:rgba(20,27,45,.48);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);padding:18px;}
+.mdialog-mask.on{display:flex;animation:mfade .16s ease;}
+.mdialog{width:min(92vw,420px);background:#fff;border-radius:22px;box-shadow:var(--shadow-lg);overflow:hidden;
+  border:1px solid rgba(230,234,242,.95);animation:pop .18s cubic-bezier(.2,.8,.3,1);}
+.mdialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 18px 14px;
+  background:linear-gradient(180deg,#f8faff 0%,#f2f5fd 100%);border-bottom:1px solid var(--line);}
+.mdialog-title{font-size:17px;font-weight:900;color:var(--ink);letter-spacing:-.4px;}
+.mdialog-close{width:34px;height:34px;border:none;border-radius:11px;background:#fff;color:var(--muted);font-size:20px;line-height:1;
+  box-shadow:var(--shadow-sm);cursor:pointer;flex:0 0 auto;}
+.mdialog-close:active{transform:scale(.94);}
+.mdialog-body{padding:18px;font-size:14px;line-height:1.7;color:var(--ink-soft);white-space:pre-line;word-break:keep-all;}
+.mdialog-input{width:100%;margin-top:2px;margin-bottom:16px;padding:12px 14px;
+  background:#f7f9fd;color:var(--ink);border:1.5px solid #dfe5f0;border-radius:12px;
+  font-size:14px;outline:none;box-sizing:border-box;}
+.mdialog-input:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(79,110,240,.13);}
+.mdialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:0 18px 18px;}
+.mdialog-btn{min-width:96px;height:44px;border:none;border-radius:13px;font-size:14px;font-weight:800;cursor:pointer;}
+.mdialog-btn.sub{background:var(--soft);color:var(--primary-dd);}
+.mdialog-btn.main{background:linear-gradient(180deg,var(--primary),var(--primary-d));color:#fff;
+  box-shadow:0 3px 0 var(--primary-dd),0 6px 14px rgba(79,110,240,.22);}
+.mdialog-btn:active{transform:translateY(2px);}
 """
 
 # 모든 매식비 화면에서 재사용하는 로딩 오버레이 (markup + 제어 스크립트)
@@ -11200,7 +11224,64 @@ window.mealLoading=function(show,txt){
 window.addEventListener('pageshow',function(){
   var el=document.getElementById('mloader');if(el)el.classList.remove('on');
 });
+
+window.mealDialog=function(opts){
+  opts=opts||{};
+  return new Promise(function(resolve){
+    var mask=document.getElementById('mealDialogMask');
+    var title=document.getElementById('mealDialogTitle');
+    var body=document.getElementById('mealDialogBody');
+    var input=document.getElementById('mealDialogInput');
+    var cancelBtn=document.getElementById('mealDialogCancel');
+    var okBtn=document.getElementById('mealDialogOk');
+    var closeBtn=document.getElementById('mealDialogClose');
+    if(!mask||!title||!body||!input||!cancelBtn||!okBtn||!closeBtn){resolve(opts.mode==='confirm'?false:(opts.mode==='prompt'?null:undefined));return;}
+    title.textContent=opts.title||'알림';
+    body.textContent=opts.message||'';
+    okBtn.textContent=opts.okText||'확인';
+    cancelBtn.textContent=opts.cancelText||'취소';
+    cancelBtn.style.display=(opts.mode==='confirm'||opts.mode==='prompt')?'':'none';
+    closeBtn.style.display=opts.hideClose?'none':'';
+    input.style.display=opts.mode==='prompt'?'block':'none';
+    input.value=opts.defaultValue||'';
+    input.placeholder=opts.placeholder||'';
+    var oldOverflow=document.body.style.overflow;
+    mask.classList.add('on');
+    document.body.style.overflow='hidden';
+    function cleanup(val){
+      mask.classList.remove('on');
+      document.body.style.overflow=oldOverflow;
+      okBtn.onclick=cancelBtn.onclick=closeBtn.onclick=null;
+      mask.onclick=null;
+      window.removeEventListener('keydown', onKey);
+      resolve(val);
+    }
+    function onKey(e){
+      if(!mask.classList.contains('on')) return;
+      if(e.key==='Escape'){ e.preventDefault(); cleanup(opts.mode==='confirm'?false:(opts.mode==='prompt'?null:undefined)); }
+      if(e.key==='Enter'){
+        if(opts.mode==='prompt' && document.activeElement===input){ e.preventDefault(); cleanup(input.value); }
+        else if(opts.mode!=='prompt'){ e.preventDefault(); cleanup(opts.mode==='confirm'?true:undefined); }
+      }
+    }
+    okBtn.onclick=function(){ cleanup(opts.mode==='prompt'?input.value:(opts.mode==='confirm'?true:undefined)); };
+    cancelBtn.onclick=function(){ cleanup(opts.mode==='confirm'?false:null); };
+    closeBtn.onclick=function(){ cleanup(opts.mode==='confirm'?false:(opts.mode==='prompt'?null:undefined)); };
+    mask.onclick=function(e){ if(e.target===mask) cleanup(opts.mode==='confirm'?false:(opts.mode==='prompt'?null:undefined)); };
+    window.addEventListener('keydown', onKey);
+    setTimeout(function(){ (opts.mode==='prompt'?input:okBtn).focus(); if(opts.mode==='prompt') input.select(); }, 0);
+  });
+};
+window.mealAlert=function(message,title,okText){ return window.mealDialog({mode:'alert',title:title||'알림',message:String(message||''),okText:okText||'확인'}); };
+window.mealConfirm=function(message,title,okText,cancelText){ return window.mealDialog({mode:'confirm',title:title||'확인',message:String(message||''),okText:okText||'확인',cancelText:cancelText||'취소'}); };
+window.mealPrompt=function(message,defaultValue,title,placeholder){ return window.mealDialog({mode:'prompt',title:title||'입력',message:String(message||''),defaultValue:defaultValue||'',placeholder:placeholder||''}); };
 </script>
+<div class=mdialog-mask id=mealDialogMask><div class=mdialog role=dialog aria-modal=true aria-labelledby=mealDialogTitle>
+  <div class=mdialog-head><div class=mdialog-title id=mealDialogTitle>알림</div><button type=button class=mdialog-close id=mealDialogClose aria-label=닫기>×</button></div>
+  <div class=mdialog-body id=mealDialogBody></div>
+  <div style="padding:0 18px"><input id=mealDialogInput class=mdialog-input style="display:none"></div>
+  <div class=mdialog-actions><button type=button class="mdialog-btn sub" id=mealDialogCancel>취소</button><button type=button class="mdialog-btn main" id=mealDialogOk>확인</button></div>
+</div></div>
 """
 
 MEAL_LOGIN_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
@@ -11576,59 +11657,59 @@ async function admApi(url, body){
 async function admHolidayAdd(){
   const d=document.getElementById('holidayDate').value;
   const name=document.getElementById('holidayName').value.trim();
-  if(!d||!name){alert('날짜와 공휴일 이름을 입력해 주세요.');return;}
+  if(!d||!name){await mealAlert('날짜와 공휴일 이름을 입력해 주세요.','입력 필요');return;}
   const result=await admApi('/meal/api/admin/holiday/add',{date:d,name:name});
-  if(result.ok){location.reload();}else{alert(result.error||'공휴일을 등록하지 못했습니다.');}
+  if(result.ok){location.reload();}else{await mealAlert(result.error||'공휴일을 등록하지 못했습니다.','등록 실패');}
 }
 async function admHolidayDelete(d){
-  if(!confirm(d+'에 수동 등록한 공휴일을 삭제할까요?'))return;
+  if(!await mealConfirm(d+'에 수동 등록한 공휴일을 삭제할까요?','공휴일 삭제'))return;
   const result=await admApi('/meal/api/admin/holiday/delete',{date:d});
-  if(result.ok){location.reload();}else{alert(result.error||'삭제하지 못했습니다.');}
+  if(result.ok){location.reload();}else{await mealAlert(result.error||'삭제하지 못했습니다.','삭제 실패');}
 }
 async function admHolidayRefresh(){
   mealLoading(true,'공휴일 정보를 확인 중…');
   try{
     const result=await admApi('/meal/api/admin/holiday/refresh',{});
-    if(!result.ok){alert(result.error||'일부 연도의 공휴일을 갱신하지 못했습니다.');}
+    if(!result.ok){await mealAlert(result.error||'일부 연도의 공휴일을 갱신하지 못했습니다.','갱신 실패');}
     location.reload();
-  }catch(e){mealLoading(false);alert('공휴일 조회 중 네트워크 오류가 발생했습니다.');}
+  }catch(e){mealLoading(false);await mealAlert('공휴일 조회 중 네트워크 오류가 발생했습니다.','네트워크 오류');}
 }
 async function admSave(slot){
-  const label = prompt('이 백업에 붙일 이름 (선택):', '');
+  const label = await mealPrompt('이 백업에 붙일 이름을 입력해 주세요.\\n비워 두면 기본 이름으로 저장됩니다.', '', '백업 이름', '예: 9월 말 정리본');
   if(label===null) return;
   mealLoading(true,'저장 중…');
   const res = await admApi('/meal/api/admin/save',{slot:slot,label:label});
   if(res.ok){ location.reload(); }
-  else{ mealLoading(false); alert(res.error||'저장 실패'); }
+  else{ mealLoading(false); await mealAlert(res.error||'저장 실패','백업 저장 실패'); }
 }
 async function admLoad(slot,label){
   label = label || ('백업 '+slot);
-  if(!confirm("'"+label+"' 백업으로 복원할까요?\\n\\n지금의 모든 매식비 데이터가 이 백업 시점으로 교체됩니다.\\n(복원 직전 상태는 자동저장본으로 보관돼요.)")) return;
+  if(!await mealConfirm("'"+label+"' 백업으로 복원할까요?\\n\\n지금의 모든 매식비 데이터가 이 백업 시점으로 교체됩니다.\\n(복원 직전 상태는 자동저장본으로 보관돼요.)",'백업 복원')) return;
   mealLoading(true,'복원 중…');
   const res = await admApi('/meal/api/admin/load',{slot:slot});
-  if(res.ok){ mealLoading(false); alert('복원이 완료됐어요.'); location.reload(); }
-  else{ mealLoading(false); alert(res.error||'복원 실패'); }
+  if(res.ok){ mealLoading(false); await mealAlert('복원이 완료됐어요.','복원 완료'); location.reload(); }
+  else{ mealLoading(false); await mealAlert(res.error||'복원 실패','복원 실패'); }
 }
 async function admDelete(slot){
-  if(!confirm('이 슬롯의 백업을 삭제할까요?')) return;
+  if(!await mealConfirm('이 슬롯의 백업을 삭제할까요?','백업 삭제')) return;
   mealLoading(true,'삭제 중…');
   const res = await admApi('/meal/api/admin/delete',{slot:slot});
   if(res.ok){ location.reload(); }
-  else{ mealLoading(false); alert(res.error||'삭제 실패'); }
+  else{ mealLoading(false); await mealAlert(res.error||'삭제 실패','삭제 실패'); }
 }
 async function admRestoreFile(){
   const f = document.getElementById('restoreFile').files[0];
-  if(!f){ alert('백업 파일을 선택해 주세요.'); return; }
+  if(!f){ await mealAlert('백업 파일을 선택해 주세요.','파일 선택'); return; }
   let snap;
   try{ snap = JSON.parse(await f.text()); }
-  catch(e){ alert('JSON 파일을 읽을 수 없어요.'); return; }
-  if(!snap || !snap.entries){ alert('매식비 백업 파일이 아닌 것 같아요.'); return; }
+  catch(e){ await mealAlert('JSON 파일을 읽을 수 없어요.','파일 읽기 실패'); return; }
+  if(!snap || !snap.entries){ await mealAlert('매식비 백업 파일이 아닌 것 같아요.','형식 오류'); return; }
   const c = snap.counts || {};
-  if(!confirm('이 파일로 복원할까요?\\n\\n팀 '+(c.teams||'?')+' · 팀원 '+(c.members||'?')+' · 내역 '+(c.entries||'?')+'\\n현재 데이터가 모두 교체됩니다.')) return;
+  if(!await mealConfirm('이 파일로 복원할까요?\\n\\n팀 '+(c.teams||'?')+' · 팀원 '+(c.members||'?')+' · 내역 '+(c.entries||'?')+'\\n현재 데이터가 모두 교체됩니다.','파일 복원')) return;
   mealLoading(true,'복원 중…');
   const res = await admApi('/meal/api/admin/restore-file',{snapshot:snap});
-  if(res.ok){ mealLoading(false); alert('복원이 완료됐어요.'); location.href='/meal'; }
-  else{ mealLoading(false); alert(res.error||'복원 실패'); }
+  if(res.ok){ mealLoading(false); await mealAlert('복원이 완료됐어요.','복원 완료'); location.href='/meal'; }
+  else{ mealLoading(false); await mealAlert(res.error||'복원 실패','복원 실패'); }
 }
 </script>
 </body></html>"""
@@ -11660,11 +11741,11 @@ MEAL_TEAM_HTML = """<!doctype html><html lang=ko><head><meta charset=utf-8>
 .cal td.weekend{background:#f0f2f6;border-color:#dfe3eb;cursor:not-allowed;}
 .cal td.weekend:active{background:#e8ebf1;transform:none;}
 .cal td.weekend .dn{color:#929aaa;}
-.cal td.weekend .daylocked{font-size:9px;line-height:1.35;color:#8992a3;font-weight:700;}
+.cal td.weekend .daylocked{display:none;}
 .cal td.weekend.has .chip{opacity:.75;}
 .cal td.holiday{background:#fff0f1;border-color:#f8ccd0;cursor:not-allowed;}
 .cal td.holiday:active{background:#ffe8eb;transform:none;}
-.cal td.holiday .dn,.cal td.holiday .daylocked{color:#ad3445;}
+.cal td.holiday .dn{color:#ad3445;}
 .cal td.holiday .holidayname{font-size:10px;color:#a52e41;font-weight:800;line-height:1.3;word-break:keep-all;}
 .cal td.holiday.has .chip{opacity:.75;}
 .cal td.today.holiday{background:#fff0f1;border-color:#f8ccd0;}
@@ -11793,7 +11874,7 @@ select{appearance:none;-webkit-appearance:none;
   <div class=tot><div class=lab>한도 마감 인원</div><div class=val>{{full_people}}명</div></div>
 </div>
 
-<div class=holiday-note>회색 🔒 주말 · 연분홍 🔒 공휴일은 입력할 수 없습니다.{% if holiday_status.error %} ⚠ 공휴일 최신정보를 확인하지 못했습니다. {% if not holiday_status.days %}자동 공휴일 차단이 완전하지 않을 수 있습니다.{% else %}이전에 저장한 공휴일 정보만 표시 중입니다.{% endif %}{% endif %}</div>
+<div class=holiday-note>회색 주말 · 연분홍 공휴일은 입력할 수 없습니다.{% if holiday_status.error %} ⚠ 공휴일 최신정보를 확인하지 못했습니다. {% if not holiday_status.days %}자동 공휴일 차단이 완전하지 않을 수 있습니다.{% else %}이전에 저장한 공휴일 정보만 표시 중입니다.{% endif %}{% endif %}</div>
 <div class=card style="padding:8px">
 <table class=cal>
   <tr>{% for w in weekdays %}<th class="{% if loop.index0==0 %}sun{% elif loop.index0==6 %}sat{% endif %}">{{w}}</th>{% endfor %}</tr>
@@ -11801,10 +11882,10 @@ select{appearance:none;-webkit-appearance:none;
   <tr>
     {% for c in week %}
       {% if c.in_month %}
-      <td class="{% if c.is_today %}today {% endif %}{% if c.is_weekend %}weekend {% endif %}{% if c.holiday_name %}holiday {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')" {% if c.holiday_name %}title="{{c.holiday_name}} · 입력 불가" aria-label="{{c.date_str}} {{c.holiday_name}} 입력 불가"{% elif c.is_weekend %}title="주말 · 입력 불가" aria-label="{{c.date_str}} 주말 입력 불가"{% endif %}>
+      <td class="{% if c.is_today %}today {% endif %}{% if c.is_weekend %}weekend {% endif %}{% if c.holiday_name %}holiday {% endif %}{% if c.entries %}has{% endif %}" onclick="openDay('{{c.date_str}}')" {% if c.holiday_name %}title="{{c.holiday_name}}" aria-label="{{c.date_str}} {{c.holiday_name}}"{% elif c.is_weekend %}title="주말" aria-label="{{c.date_str}} 주말"{% endif %}>
         <div class=cell>
           <span class=dn>{{c.day}}</span>
-          {% if c.holiday_name %}<span class=holidayname>{{c.holiday_name}}</span><span class=daylocked>🔒 입력 불가</span>{% elif c.is_weekend %}<span class=daylocked>🔒<br>입력 불가</span>{% endif %}
+          {% if c.holiday_name %}<span class=holidayname>{{c.holiday_name}}</span>{% endif %}
           {% if c.entries %}<span class=chip>{{c.entries|length}}명</span>{% endif %}
         </div>
       </td>
@@ -11934,18 +12015,18 @@ async function api(url, body){
   return r.json();
 }
 
-function openDay(ds){
+async function openDay(ds){
   if(HOLIDAY_DAYS[ds]){
-    alert(HOLIDAY_DAYS[ds]+' 공휴일에는 매식비를 입력하거나 수정할 수 없습니다.');return;
+    await mealAlert(HOLIDAY_DAYS[ds]+' 공휴일에는 매식비를 입력하거나 수정할 수 없습니다.','공휴일 안내');return;
   }
   const dayOfWeek = new Date(ds+'T12:00:00').getDay();
   if(dayOfWeek===0 || dayOfWeek===6){
-    alert('주말에는 매식비를 입력하거나 수정할 수 없습니다.\\n평일 날짜를 선택해 주세요.');return;
+    await mealAlert('주말에는 매식비를 입력하거나 수정할 수 없습니다.\\n평일 날짜를 선택해 주세요.','주말 안내');return;
   }
   // 한국 시간 기준으로 자정을 지난 직후에도 미래 날짜 선택을 막는다.
   const todayKst = new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
-  if(ds>todayKst){alert('미래 날짜에는 매식비를 입력할 수 없습니다.\\n오늘 또는 지난 날짜를 선택해 주세요.');return;}
-  if(!HAS_MEMBERS){alert('먼저 팀원을 추가해 주세요.');return;}
+  if(ds>todayKst){await mealAlert('미래 날짜에는 매식비를 입력할 수 없습니다.\\n오늘 또는 지난 날짜를 선택해 주세요.','미래 날짜 안내');return;}
+  if(!HAS_MEMBERS){await mealAlert('먼저 팀원을 추가해 주세요.','팀원 없음');return;}
   dayEditMode=false;
   curDate = ds;
   document.getElementById('modalDate').textContent = ds.replace(/-/g,'.');
@@ -12039,12 +12120,12 @@ function updateEntrySelCount(){
 }
 async function delSelectedEntries(){
   const checked=Array.from(document.querySelectorAll('#dayEntries .entrychk:checked'));
-  if(!checked.length){alert('삭제할 항목을 선택해 주세요.');return;}
-  if(!confirm(`선택한 ${checked.length}건을 삭제할까요?`))return;
+  if(!checked.length){await mealAlert('삭제할 항목을 선택해 주세요.','선택 필요');return;}
+  if(!await mealConfirm(`선택한 ${checked.length}건을 삭제할까요?`,'입력 내역 삭제'))return;
   mealLoading(true,'삭제 중…');
   const ids=checked.map(c=>parseInt(c.value,10));
   const res=await api('/meal/api/entry/delete-many',{entry_ids:ids});
-  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'삭제 실패');}
+  if(res.ok)location.reload(); else {mealLoading(false);await mealAlert(res.error||'삭제 실패','삭제 실패');}
 }
 
 function renderMemberChecks(){
@@ -12097,7 +12178,7 @@ async function saveEntry(){
     {team_id:TEAM_ID,member_ids:ids,date:curDate,restaurant:rest,approver:appr});
   if(res.ok){
     if(res.skipped && res.skipped.length){
-      alert('추가: '+res.added.join(', ')+'\\n제외: '+res.skipped.join(', '));
+      mealLoading(false); await mealAlert('추가: '+res.added.join(', ')+'\\n제외: '+res.skipped.join(', '),'입력 결과');
     }
     location.reload();
   }else{
@@ -12106,7 +12187,7 @@ async function saveEntry(){
   }
 }
 async function delEntry(id){
-  if(!confirm('이 입력을 삭제할까요?'))return;
+  if(!await mealConfirm('이 입력을 삭제할까요?','입력 삭제'))return;
   mealLoading(true,'삭제 중…');
   const res = await api('/meal/api/entry/delete',{entry_id:id});
   if(res.ok)location.reload(); else mealLoading(false);
@@ -12117,10 +12198,10 @@ async function addMember(){
   if(!name){inp.focus();return;}
   mealLoading(true,'추가 중…');
   const res = await api('/meal/api/member/add',{team_id:TEAM_ID,name:name});
-  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'추가 실패');}
+  if(res.ok)location.reload(); else {mealLoading(false);await mealAlert(res.error||'추가 실패','팀원 추가 실패');}
 }
 async function delMember(id,name){
-  if(!confirm(`'${name}' 팀원을 명단에서 삭제할까요?\n\n지금까지 입력한 식비 기록은 그대로 남고,\n팀원 선택 명단에서만 빠집니다.`))return;
+  if(!await mealConfirm(`'${name}' 팀원을 명단에서 삭제할까요?\n\n지금까지 입력한 식비 기록은 그대로 남고,\n팀원 선택 명단에서만 빠집니다.`,'팀원 삭제'))return;
   mealLoading(true,'삭제 중…');
   const res = await api('/meal/api/member/delete',{member_id:id});
   if(res.ok)location.reload(); else mealLoading(false);
@@ -12141,20 +12222,20 @@ function updateSelCount(){
 }
 async function delSelected(){
   const checked=Array.from(document.querySelectorAll('.memchk:checked'));
-  if(!checked.length){alert('삭제할 팀원을 선택해 주세요.');return;}
+  if(!checked.length){await mealAlert('삭제할 팀원을 선택해 주세요.','선택 필요');return;}
   const names=checked.map(c=>c.dataset.name).join(', ');
-  if(!confirm(`선택한 ${checked.length}명(${names})을 명단에서 삭제할까요?\n\n입력한 식비 기록은 그대로 남고, 팀원 명단에서만 빠집니다.`))return;
+  if(!await mealConfirm(`선택한 ${checked.length}명(${names})을 명단에서 삭제할까요?\n\n입력한 식비 기록은 그대로 남고, 팀원 명단에서만 빠집니다.`,'팀원 삭제'))return;
   mealLoading(true,'삭제 중…');
   const ids=checked.map(c=>parseInt(c.value,10));
   const res=await api('/meal/api/member/delete-many',{member_ids:ids});
-  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'삭제 실패');}
+  if(res.ok)location.reload(); else {mealLoading(false);await mealAlert(res.error||'삭제 실패','삭제 실패');}
 }
 async function renameTeam(){
-  const name = prompt('팀 이름', document.getElementById('teamTitle').textContent);
+  const name = await mealPrompt('변경할 팀 이름을 입력해 주세요.', document.getElementById('teamTitle').textContent, '팀 이름 변경', '팀 이름');
   if(!name||!name.trim())return;
   mealLoading(true,'변경 중…');
   const res = await api('/meal/api/team/rename',{team_id:TEAM_ID,name:name.trim()});
-  if(res.ok)location.reload(); else {mealLoading(false);alert(res.error||'변경 실패');}
+  if(res.ok)location.reload(); else {mealLoading(false);await mealAlert(res.error||'변경 실패','변경 실패');}
 }
 </script>
 """ + MEAL_LOADER_HTML + """
