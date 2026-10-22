@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify, render_template_string, Response, send_file, session
-
+from flask import Flask, request, jsonify, render_template_string, Response, send_file, session, redirect
+import functools
+from html import escape as html_escape
 import pandas as pd
 
 from flask_compress import Compress
@@ -39,7 +40,27 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
-
+def to_kst(value, naive_tz="UTC"):
+    """Supabase 시각 문자열 → 한국시간. 오프셋 없는 값은 naive_tz 기준으로 해석한다."""
+    if value is None or value == "":
+        return None
+    try:
+        ts = pd.Timestamp(value)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.tz_localize(naive_tz)
+    return ts.tz_convert("Asia/Seoul")
+def kst_iso(value):
+    ts = to_kst(value)
+    return ts.isoformat() if ts is not None else value
+def kst_fmt_series(series, fmt="%Y-%m-%d", naive_tz="UTC"):
+    def _f(v):
+        ts = to_kst(v, naive_tz)
+        return ts.strftime(fmt) if ts is not None else None
+    return series.apply(_f)
 from io import BytesIO
 
 
@@ -3620,23 +3641,17 @@ function submitAdminPw(){
 
 
 
-  if(input.value !== "qwer"){
-
-    if(msg){
-
-      msg.textContent = "암호가 틀렸습니다.";
-
-    }
-
+  fetch("/api/admin/login", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({password: input.value})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d && d.ok){ window.location.href = "/stats"; return; }
+    if(msg){ msg.textContent = "암호가 틀렸습니다."; }
     input.focus();
-
-    return;
-
-  }
-
-
-
-  window.location.href = "/stats";
+  }).catch(function(){
+    if(msg){ msg.textContent = "확인 중 오류가 발생했습니다."; }
+  });
 
 
 
@@ -6994,16 +7009,13 @@ async function submitComment(){
 
   try{
 
-    await fetch("/api/comments", {
-
+    const res = await fetch("/api/comments", {
       method:"POST",
-
       headers:{"Content-Type":"application/json"},
-
       body: JSON.stringify({spot_id: sid, content: content})
-
     });
-
+    const d = await res.json().catch(function(){ return {}; });
+    if(!d.ok){ alert("저장 실패"); return; }
     input.value = "";
 
     loadComments(sid);
@@ -7984,7 +7996,7 @@ display:none;align-items:center;justify-content:center;z-index:7000;">
 
   <div id="commentList" style="flex:1;overflow-y:auto;max-height:260px;margin-bottom:14px;border:1px solid #f1f5f9;border-radius:10px;padding:8px 10px;"></div>
 
-  <textarea id="commentInput" placeholder="이 지점에 대한 의견을 남겨주세요..." style="
+  <textarea id="commentInput" maxlength="500" placeholder="이 지점에 대한 의견을 남겨주세요..." style="
 
     width:100%;height:72px;border:1px solid #cbd5e1;border-radius:10px;
 
@@ -8348,11 +8360,12 @@ def post_rating():
 
     data = request.get_json() or {}
 
-    spot_id = str(data.get("spot_id", ""))
-
-    score = int(data.get("score", 0))
-
-    if not spot_id or score < 1 or score > 5 or not SUPABASE_URL or not SUPABASE_KEY:
+    spot_id = str(data.get("spot_id", "")).strip()
+    try:
+        score = int(data.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0
+    if not spot_id.isdigit() or score < 1 or score > 5 or not SUPABASE_URL or not SUPABASE_KEY:
 
         return jsonify({"ok": False})
 
@@ -8429,35 +8442,23 @@ def get_comments():
         )
 
         rows = r.json()
-
         if not isinstance(rows, list):
-
             return jsonify({"comments": []})
-
+        for row in rows:
+            row["created_at"] = kst_iso(row.get("created_at"))
         return jsonify({"comments": rows})
-
     except Exception as e:
-
         return jsonify({"comments": []})
-
-
-
-
-
 @app.route("/api/comments", methods=["POST"])
 
 def post_comment():
 
     data = request.get_json() or {}
 
-    spot_id = str(data.get("spot_id", ""))
-
+    spot_id = str(data.get("spot_id", "")).strip()
     content = str(data.get("content", "")).strip()
-
-    if not spot_id or not content or not SUPABASE_URL or not SUPABASE_KEY:
-
+    if not spot_id.isdigit() or not content or len(content) > 500 or not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"ok": False})
-
     try:
 
         headers = {
@@ -8472,17 +8473,12 @@ def post_comment():
 
         }
 
-        requests.post(
-
+        r = requests.post(
             f"{SUPABASE_URL}/rest/v1/spot_comments",
-
             headers=headers,
-
             json={"spot_id": spot_id, "content": content}
-
         )
-
-        return jsonify({"ok": True})
+        return jsonify({"ok": r.status_code < 300})
 
     except Exception as e:
 
@@ -8520,10 +8516,27 @@ def spot_location():
 
 
 
+# ===== 관리자 인증 (서버에서 확인) =====
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "qwer")
+def admin_required(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("safety_admin"):
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "error": "관리자 인증이 필요합니다."}), 401
+            return redirect("/")
+        return view(*args, **kwargs)
+    return wrapped
+@app.route("/api/admin/login", methods=["POST"])
+def admin_login():
+    data = request.get_json(silent=True) or {}
+    if str(data.get("password", "")) == ADMIN_PASSWORD:
+        session["safety_admin"] = True
+        return jsonify({"ok": True})
+    return jsonify({"ok": False}), 401
 # ===== 관리자: 코멘트 전체 조회 =====
-
 @app.route("/api/admin/comments", methods=["GET"])
-
+@admin_required
 def admin_get_comments():
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -8551,25 +8564,17 @@ def admin_get_comments():
         )
 
         rows = r.json()
-
         if not isinstance(rows, list):
-
             return jsonify({"comments": []})
-
+        for row in rows:
+            row["created_at"] = kst_iso(row.get("created_at"))
         return jsonify({"comments": rows})
-
     except Exception as e:
-
         return jsonify({"comments": []})
-
-
-
-
-
 # ===== 관리자: 코멘트 삭제 =====
 
 @app.route("/api/admin/comments/<int:comment_id>", methods=["DELETE"])
-
+@admin_required
 def admin_delete_comment(comment_id):
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -8609,7 +8614,7 @@ def admin_delete_comment(comment_id):
 # ===== 관리자: 별점 전체 조회 =====
 
 @app.route("/api/admin/ratings", methods=["GET"])
-
+@admin_required
 def admin_get_ratings():
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -8637,13 +8642,11 @@ def admin_get_ratings():
         )
 
         rows = r.json()
-
         if not isinstance(rows, list):
-
             return jsonify({"ratings": []})
-
+        for row in rows:
+            row["created_at"] = kst_iso(row.get("created_at"))
         return jsonify({"ratings": rows})
-
     except Exception as e:
 
         return jsonify({"ratings": []})
@@ -8655,7 +8658,7 @@ def admin_get_ratings():
 # ===== 관리자: 별점 삭제 =====
 
 @app.route("/api/admin/ratings/<int:rating_id>", methods=["DELETE"])
-
+@admin_required
 def admin_delete_rating(rating_id):
 
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -8693,6 +8696,7 @@ def admin_delete_rating(rating_id):
 
 
 @app.route("/stats")
+@admin_required
 def stats():
 
     try:
@@ -8739,10 +8743,7 @@ def stats():
                     if col not in df.columns:
                         df[col] = ""
 
-                df["day"] = pd.to_datetime(
-                    df["created_at"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
+                df["day"] = kst_fmt_series(df["created_at"])
 
                 df["day"] = df["day"].fillna("날짜없음")
 
@@ -8816,10 +8817,7 @@ def stats():
                     if "downloaded_at" not in dl_df.columns:
                         download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
                     else:
-                        dl_df["day"] = pd.to_datetime(
-                            dl_df["downloaded_at"],
-                            errors="coerce"
-                        ).dt.strftime("%Y-%m-%d")
+                        dl_df["day"] = kst_fmt_series(dl_df["downloaded_at"], naive_tz="Asia/Seoul")
 
                         dl_df["day"] = dl_df["day"].fillna("날짜없음")
 
@@ -9253,6 +9251,12 @@ def stats():
           render();
         }
 
+        function _esc(s){
+          return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch){
+            return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;';
+          });
+        }
+        function _sid(s){ return String(s == null ? '' : s).replace(/[^0-9]/g, ''); }
         async function loadAdminComments(){
           const res = await fetch('/api/admin/comments');
           const d = await res.json();
@@ -9264,13 +9268,13 @@ def stats():
           let html = '<div class="table-wrap"><table id="commentsTable"><thead><tr><th>ID</th><th>지점번호</th><th>내용</th><th>작성일시</th><th>삭제/이동</th></tr></thead><tbody>';
           d.comments.forEach(c=>{
             html += `<tr>
-              <td>${c.id}</td>
-              <td>${c.spot_id}</td>
-              <td style="max-width:300px;word-break:break-all;">${c.content}</td>
+              <td>${_esc(c.id)}</td>
+              <td>${_esc(c.spot_id)}</td>
+              <td style="max-width:300px;word-break:break-all;">${_esc(c.content)}</td>
               <td>${c.created_at ? c.created_at.slice(0,16).replace('T',' ') : ''}</td>
               <td style="white-space:nowrap;">
-                <button class="btn-del" onclick="deleteComment(${c.id}, this)">삭제</button>
-                <button class="btn-goto" onclick="gotoSpot('${c.spot_id}')">이동</button>
+                <button class="btn-del" onclick="deleteComment(${Number(c.id)}, this)">삭제</button>
+                <button class="btn-goto" onclick="gotoSpot('${_sid(c.spot_id)}')">이동</button>
               </td>
             </tr>`;
           });
@@ -9306,13 +9310,13 @@ def stats():
           d.ratings.forEach(r=>{
             const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
             html += `<tr>
-              <td>${r.id}</td>
-              <td>${r.spot_id}</td>
+              <td>${_esc(r.id)}</td>
+              <td>${_esc(r.spot_id)}</td>
               <td style="color:#f59e0b;font-weight:700;letter-spacing:1px;">${stars} (${r.score}점)</td>
               <td>${r.created_at ? r.created_at.slice(0,16).replace('T',' ') : ''}</td>
               <td style="white-space:nowrap;">
-                <button class="btn-del" onclick="deleteRating(${r.id}, this)">삭제</button>
-                <button class="btn-goto" onclick="gotoSpot('${r.spot_id}')">이동</button>
+                <button class="btn-del" onclick="deleteRating(${Number(r.id)}, this)">삭제</button>
+                <button class="btn-goto" onclick="gotoSpot('${_sid(r.spot_id)}')">이동</button>
               </td>
             </tr>`;
           });
@@ -9414,7 +9418,7 @@ def stats():
 
 
 @app.route("/stats_excel")
-
+@admin_required
 def stats_excel():
 
 
@@ -9477,23 +9481,8 @@ def stats_excel():
 
 
 
-        df["날짜"] = pd.to_datetime(
-
-            df["created_at"],
-
-            errors="coerce"
-
-        ).dt.strftime("%Y-%m-%d")
-
-
-
-        df["조회일시"] = pd.to_datetime(
-
-            df["created_at"],
-
-            errors="coerce"
-
-        ).dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["날짜"] = kst_fmt_series(df["created_at"])
+        df["조회일시"] = kst_fmt_series(df["created_at"], "%Y-%m-%d %H:%M:%S")
 
 
 
@@ -9711,10 +9700,7 @@ def stats_excel():
                     if "downloaded_at" not in dl_df.columns:
                         download_stats = pd.DataFrame(columns=["날짜", "다운로드 수"])
                     else:
-                        dl_df["day"] = pd.to_datetime(
-                            dl_df["downloaded_at"],
-                            errors="coerce"
-                        ).dt.strftime("%Y-%m-%d")
+                        dl_df["day"] = kst_fmt_series(dl_df["downloaded_at"], naive_tz="Asia/Seoul")
                         dl_df["day"] = dl_df["day"].fillna("날짜없음")
                         download_stats = (
                             dl_df.groupby("day", dropna=False)
@@ -9995,14 +9981,10 @@ def data_all():
 def sample_image():
 
     category = safe_str(request.args.get("category", "위험지역"))
-
     city = safe_str(request.args.get("city", ""))
-
     town = safe_str(request.args.get("town", ""))
-
-
-
     color = TYPE_COLORS.get(category, "#334155")
+    category, city, town = html_escape(category), html_escape(city), html_escape(town)
 
 
 
