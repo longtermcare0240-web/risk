@@ -7211,18 +7211,23 @@ function applyMapRotation(){
 
 /* ===== 시설 추가 정보 (화장실·주차장·AED·교통사고) ===== */
 function timeRangeOpen(s){
-  // "09:00~18:00" 같은 시간대가 지금 열려 있는지: true / false / null(판단 불가)
+  // "09:00~18:00" · "0900-1800" · "09:00∼18:00" · "9시~18시" 등이 지금 열려 있는지: true / false / null(판단 불가)
   if(!s) return null;
-  const t = String(s).replace(/\s/g, "");
-  if(/상시|24시간|연중무휴|0?0:00[~\-]24:00/.test(t)) return true;
-  const m = t.match(/(\d{1,2})(?::|시)(\d{2})?분?[~\-](\d{1,2})(?::|시)(\d{2})?/);
-  if(!m) return null;
-  const a = (+m[1]) * 60 + (+(m[2] || 0));
-  let b = (+m[3]) * 60 + (+(m[4] || 0));
-  if(b === 23 * 60 + 59) b = 24 * 60;          // 23:59 = 하루 끝까지
+  const t = String(s).replace(/\s/g, "").replace(/[∼～〜–—]/g, "~");
+  if(/상시|24시간|연중무휴|0?0:?00[~\-]24:?00/.test(t)) return true;
+  let m = t.match(/(\d{1,2}):?(\d{2})[~\-](\d{1,2}):?(\d{2})/);
+  if(!m){
+    const k = t.match(/(\d{1,2})시(?:(\d{1,2})분)?[~\-](\d{1,2})시(?:(\d{1,2})분)?/);
+    if(!k) return null;
+    m = [k[0], k[1], k[2] || "0", k[3], k[4] || "0"];
+  }
+  const a = (+m[1]) * 60 + (+m[2]);
+  let b = (+m[3]) * 60 + (+m[4]);
+  if(a > 24 * 60 || b > 24 * 60) return null;
+  if(b === 23 * 60 + 59) b = 24 * 60;            // 23:59 = 하루 끝까지
   const d = new Date();
   const n = d.getHours() * 60 + d.getMinutes();
-  if(a === b) return null;                       // 00:00~00:00 등은 24시간인지 미운영인지 알 수 없음
+  if(a === b) return null;                         // 00:00~00:00 등은 24시간인지 미운영인지 알 수 없음
   return a < b ? (n >= a && n < b) : (n >= a || n < b);   // 자정 넘는 시간대
 }
 // 예전 이름 호환
@@ -7868,20 +7873,58 @@ backdrop-filter:blur(4px);">
       <button onclick="findNearestFacility('자동심장충격기')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:12px;font-weight:700;color:#374151;cursor:pointer;line-height:1.2;text-align:center;padding:0 6px;"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;flex-shrink:0;"></span>자동심장충격기(AED)</button>
     </div>
     {% if detail_on %}
-    <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#334155;line-height:1.9;">
-      <div style="font-weight:800;color:#0f172a;">조건 (선택) — 체크 후 위 버튼을 누르세요</div>
-      <div><b style="color:#b45309;">화장실</b>&nbsp;
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletOpen"> 지금 개방</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletBell"> 비상벨</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletDis"> 장애인용</label></div>
-      <div><b style="color:#7c3aed;">주차장</b>&nbsp;
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabParkFree"> 무료만</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabParkOpen"> 지금 운영 중</label></div>
-      <div><b style="color:#16a34a;">AED</b>&nbsp;
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAedOpen"> 지금 사용 가능</label></div>
-      <div><b style="color:#dc2626;">위험지역</b>&nbsp;
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccWalk"> 보행자 사고</label>
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccNight"> 야간 사고</label></div>
+    <style>
+      .fcond{border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px 11px;background:#f8fafc;margin-bottom:8px;}
+      .fcond-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+      .fcond-title{font-size:13px;font-weight:800;color:#0f172a;}
+      .fcond-hint{font-size:11px;color:#94a3b8;white-space:nowrap;}
+      .fcond-row{display:flex;align-items:center;gap:4px;margin-top:7px;}
+      .fcond-chips{display:flex;flex-wrap:nowrap;gap:5px;flex:1;min-width:0;}
+      .fcond-label{width:58px;height:28px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#475569;}
+      .fcond-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+      .fchip input{position:absolute;opacity:0;pointer-events:none;}
+      .fchip span{display:inline-flex;align-items:center;height:28px;padding:0 9px;white-space:nowrap;border:1.5px solid #e2e8f0;border-radius:999px;background:#fff;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer;user-select:none;transition:background .15s,border-color .15s,color .15s;}
+      .fchip span:hover{border-color:#cbd5e1;}
+      .fchip input:checked + span{color:#fff;}
+      .fchip input:checked + span:before{content:"✓";margin-right:3px;font-weight:900;}
+      .fc-toilet input:checked + span{background:#f59e0b;border-color:#f59e0b;}
+      .fc-park input:checked + span{background:#8b5cf6;border-color:#8b5cf6;}
+      .fc-aed input:checked + span{background:#16a34a;border-color:#16a34a;}
+      .fc-acc input:checked + span{background:#ef4444;border-color:#ef4444;}
+    </style>
+    <div class="fcond">
+      <div class="fcond-head">
+        <span class="fcond-title">조건 고르기 <span style="font-weight:600;color:#94a3b8;">(선택)</span></span>
+        <span class="fcond-hint">고른 뒤 위 시설 버튼을 누르세요</span>
+      </div>
+      <div class="fcond-row">
+        <span class="fcond-label"><span class="fcond-dot" style="background:#f59e0b;"></span>화장실</span>
+        <div class="fcond-chips">
+          <label class="fchip fc-toilet"><input type="checkbox" id="fabToiletOpen"><span>개방 중</span></label>
+          <label class="fchip fc-toilet"><input type="checkbox" id="fabToiletBell"><span>비상벨</span></label>
+          <label class="fchip fc-toilet"><input type="checkbox" id="fabToiletDis"><span>장애인용</span></label>
+        </div>
+      </div>
+      <div class="fcond-row">
+        <span class="fcond-label"><span class="fcond-dot" style="background:#8b5cf6;"></span>주차장</span>
+        <div class="fcond-chips">
+          <label class="fchip fc-park"><input type="checkbox" id="fabParkFree"><span>무료</span></label>
+          <label class="fchip fc-park"><input type="checkbox" id="fabParkOpen"><span>운영 중</span></label>
+        </div>
+      </div>
+      <div class="fcond-row">
+        <span class="fcond-label"><span class="fcond-dot" style="background:#16a34a;"></span>AED</span>
+        <div class="fcond-chips">
+          <label class="fchip fc-aed"><input type="checkbox" id="fabAedOpen"><span>사용 가능</span></label>
+        </div>
+      </div>
+      <div class="fcond-row">
+        <span class="fcond-label"><span class="fcond-dot" style="background:#ef4444;"></span>위험지역</span>
+        <div class="fcond-chips">
+          <label class="fchip fc-acc"><input type="checkbox" id="fabAccWalk"><span>보행자 사고</span></label>
+          <label class="fchip fc-acc"><input type="checkbox" id="fabAccNight"><span>야간 사고</span></label>
+        </div>
+      </div>
     </div>
     {% endif %}
     <button onclick="closeFacilityFab()" style="width:100%;height:42px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
