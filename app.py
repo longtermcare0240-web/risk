@@ -1604,7 +1604,7 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 /* 모바일: 한 화면에 더 많이 */
 @media (max-width:600px){
   .sr-hero{padding:18px 18px 18px!important;border-radius:20px!important;margin-bottom:10px!important;}
-  .sr-hero-t{font-size:17px!important;line-height:1.42!important;padding-right:0!important;}
+  .sr-hero-t{font-size:clamp(14px, calc((100vw - 74px) / 17.5), 18px)!important;line-height:1.42!important;padding-right:0!important;white-space:nowrap;}
   .sr-hero-s{font-size:12.5px!important;margin-top:6px!important;padding-right:0!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .sr-hero-deco{width:64px!important;height:64px!important;right:-8px!important;bottom:-10px!important;}
   .sr-tiles{gap:8px!important;}
@@ -1730,7 +1730,7 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 {% if detail_on %}
       <!-- 새 디자인: 첫 문구 -->
       <div class="sr-hero">
-        <div class="sr-hero-t">출장 지역의 위험구간과 편의시설을 한눈에 확인합니다.</div>
+        <div class="sr-hero-t">출장 지역의 위험구간과 편의시설을<br>한눈에 확인합니다.</div>
         <div class="sr-hero-s">화장실, 주차장, AED, 결빙, 사고지역</div>
         <svg class="sr-hero-deco" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
       </div>
