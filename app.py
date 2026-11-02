@@ -8656,6 +8656,35 @@ backdrop-filter:blur(4px);">
   document.addEventListener("click", function(e){
     if(e.target.closest && e.target.closest(".sr-sel-hit")) setTimeout(function(){ if(anyOpen()) ensureGuard(); }, 0);
   }, true);
+
+  /* 모바일: 결과 목록은 지도가 열려 있을 때만 (검색이 늦게 끝나도 첫 화면에 목록이 남지 않게) */
+  function fixPanel(){
+    if(!isMobile()) return;
+    var panel = document.getElementById("mobileResultPanel");
+    if(panel && panel.style.display !== "none" && !shown("mobileMapPopup")) panel.style.display = "none";
+  }
+  function watchPanel(){
+    var panel = document.getElementById("mobileResultPanel");
+    if(!panel) return;
+    new MutationObserver(function(){ setTimeout(fixPanel, 0); }).observe(panel, {attributes: true, attributeFilter: ["style"]});
+    var mm = document.getElementById("mobileMapPopup");
+    if(mm) new MutationObserver(function(){ setTimeout(fixPanel, 0); }).observe(mm, {attributes: true, attributeFilter: ["style"]});
+  }
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchPanel); else watchPanel();
+  /* '홈으로'는 페이지를 다시 불러오지 않고 지도만 닫기 (뒤로가기 기록이 쌓여 예전 화면이 나오는 것 방지) */
+  var _goHome = window.goHome;
+  if(typeof _goHome === "function"){
+    window.goHome = function(){
+      if(isMobile() && shown("mobileMapPopup")){ closeMobileMap(); window.scrollTo(0, 0); return; }
+      return _goHome.apply(this, arguments);
+    };
+  }
+  /* 뒤로가기로 예전 화면이 캐시에서 돌아온 경우 열린 창 정리 */
+  window.addEventListener("pageshow", function(e){
+    if(!e.persisted) return;
+    LAYERS.slice().reverse().forEach(function(l){ try{ if(l.open()) l.close(); }catch(err){} });
+    fixPanel();
+  });
 })();
 </script>
 {% endif %}
