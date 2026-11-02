@@ -1597,6 +1597,28 @@ html,body{font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo','
 .mobile-result-item .mobile-result-distance{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0!important;}
 .mobile-result-item .mobile-result-distance:empty{display:none;}
 .mobile-result-header{border-bottom:none!important;}
+/* 모바일: 한 화면에 더 많이 */
+@media (max-width:600px){
+  .sr-hero{padding:18px 18px 18px!important;border-radius:20px!important;margin-bottom:10px!important;}
+  .sr-hero-t{font-size:17px!important;line-height:1.42!important;padding-right:0!important;}
+  .sr-hero-s{font-size:12.5px!important;margin-top:6px!important;padding-right:0!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .sr-hero-deco{width:64px!important;height:64px!important;right:-8px!important;bottom:-10px!important;}
+  .sr-tiles{gap:8px!important;}
+  .sr-tile{padding:11px 12px!important;gap:3px!important;border-radius:16px!important;min-width:0;}
+  .sr-ico{width:32px!important;height:32px!important;border-radius:10px!important;margin-bottom:3px!important;}
+  .sr-ico svg{width:18px;height:18px;}
+  .sr-t{font-size:14.5px!important;white-space:nowrap;}
+  .sr-s{font-size:11.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+  html body #categoryBox{gap:6px!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;}
+  html body #categoryBox .check-item{flex-direction:row!important;align-items:center!important;gap:7px!important;min-height:0!important;padding:11px 8px 11px 9px!important;border-radius:14px!important;font-size:13px!important;letter-spacing:-0.4px;}
+  html body #categoryBox .check-item .dot{width:22px!important;height:22px!important;flex:0 0 22px!important;border-radius:7px!important;}
+  html body #categoryBox .check-item .dot::after{width:7px;height:7px;margin:-3.5px;}
+  html body #categoryBox .check-item::after{display:none!important;}
+  html body #categoryBox .check-item:has(input:checked){border-width:2px!important;padding:10px 7px 10px 8px!important;}
+  html body #categoryBox .check-item:has(input:checked) > span:last-child{color:#1d4ed8;}
+  html body #categoryBox .check-item > span:last-child{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  html body #categoryBox .check-item > span:last-child span{display:none!important;}
+}
 /* 구분: 2x2 카드 */
 #categoryBox{display:grid!important;grid-template-columns:1fr 1fr;gap:8px;}
 #categoryBox .check-item{position:relative;display:flex!important;flex-direction:column;align-items:flex-start;gap:10px;min-height:88px;padding:14px!important;border:1.5px solid #e8ebf0!important;border-radius:16px!important;background:#fff;cursor:pointer;font-size:14px!important;font-weight:800;color:#111827;line-height:1.3;transition:border-color .15s,background .15s;}
@@ -1704,7 +1726,7 @@ html,body{font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo','
       <!-- 새 디자인: 첫 문구 -->
       <div class="sr-hero">
         <div class="sr-hero-t">출장 지역의 위험구간과 편의시설을 한눈에 확인합니다.</div>
-        <div class="sr-hero-s">화장실 · 주차장 · AED · 결빙 · 교통사고 지역 확인</div>
+        <div class="sr-hero-s">화장실, 주차장, 결빙, 사고지역 등</div>
         <svg class="sr-hero-deco" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
       </div>
       <!-- 새 디자인: 빠른 찾기 (순서는 기존과 같음) -->
@@ -5847,7 +5869,7 @@ function activateIme(inputId){
   function adjustPopupForKeyboard(){
     var kb = window.innerHeight - vv.height - vv.offsetTop;
     var shift = (kb > 80) ? -Math.round(kb/2) : 0;
-    ["routePopup","addrSearchPopup"].forEach(function(id){
+    ["routePopup","addrSearchPopup"].concat(window.FEATURE_DETAIL ? ["adminPwModal"] : []).forEach(function(id){
       var p = document.getElementById(id);
       if(!p || getComputedStyle(p).display === "none") return;
       var card = p.firstElementChild;
