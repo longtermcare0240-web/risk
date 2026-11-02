@@ -7876,11 +7876,11 @@ backdrop-filter:blur(4px);">
     <style>
       .fcond{border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px 11px;background:#f8fafc;margin-bottom:8px;}
       .fcond-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
-      .fcond-title{font-size:13px;font-weight:800;color:#0f172a;}
-      .fcond-hint{font-size:11px;color:#94a3b8;white-space:nowrap;}
+      .fcond-title{font-size:13px;font-weight:800;color:#0f172a;white-space:nowrap;flex-shrink:0;}
+      .fcond-hint{font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
       .fcond-row{display:flex;align-items:center;gap:4px;margin-top:7px;}
       .fcond-chips{display:flex;flex-wrap:nowrap;gap:5px;flex:1;min-width:0;}
-      .fcond-label{width:58px;height:28px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#475569;}
+      .fcond-label{width:66px;height:28px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#475569;}
       .fcond-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
       .fchip input{position:absolute;opacity:0;pointer-events:none;}
       .fchip span{display:inline-flex;align-items:center;height:28px;padding:0 9px;white-space:nowrap;border:1.5px solid #e2e8f0;border-radius:999px;background:#fff;font-size:11.5px;font-weight:600;color:#475569;cursor:pointer;user-select:none;transition:background .15s,border-color .15s,color .15s;}
@@ -7895,7 +7895,7 @@ backdrop-filter:blur(4px);">
     <div class="fcond">
       <div class="fcond-head">
         <span class="fcond-title">조건 고르기 <span style="font-weight:600;color:#94a3b8;">(선택)</span></span>
-        <span class="fcond-hint">고른 뒤 위 시설 버튼을 누르세요</span>
+        <span class="fcond-hint">고른 뒤 시설 버튼 누르기</span>
       </div>
       <div class="fcond-row">
         <span class="fcond-label"><span class="fcond-dot" style="background:#f59e0b;"></span>화장실</span>
@@ -9503,29 +9503,6 @@ def stats():
         <a class="btn" href="/">돌아가기</a>
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
-        <style>
-        .ft-card{background:#fff;border-radius:14px;padding:14px 18px;margin:16px 0;box-shadow:0 1px 4px rgba(0,0,0,.08);max-width:620px;}
-        .ft-switch{position:relative;display:inline-block;width:56px;height:30px;vertical-align:middle;}
-        .ft-switch input{opacity:0;width:0;height:0;}
-        .ft-slider{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.2s;cursor:pointer;}
-        .ft-slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
-        .ft-switch input:checked + .ft-slider{background:#22c55e;}
-        .ft-switch input:checked + .ft-slider:before{transform:translateX(26px);}
-        .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
-        </style>
-        <div class="ft-card">
-          <div style="font-size:16px;font-weight:800;margin-bottom:10px;">시설 상세정보 기능</div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <b>지도에 적용</b>
-            <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
-            <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
-          </div>
-          <div style="font-size:12px;color:#64748b;margin-top:8px;line-height:1.5;">
-            ON 하면 팝업에 화장실 개방시간·비상벨·장애인용, 주차장 요금·운영시간, AED 설치위치·사용시간, 교통사고 건수가 나오고
-            '내 주변 찾기'에 조건 체크가 생깁니다. OFF 하면 예전 화면으로 돌아갑니다. (적용까지 최대 30초)
-          </div>
-        </div>
-
         <div class="page-nav">
           <button class="page-btn active" data-page="0" onclick="goToPage(0)">0.방문자</button>
           <button class="page-btn" data-page="1" onclick="goToPage(1)">1.지역</button>
@@ -9581,6 +9558,25 @@ def stats():
           <h3>📥 날짜별 앱 다운로드 수</h3>
           <div class="table-wrap">{{ download_table|safe }}</div>
           <div class="pg-controls" id="pg-downloadTable"></div>
+        </div>
+
+        <style>
+        .ft-card{background:#fff;border-radius:14px;padding:14px 18px;margin:28px 0 16px;box-shadow:0 1px 4px rgba(0,0,0,.08);max-width:620px;}
+        .ft-switch{position:relative;display:inline-block;width:56px;height:30px;vertical-align:middle;}
+        .ft-switch input{opacity:0;width:0;height:0;}
+        .ft-slider{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.2s;cursor:pointer;}
+        .ft-slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+        .ft-switch input:checked + .ft-slider{background:#22c55e;}
+        .ft-switch input:checked + .ft-slider:before{transform:translateX(26px);}
+        .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
+        </style>
+        <div class="ft-card">
+          <div style="font-size:16px;font-weight:800;margin-bottom:10px;">시설 상세정보 기능</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <b>지도에 적용</b>
+            <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
+            <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
+          </div>
         </div>
 
         <script>
