@@ -2720,7 +2720,7 @@ function srTrimList(){
     if(!note){ note = document.createElement("small"); note.className = "sr-trim"; host.appendChild(note); }
     const r = window.srRef;
     const base = r ? (r.kind === "route" ? "출발지 기준 " : "주소 기준 ") : (window.srHasDist ? "내 위치 기준 " : "");
-    note.textContent = " · " + base + SR_LIST_MAX + "곳 표시";
+    note.textContent = " · 목록은 " + base + SR_LIST_MAX + "곳";
   } else if(note && total) { note.remove(); }
 }
 function srApplyDistances(lat, lng){
@@ -6941,7 +6941,6 @@ async function runAddressSearch(){
 
 
 
-  if(window.FEATURE_DETAIL && filtered.length > 30){ window.srCutFrom = filtered.length; filtered.splice(30); }
   if(filtered.length===0){
 
     closeMsg(); showMsg("5km 이내에 위험지역이 없습니다."); return;
@@ -8641,7 +8640,7 @@ backdrop-filter:blur(4px);">
     addChips("routePopup", "route");
     addChips("addrSearchPopup", "addr");
     var sub = document.querySelector("#addrSearchPopup > div > div:first-child > div:last-child");
-    if(sub) sub.textContent = "주소 5km 안에서 가까운 30곳을 보여줘요";
+    if(sub) sub.textContent = "주소 5km 안을 지도에, 가까운 30곳을 목록에 보여줘요";
   }
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 
