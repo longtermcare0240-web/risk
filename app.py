@@ -2729,6 +2729,15 @@ document.addEventListener("DOMContentLoaded", function(){
   let t = null;
   new MutationObserver(function(){ clearTimeout(t); t = setTimeout(srEnhanceList, 30); }).observe(list, {childList:true});
 });
+function srCatOk(item, which){
+  if(!window.FEATURE_DETAIL) return true;
+  const box = document.getElementById("srPcat_" + which);
+  if(!box) return true;
+  const on = Array.from(box.querySelectorAll("input:checked")).map(i => i.value);
+  if(!on.length) return true;
+  const g = item.구분;
+  return on.some(v => v === g || (v === "주차장" && (g === "공영주차장" || g === "민영주차장")));
+}
 function closeMsg(){
   const _lx2 = document.getElementById("msgBox"); if(_lx2) _lx2.classList.remove("sr-loading");
   const _h = document.getElementById("srMsgHead");
@@ -6533,7 +6542,7 @@ data.forEach(item=>{
 
   
 
-  if(dist <= radius){
+  if(dist <= radius && srCatOk(item, "route")){
 
     filtered.push(item);
 
@@ -6886,7 +6895,7 @@ async function runAddressSearch(){
   if(window.FEATURE_DETAIL) window.srRef = {lat: lat, lng: lng};
   const filtered = data.filter(item => {
 
-    return calcDistance(lat, lng, item.위도, item.경도) <= radius;
+    return calcDistance(lat, lng, item.위도, item.경도) <= radius && srCatOk(item, "addr");
 
   }).sort((a,b) =>
 
@@ -6896,6 +6905,7 @@ async function runAddressSearch(){
 
 
 
+  if(window.FEATURE_DETAIL && filtered.length > 50) filtered.splice(50);
   if(filtered.length===0){
 
     closeMsg(); showMsg("5km 이내에 위험지역이 없습니다."); return;
@@ -8562,6 +8572,87 @@ backdrop-filter:blur(4px);">
   wrap("runAddressSearch", "search", true);
   wrap("runRouteSearch", "search", true);
   ["findNearestFacility", "findNearestToilet", "findNearestDanger", "loadData"].forEach(function(n){ wrap(n, "me", false); });
+})();
+</script>
+{% endif %}
+{% if detail_on %}
+<style>
+.sr-pcat{margin:2px 0 12px;}
+.sr-pcat-t{font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;}
+.sr-pcat-row{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.sr-pcat label{position:relative;display:flex;align-items:center;gap:7px;height:38px;padding:0 10px;border:1.5px solid #e5e7eb;border-radius:11px;background:#fff;font-size:13px;font-weight:700;color:#9ca3af;cursor:pointer;user-select:none;transition:border-color .15s,background .15s,color .15s;}
+.sr-pcat label input{position:absolute;opacity:0;pointer-events:none;}
+.sr-pcat label i{width:9px;height:9px;border-radius:50%;flex-shrink:0;opacity:.35;}
+.sr-pcat label:has(input:checked){border-color:#bfd2fb;background:#f5f8ff;color:#111827;}
+.sr-pcat label:has(input:checked) i{opacity:1;}
+</style>
+<script>
+(function(){
+  var CATS = [["상습결빙지역","결빙","#06b6d4"],["공중화장실","화장실","#f59e0b"],["교통사고위험지역","교통사고","#ef4444"],["주차장","주차장","#8b5cf6"]];
+  function addChips(popupId, which){
+    var pop = document.getElementById(popupId); if(!pop) return;
+    var body = pop.firstElementChild && pop.firstElementChild.children[1]; if(!body) return;
+    var btnRow = body.lastElementChild;
+    var box = document.createElement("div");
+    box.className = "sr-pcat"; box.id = "srPcat_" + which;
+    box.innerHTML = '<div class="sr-pcat-t">찾을 구분</div><div class="sr-pcat-row">' +
+      CATS.map(function(c){ return '<label><input type="checkbox" value="' + c[0] + '" checked><i style="background:' + c[2] + '"></i>' + c[1] + '</label>'; }).join('') + '</div>';
+    body.insertBefore(box, btnRow);
+  }
+  function init(){
+    addChips("routePopup", "route");
+    addChips("addrSearchPopup", "addr");
+    var sub = document.querySelector("#addrSearchPopup > div > div:first-child > div:last-child");
+    if(sub) sub.textContent = "주소 5km 안에서 가까운 50곳을 보여줘요";
+  }
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+
+  /* 뒤로가기: 열린 팝업만 닫기 (사이트를 떠나지 않게) */
+  function shown(id){ var e = document.getElementById(id); return !!(e && getComputedStyle(e).display !== "none"); }
+  var LAYERS = [
+    {open: function(){ return !!document.querySelector(".sr-sheet.open"); }, close: function(){ var e = document.querySelector(".sr-sheet.open"); if(e) e.click(); }},
+    {open: function(){ return shown("facilityFabMenu"); }, close: function(){ closeFacilityFab(); }},
+    {open: function(){ return shown("routePopup"); },      close: function(){ closeRoutePopup(); }},
+    {open: function(){ return shown("addrSearchPopup"); }, close: function(){ closeAddressSearch(); }},
+    {open: function(){ return shown("adminPwModal"); },    close: function(){ closeAdminPwModal(); }},
+    {open: function(){ return shown("msgModal"); },        close: function(){ closeMsg(); }},
+    {open: function(){ return shown("mobileMapPopup"); },  close: function(){ closeMobileMap(); }}
+  ];
+  function anyOpen(){ return LAYERS.some(function(l){ try{ return l.open(); }catch(e){ return false; } }); }
+  var guard = false, skip = false, closing = false;
+  function ensureGuard(){
+    if(guard) return;
+    try{ history.pushState({srGuard: 1}, ""); guard = true; }catch(e){}
+  }
+  function afterClose(){
+    if(closing) return;
+    setTimeout(function(){
+      if(guard && !anyOpen()){ guard = false; skip = true; history.back(); }
+    }, 60);
+  }
+  window.addEventListener("popstate", function(){
+    if(skip){ skip = false; return; }
+    guard = false;
+    for(var i = 0; i < LAYERS.length; i++){
+      var l = LAYERS[i], isOpen = false;
+      try{ isOpen = l.open(); }catch(e){}
+      if(isOpen){ closing = true; try{ l.close(); }catch(e){} closing = false; break; }
+    }
+    if(anyOpen()) ensureGuard();
+  });
+  function wrapOpen(name){
+    var f = window[name]; if(typeof f !== "function") return;
+    window[name] = function(){ var r = f.apply(this, arguments); setTimeout(function(){ if(anyOpen()) ensureGuard(); }, 0); return r; };
+  }
+  function wrapClose(name){
+    var f = window[name]; if(typeof f !== "function") return;
+    window[name] = function(){ var r = f.apply(this, arguments); afterClose(); return r; };
+  }
+  ["openRouteSearch", "openAddressSearch", "toggleFacilityFab", "openAdminStats", "openMobileMap", "showMsg", "showLoadingLocation"].forEach(wrapOpen);
+  ["closeRoutePopup", "closeAddressSearch", "closeFacilityFab", "closeAdminPwModal", "closeMobileMap", "closeMsg"].forEach(wrapClose);
+  document.addEventListener("click", function(e){
+    if(e.target.closest && e.target.closest(".sr-sel-hit")) setTimeout(function(){ if(anyOpen()) ensureGuard(); }, 0);
+  }, true);
 })();
 </script>
 {% endif %}
