@@ -565,7 +565,17 @@ def load_df():
 
 
 
-    for col in ["구분", "시도", "시군구", "주소", "읍면동", "사고설명", "날짜", "사진URL"]:
+    # 항목별 추가 정보 열 (갱신 프로그램이 넣음, 예전 엑셀이면 빈 값)
+
+    for _c in EXTRA_INFO_COLS:
+
+        if _c not in df.columns:
+
+            df[_c] = ""
+
+
+
+    for col in ["구분", "시도", "시군구", "주소", "읍면동", "사고설명", "날짜", "사진URL"] + EXTRA_INFO_COLS:
 
         df[col] = df[col].apply(safe_str)
 
@@ -592,6 +602,16 @@ def load_df():
     DATA_CACHE = df
 
     return DATA_CACHE
+
+
+
+
+
+# 항목별로 앱에 보내는 추가 정보 (팝업·내 주변 찾기 조건용)
+
+EXTRA_INFO = {'공중화장실': ['개방시간', '비상벨', '장애인화장실'], '공영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '민영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '자동심장충격기': ['설치장소', '사용시간', '일요일사용'], '교통사고위험지역': ['사고건수', '보행자사고', '야간사고', '중상이상']}
+
+EXTRA_INFO_COLS = ['개방시간', '비상벨', '장애인화장실', '요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '설치장소', '사용시간', '일요일사용', '사고건수', '보행자사고', '야간사고', '중상이상']
 
 
 
@@ -627,7 +647,7 @@ def row_to_dict(row):
 
 
 
-    return {
+    d = {
 
         "시도": province,
 
@@ -654,6 +674,18 @@ def row_to_dict(row):
         "마커색상": TYPE_COLORS.get(category, "#334155"),
 
     }
+
+    # 항목별 추가 정보는 값이 있는 것만 보냄 (전송량 절약)
+
+    for _c in EXTRA_INFO.get(category, []):
+
+        _v = re.sub(r"\.0$", "", safe_str(row.get(_c, "")))   # 엑셀이 3 → 3.0 으로 읽는 것 정리
+
+        if _v and _v != "0":
+
+            d[_c] = _v
+
+    return d
 
 
 
@@ -2559,6 +2591,8 @@ function buildPopupHtml(item){
 
   </div>
 
+  ${facilityInfoHtml(item)}
+
 
 
   <!-- 별점 UI: 평가하기 버튼 -->
@@ -4377,6 +4411,7 @@ const data = ALL_DATA_CACHE;
 
 
     if(!catMatch(item.구분, targetType)) return;
+    if(!facilityFilterPass(item, targetType)) return;
 
 
 
@@ -4420,7 +4455,11 @@ const data = ALL_DATA_CACHE;
 
     closeMsg();   // ⭐ 추가
 
-    showMsg("주변에 데이터가 없습니다.");
+    if(facilityFilterActive(targetType)){
+      showMsg("조건에 맞는 곳이 주변 5km 안에 없습니다.\n(정보가 없는 곳은 조건 검색에서 빠집니다)");
+    } else {
+      showMsg("주변에 데이터가 없습니다.");
+    }
 
 
 
@@ -6795,11 +6834,11 @@ async function loadRating(sid){
 
   try{
 
-    const res = await fetch("/api/rating?spot_id="+encodeURIComponent(sid));
+    const res = await fetch("/api/rating?"+spotQuery(sid));
 
     const d = await res.json();
 
-    const myScore = parseInt(localStorage.getItem("rating_"+sid)||"0");
+    const myScore = parseInt(localStorage.getItem(spotKey(sid))||"0");
 
     renderStars(sid, myScore, d.avg||0, d.count||0);
 
@@ -6821,7 +6860,7 @@ function openRatingModal(sid){
 
   _ratingModalSid = sid;
 
-  _ratingSelected = parseInt(localStorage.getItem("rating_"+sid)||"0");
+  _ratingSelected = parseInt(localStorage.getItem(spotKey(sid))||"0");
 
   renderRatingStars(_ratingSelected);
 
@@ -6893,7 +6932,7 @@ async function submitRating(){
 
       headers:{"Content-Type":"application/json"},
 
-      body: JSON.stringify({spot_id: sid, score: score})
+      body: JSON.stringify(Object.assign(spotBody(sid), {score: score}))
 
     });
 
@@ -6901,7 +6940,7 @@ async function submitRating(){
 
     if(d.ok){
 
-      localStorage.setItem("rating_"+sid, score);
+      localStorage.setItem(spotKey(sid), score);
 
       await loadRating(sid);
 
@@ -6959,7 +6998,7 @@ async function loadComments(sid){
 
   try{
 
-    const res = await fetch("/api/comments?spot_id="+encodeURIComponent(sid));
+    const res = await fetch("/api/comments?"+spotQuery(sid));
 
     const d = await res.json();
 
@@ -7012,7 +7051,7 @@ async function submitComment(){
     const res = await fetch("/api/comments", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({spot_id: sid, content: content})
+      body: JSON.stringify(Object.assign(spotBody(sid), {content: content}))
     });
     const d = await res.json().catch(function(){ return {}; });
     if(!d.ok){ alert("저장 실패"); return; }
@@ -7168,6 +7207,155 @@ function applyMapRotation(){
 
 
 
+/* ===== 시설 추가 정보 (화장실·주차장·AED·교통사고) ===== */
+function timeRangeOpen(s){
+  // "09:00~18:00" 같은 시간대가 지금 열려 있는지: true / false / null(판단 불가)
+  if(!s) return null;
+  const t = String(s).replace(/\s/g, "");
+  if(/상시|24시간|연중무휴|0?0:00[~\-]24:00/.test(t)) return true;
+  const m = t.match(/(\d{1,2})(?::|시)(\d{2})?분?[~\-](\d{1,2})(?::|시)(\d{2})?/);
+  if(!m) return null;
+  const a = (+m[1]) * 60 + (+(m[2] || 0));
+  let b = (+m[3]) * 60 + (+(m[4] || 0));
+  if(b === 23 * 60 + 59) b = 24 * 60;          // 23:59 = 하루 끝까지
+  const d = new Date();
+  const n = d.getHours() * 60 + d.getMinutes();
+  if(a === b) return null;                       // 00:00~00:00 등은 24시간인지 미운영인지 알 수 없음
+  return a < b ? (n >= a && n < b) : (n >= a || n < b);   // 자정 넘는 시간대
+}
+// 예전 이름 호환
+function toiletOpenState(s){ return timeRangeOpen(s); }
+
+function openBadge(st){
+  if(st === true) return '<span style="background:#dcfce7;color:#166534;border-radius:6px;padding:1px 6px;font-weight:700;margin-left:4px;">지금 이용 가능</span>';
+  if(st === false) return '<span style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:1px 6px;font-weight:700;margin-left:4px;">지금 이용 불가</span>';
+  return "";
+}
+
+/* 주차장: 오늘 요일에 맞는 운영시간 (일요일=공휴일 시간 사용, 법정공휴일은 구분 못 함) */
+function parkingTodayRange(item){
+  const day = new Date().getDay();   // 0=일
+  if(day === 0) return item.운영공휴일 || "";
+  if(day === 6) return item.운영토요일 || "";
+  return item.운영평일 || "";
+}
+
+/* AED: 오늘 사용시간 (사용시간 = 월~일 7칸, 일요일사용 = 1~5주 Y/N) */
+function aedTodayRange(item){
+  const parts = String(item.사용시간 || "").split(",");
+  if(parts.length < 7) return "";
+  const day = new Date().getDay();
+  const idx = day === 0 ? 6 : day - 1;
+  return parts[idx] || "";
+}
+function aedOpenNow(item){
+  const day = new Date().getDay();
+  if(day === 0 && item.일요일사용){
+    const w = Math.ceil(new Date().getDate() / 7);   // 몇째 일요일
+    const flag = String(item.일요일사용).charAt(w - 1);
+    if(flag === "N") return false;
+  }
+  return timeRangeOpen(aedTodayRange(item));
+}
+
+function infoLine(html){
+  return `<div class="popup-meta" style="margin-top:2px;">${html}</div>`;
+}
+
+function facilityInfoHtml(item){
+  const g = item.구분;
+  if(g === "공중화장실"){
+    const hr = item.개방시간 || "";
+    const bell = item.비상벨 === "Y" ? "🔔 비상벨 있음" : item.비상벨 === "N" ? "비상벨 없음" : "비상벨 정보 없음";
+    const dis = item.장애인화장실 === "Y" ? " · ♿ 장애인 화장실 있음" : item.장애인화장실 === "N" ? " · 장애인 화장실 없음" : "";
+    return infoLine(`개방시간: ${hr ? escapeHtml(hr) : "정보 없음"}${openBadge(timeRangeOpen(hr))}<br>${bell}${dis}`);
+  }
+  if(g === "공영주차장" || g === "민영주차장"){
+    if(!item.요금 && !item.운영평일 && !item.운영토요일 && !item.운영공휴일) return "";
+    const fee = item.요금 ? escapeHtml(item.요금) + (item.요금상세 ? ` (${escapeHtml(item.요금상세)})` : "") : "요금 정보 없음";
+    const today = parkingTodayRange(item);
+    const rows = [];
+    if(item.운영평일) rows.push("평일 " + escapeHtml(item.운영평일));
+    if(item.운영토요일) rows.push("토 " + escapeHtml(item.운영토요일));
+    if(item.운영공휴일) rows.push("일·공휴일 " + escapeHtml(item.운영공휴일));
+    return infoLine(`요금: ${fee}<br>운영: ${rows.length ? rows.join(" · ") : "정보 없음"}${openBadge(timeRangeOpen(today))}`);
+  }
+  if(g === "자동심장충격기"){
+    if(!item.설치장소 && !item.사용시간) return "";
+    const place = item.설치장소 ? "설치 위치: " + escapeHtml(item.설치장소) : "";
+    const today = aedTodayRange(item);
+    const use = item.사용시간 ? `오늘 사용시간: ${today ? escapeHtml(today) : "정보 없음"}${openBadge(aedOpenNow(item))}` : "";
+    return infoLine([place, use].filter(Boolean).join("<br>"));
+  }
+  if(g === "교통사고위험지역"){
+    const n = +item.사고건수 || 0;
+    if(!n) return "";
+    const tags = [];
+    if(+item.보행자사고) tags.push(`🚶 보행자 ${+item.보행자사고}`);
+    if(+item.야간사고) tags.push(`🌙 야간 ${+item.야간사고}`);
+    if(+item.중상이상) tags.push(`중상 이상 ${+item.중상이상}`);
+    return infoLine(`사고 ${n}건${tags.length ? " (" + tags.join(" · ") + ")" : ""}`);
+  }
+  return "";
+}
+
+/* 내 주변 찾기 조건 */
+function fchk(id){
+  const el = document.getElementById(id);
+  return !!(el && el.checked);
+}
+
+function facilityFilterActive(targetType){
+  if(targetType === "공중화장실") return fchk("fabToiletOpen") || fchk("fabToiletBell") || fchk("fabToiletDis");
+  if(targetType === "주차장") return fchk("fabParkFree") || fchk("fabParkOpen");
+  if(targetType === "자동심장충격기") return fchk("fabAedOpen");
+  if(targetType === "위험지역") return fchk("fabAccWalk") || fchk("fabAccNight");
+  return false;
+}
+// 예전 이름 호환
+function toiletFilterActive(){ return facilityFilterActive("공중화장실"); }
+
+function facilityFilterPass(item, targetType){
+  const g = item.구분;
+  if(targetType === "공중화장실"){
+    if(fchk("fabToiletOpen") && timeRangeOpen(item.개방시간) !== true) return false;
+    if(fchk("fabToiletBell") && item.비상벨 !== "Y") return false;
+    if(fchk("fabToiletDis") && item.장애인화장실 !== "Y") return false;
+  }
+  if(targetType === "주차장"){
+    if(fchk("fabParkFree") && item.요금 !== "무료") return false;
+    if(fchk("fabParkOpen") && timeRangeOpen(parkingTodayRange(item)) !== true) return false;
+  }
+  if(targetType === "자동심장충격기"){
+    if(fchk("fabAedOpen") && aedOpenNow(item) !== true) return false;
+  }
+  if(targetType === "위험지역" && (fchk("fabAccWalk") || fchk("fabAccNight"))){
+    if(g !== "교통사고위험지역") return false;          // 조건은 교통사고 지점에만 해당
+    if(fchk("fabAccWalk") && !(+item.보행자사고 > 0)) return false;
+    if(fchk("fabAccNight") && !(+item.야간사고 > 0)) return false;
+  }
+  return true;
+}
+// 예전 이름 호환
+function toiletFilterPass(item){ return facilityFilterPass(item, "공중화장실"); }
+
+/* ===== 별점·코멘트 장소 식별 (구분 + 좌표) ===== */
+function spotQuery(sid){
+  const it = (window._popupItems || {})[sid];
+  let q = "spot_id=" + encodeURIComponent(sid);
+  if(it) q += "&gubun=" + encodeURIComponent(it.구분) + "&lat=" + it.위도 + "&lng=" + it.경도;
+  return q;
+}
+function spotBody(sid){
+  const it = (window._popupItems || {})[sid];
+  return it ? {spot_id: sid, gubun: it.구분, lat: it.위도, lng: it.경도} : {spot_id: sid};
+}
+function spotKey(sid){
+  // 내가 준 별점 기억용 (순번이 바뀌어도 유지되도록 좌표 기준)
+  const it = (window._popupItems || {})[sid];
+  return it ? "rating_" + it.구분 + "_" + Number(it.위도).toFixed(4) + "_" + Number(it.경도).toFixed(4) : "rating_" + sid;
+}
+
 function debounce(fn, delay){
 
 
@@ -7228,7 +7416,14 @@ window.addEventListener("load", function(){
 
       }
 
-      const found = ALL_DATA_CACHE.find(d => String(d.순번) === String(gotoSpot));
+      // 순번은 엑셀 갱신 때 바뀌므로 좌표로 가장 가까운 장소(30m 이내)를 찾음
+      let found = null, best = 30;
+      const gotoGubun = params.get("gubun") || "";
+      ALL_DATA_CACHE.forEach(d => {
+        if(gotoGubun && d.구분 !== gotoGubun) return;   // 같은 좌표에 여러 시설이 있을 때 구분으로 가림
+        const dist = map.distance([gotoLat, gotoLng], [d.위도, d.경도]);
+        if(dist <= best){ best = dist; found = d; }
+      });
 
       if(!found){
 
@@ -7259,7 +7454,7 @@ window.addEventListener("load", function(){
 
             layer.getAllChildMarkers().forEach(function(child){
 
-              if(child.itemData && String(child.itemData.순번) === String(gotoSpot)){
+              if(child.itemData && String(child.itemData.순번) === String(found.순번)){
 
                 targetMarker = child;
 
@@ -7270,7 +7465,7 @@ window.addEventListener("load", function(){
           }
 
           // 일반 마커인 경우
-          if(layer.itemData && String(layer.itemData.순번) === String(gotoSpot)){
+          if(layer.itemData && String(layer.itemData.순번) === String(found.순번)){
 
             targetMarker = layer;
 
@@ -7666,6 +7861,21 @@ backdrop-filter:blur(4px);">
       <button onclick="findNearestFacility('주차장')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#8b5cf6;flex-shrink:0;"></span>주차장</button>
       <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역</button>
       <button onclick="findNearestFacility('자동심장충격기')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:12px;font-weight:700;color:#374151;cursor:pointer;line-height:1.2;text-align:center;padding:0 6px;"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;flex-shrink:0;"></span>자동심장충격기(AED)</button>
+    </div>
+    <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#334155;line-height:1.9;">
+      <div style="font-weight:800;color:#0f172a;">조건 (선택) — 체크 후 위 버튼을 누르세요</div>
+      <div><b style="color:#b45309;">화장실</b>&nbsp;
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletOpen"> 지금 개방</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletBell"> 비상벨</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabToiletDis"> 장애인용</label></div>
+      <div><b style="color:#7c3aed;">주차장</b>&nbsp;
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabParkFree"> 무료만</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabParkOpen"> 지금 운영 중</label></div>
+      <div><b style="color:#16a34a;">AED</b>&nbsp;
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAedOpen"> 지금 사용 가능</label></div>
+      <div><b style="color:#dc2626;">위험지역</b>&nbsp;
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccWalk"> 보행자 사고</label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccNight"> 야간 사고</label></div>
     </div>
     <button onclick="closeFacilityFab()" style="width:100%;height:42px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
   </div>
@@ -8304,6 +8514,46 @@ def log_search():
 
 # ===== 5번: 별점 API =====
 
+# ===== 별점·코멘트를 순번이 아니라 "구분 + 좌표"로 연결 =====
+# 엑셀을 갱신하면 순번이 바뀌므로, 같은 구분 + 반경 약 15m 안이면 같은 장소로 본다.
+SPOT_TOL_LAT = 0.00015   # 약 17m
+SPOT_TOL_LNG = 0.00018   # 약 16m (위도 35도 기준)
+
+
+def _spot_loc(src):
+    gubun = safe_str(src.get("gubun", ""))
+    try:
+        lat = float(src.get("lat"))
+        lng = float(src.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    if gubun not in TYPE_COLORS or not (32.5 <= lat <= 39.5 and 123.5 <= lng <= 132.5):
+        return None
+    return gubun, lat, lng
+
+
+def spot_filter_qs(args, spot_id):
+    """조회 조건: 좌표가 오면 좌표 범위로, 없으면 예전처럼 spot_id 로"""
+    loc = _spot_loc(args)
+    if not loc:
+        return f"spot_id=eq.{quote(str(spot_id))}"
+    g, lat, lng = loc
+    return (f"spot_gubun=eq.{quote(g)}"
+            f"&spot_lat=gte.{lat - SPOT_TOL_LAT:.7f}&spot_lat=lte.{lat + SPOT_TOL_LAT:.7f}"
+            f"&spot_lng=gte.{lng - SPOT_TOL_LNG:.7f}&spot_lng=lte.{lng + SPOT_TOL_LNG:.7f}")
+
+
+def spot_loc_fields(data):
+    """저장할 때 함께 넣을 구분·좌표"""
+    loc = _spot_loc(data)
+    if not loc:
+        return {}
+    return {"spot_gubun": loc[0], "spot_lat": round(loc[1], 7), "spot_lng": round(loc[2], 7)}
+
+
+
+
+
 @app.route("/api/rating", methods=["GET"])
 
 def get_rating():
@@ -8328,7 +8578,7 @@ def get_rating():
 
         r = requests.get(
 
-            f"{SUPABASE_URL}/rest/v1/spot_ratings?spot_id=eq.{quote(spot_id)}&select=score",
+            f"{SUPABASE_URL}/rest/v1/spot_ratings?{spot_filter_qs(request.args, spot_id)}&select=score",
 
             headers=headers
 
@@ -8389,7 +8639,7 @@ def post_rating():
 
             headers=headers,
 
-            json={"spot_id": spot_id, "score": score}
+            json={"spot_id": spot_id, "score": score, **spot_loc_fields(data)}
 
         )
 
@@ -8435,7 +8685,7 @@ def get_comments():
 
         r = requests.get(
 
-            f"{SUPABASE_URL}/rest/v1/spot_comments?spot_id=eq.{quote(spot_id)}&order=created_at.desc&limit=50",
+            f"{SUPABASE_URL}/rest/v1/spot_comments?{spot_filter_qs(request.args, spot_id)}&order=created_at.desc&limit=50",
 
             headers=headers
 
@@ -8476,7 +8726,7 @@ def post_comment():
         r = requests.post(
             f"{SUPABASE_URL}/rest/v1/spot_comments",
             headers=headers,
-            json={"spot_id": spot_id, "content": content}
+            json={"spot_id": spot_id, "content": content, **spot_loc_fields(data)}
         )
         return jsonify({"ok": r.status_code < 300})
 
@@ -9269,12 +9519,12 @@ def stats():
           d.comments.forEach(c=>{
             html += `<tr>
               <td>${_esc(c.id)}</td>
-              <td>${_esc(c.spot_id)}</td>
+              <td>${_esc(c.spot_gubun || '')} ${_esc(c.spot_id)}</td>
               <td style="max-width:300px;word-break:break-all;">${_esc(c.content)}</td>
               <td>${c.created_at ? c.created_at.slice(0,16).replace('T',' ') : ''}</td>
               <td style="white-space:nowrap;">
                 <button class="btn-del" onclick="deleteComment(${Number(c.id)}, this)">삭제</button>
-                <button class="btn-goto" onclick="gotoSpot('${_sid(c.spot_id)}')">이동</button>
+                <button class="btn-goto" onclick="gotoSpot('${_sid(c.spot_id)}', ${Number(c.spot_lat) || 0}, ${Number(c.spot_lng) || 0}, '${_esc(c.spot_gubun || '')}')">이동</button>
               </td>
             </tr>`;
           });
@@ -9311,12 +9561,12 @@ def stats():
             const stars = '★'.repeat(r.score||0) + '☆'.repeat(5-(r.score||0));
             html += `<tr>
               <td>${_esc(r.id)}</td>
-              <td>${_esc(r.spot_id)}</td>
+              <td>${_esc(r.spot_gubun || '')} ${_esc(r.spot_id)}</td>
               <td style="color:#f59e0b;font-weight:700;letter-spacing:1px;">${stars} (${r.score}점)</td>
               <td>${r.created_at ? r.created_at.slice(0,16).replace('T',' ') : ''}</td>
               <td style="white-space:nowrap;">
                 <button class="btn-del" onclick="deleteRating(${Number(r.id)}, this)">삭제</button>
-                <button class="btn-goto" onclick="gotoSpot('${_sid(r.spot_id)}')">이동</button>
+                <button class="btn-goto" onclick="gotoSpot('${_sid(r.spot_id)}', ${Number(r.spot_lat) || 0}, ${Number(r.spot_lng) || 0}, '${_esc(r.spot_gubun || '')}')">이동</button>
               </td>
             </tr>`;
           });
@@ -9340,7 +9590,11 @@ def stats():
           }
         }
 
-        async function gotoSpot(spotId){
+        async function gotoSpot(spotId, lat, lng, gubun){
+          if(lat && lng){   // 저장된 좌표가 있으면 그 위치로 바로 이동
+            window.location.href = '/?goto_spot=' + encodeURIComponent(spotId) + '&lat=' + lat + '&lng=' + lng + '&gubun=' + encodeURIComponent(gubun || '');
+            return;
+          }
           try{
             const res = await fetch('/api/spot_location?spot_id=' + encodeURIComponent(spotId));
             const d = await res.json();
