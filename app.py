@@ -1637,7 +1637,7 @@ html,body{
 
         </div>
 
-        <button class="btn-action" onclick="openAdminStats()">관리자 통계</button>
+        <button class="btn-action" onclick="openAdminStats()">관리자</button>
 
       </div>
 
@@ -9463,10 +9463,12 @@ def stats():
             gap:4px;
           }
           .page-btn{
-            flex:0 0 auto;
-            padding:8px 10px;
-            font-size:11.5px;
-            overflow:visible;
+            flex:1 1 0;
+            min-width:0;
+            padding:8px 2px;
+            font-size:12px;
+            white-space:nowrap;
+            overflow:hidden;
             text-overflow:clip;
           }
           .stat-cards{
@@ -9504,12 +9506,12 @@ def stats():
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
         <div class="page-nav">
-          <button class="page-btn active" data-page="0" onclick="goToPage(0)">0.방문자</button>
-          <button class="page-btn" data-page="1" onclick="goToPage(1)">1.지역</button>
-          <button class="page-btn" data-page="2" onclick="goToPage(2)">2.위험</button>
-          <button class="page-btn" data-page="3" onclick="goToPage(3)">3.코멘트</button>
-          <button class="page-btn" data-page="4" onclick="goToPage(4)">4.별점</button>
-          <button class="page-btn" data-page="5" onclick="goToPage(5)">5.다운</button>
+          <button class="page-btn active" data-page="0" onclick="goToPage(0)">방문자</button>
+          <button class="page-btn" data-page="1" onclick="goToPage(1)">지역</button>
+          <button class="page-btn" data-page="2" onclick="goToPage(2)">위험</button>
+          <button class="page-btn" data-page="3" onclick="goToPage(3)">코멘트</button>
+          <button class="page-btn" data-page="4" onclick="goToPage(4)">별점</button>
+          <button class="page-btn" data-page="5" onclick="goToPage(5)">다운</button>
         </div>
 
         <div class="page-panel active" data-page="0">
