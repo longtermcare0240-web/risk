@@ -10502,8 +10502,15 @@ def stats():
           .sr-grid2,.sr-g-cat,.sr-rsum{grid-template-columns:1fr!important;}
           .sr-legend div{white-space:nowrap;}
           .table-wrap td{white-space:nowrap;}
-          .stat-card{flex:1 1 40%!important;padding:14px!important;}
-          .stat-card .num{font-size:21px!important;}
+          /* 숫자 카드는 한 줄에 나란히 */
+          .stat-cards{display:grid!important;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px!important;}
+          .stat-card{padding:11px 8px 10px!important;border-radius:14px!important;text-align:center!important;min-width:0;}
+          .stat-card .ico{display:none;}
+          .stat-card .num{font-size:18px!important;line-height:1.2;white-space:nowrap;}
+          .stat-card .num span{font-size:11px!important;}
+          .stat-card .lbl{font-size:11px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px!important;}
+          .stat-card .delta{position:static;display:inline-block;margin-top:5px;font-size:10px;padding:2px 6px;order:3;}
+          .stat-card{display:flex!important;flex-direction:column;align-items:center;}
           .sr-chart{height:220px;}
           .page-btn{font-size:12.5px!important;}
         }
