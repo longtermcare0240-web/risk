@@ -10354,7 +10354,7 @@ def stats():
           <button class="page-btn" data-page="2" onclick="goToPage(2)">위험</button>
           <button class="page-btn" data-page="3" onclick="goToPage(3)">코멘트</button>
           <button class="page-btn" data-page="4" onclick="goToPage(4)">별점</button>
-          <button class="page-btn" data-page="5" onclick="goToPage(5)">다운</button>
+          <button class="page-btn" data-page="5" onclick="goToPage(5)">어플</button>
         </div>
 
         <div class="page-panel active" data-page="0">
