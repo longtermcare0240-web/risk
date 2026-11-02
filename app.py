@@ -10434,9 +10434,8 @@ def stats():
         </div>
         {% endif %}
         <div class="ft-card">
-          <div style="font-size:16px;font-weight:800;margin-bottom:10px;">안전로드 Ver.2</div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <b>지도에 적용</b>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:16px;font-weight:800;">안전로드 Ver.2</div>
             <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
             <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
           </div>
