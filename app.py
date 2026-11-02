@@ -114,6 +114,8 @@ def update_visitors():
 
         # 같은 브라우저(세션) 안에서 1시간 이내 재방문이면 카운트 증가 안 함
         if last_counted_at and now_time - float(last_counted_at) < 3600:
+            if today != str(datetime.now(KST).date()) and feature_detail_on():
+                today_count = 0
             return {
                 "total": total,
                 "today_count": today_count
@@ -7825,11 +7827,12 @@ function facilityInfoHtml(item){
   if(g === "교통사고위험지역"){
     const n = +item.사고건수 || 0;
     if(!n) return "";
-    const tags = [];
-    if(+item.보행자사고) tags.push(`🚶 보행자 ${+item.보행자사고}`);
-    if(+item.야간사고) tags.push(`🌙 야간 ${+item.야간사고}`);
-    if(+item.중상이상) tags.push(`중상 이상 ${+item.중상이상}`);
-    return infoLine(`사고 ${n}건${tags.length ? " (" + tags.join(" · ") + ")" : ""}`);
+    const pill = (t, bg, fg) => `<span style="display:inline-flex;align-items:center;height:22px;padding:0 9px;margin:2px 4px 2px 0;border-radius:999px;background:${bg};color:${fg};font-size:12px;font-weight:800;white-space:nowrap;">${t}</span>`;
+    const pills = [pill(`사고 ${n}건`, "#f1f5f9", "#334155")];
+    pills.push(+item.중상이상 ? pill(`중상 이상 ${+item.중상이상}`, "#fee2e2", "#b91c1c") : pill("경상", "#ecfdf5", "#047857"));
+    if(+item.보행자사고) pills.push(pill(`보행자 ${+item.보행자사고}`, "#fff7ed", "#c2410c"));
+    if(+item.야간사고) pills.push(pill(`야간 ${+item.야간사고}`, "#eef2ff", "#4338ca"));
+    return `<div class="popup-meta" style="margin-top:4px;display:flex;flex-wrap:wrap;">${pills.join("")}</div>`;
   }
   return "";
 }
@@ -9940,6 +9943,8 @@ def stats():
             if isinstance(vs_rows, list) and vs_rows:
                 total_visit_count = int(vs_rows[0].get("total_count", 0))
                 today_visit_count = int(vs_rows[0].get("today_count", 0))
+                if feature_detail_on() and str(vs_rows[0].get("today_date", "")) != str(datetime.now(KST).date()):
+                    today_visit_count = 0
             else:
                 total_visit_count = 0
                 today_visit_count = 0
@@ -10804,6 +10809,15 @@ def stats():
             });
           }
 
+          /* ── 모바일: 표는 7줄씩 ── */
+          if(isMobile && typeof paginateTable === 'function'){
+            const _pg = paginateTable;
+            window.paginateTable = paginateTable = function(id, size){ return _pg(id, 7); };
+            ['visitDailyTable', 'regionTable', 'categoryTable', 'downloadTable', 'commentsTable', 'ratingsTable'].forEach(function(id){
+              if(document.getElementById(id)) _pg(id, 7);
+            });
+          }
+
           /* ── 별점 요약 ── */
           function ratingSummary(){
             const area = document.getElementById('ratingAdminArea'); if(!area) return;
@@ -11095,6 +11109,8 @@ def stats_excel():
             if isinstance(vs_rows, list) and vs_rows:
                 total_visit_count = int(vs_rows[0].get("total_count", 0))
                 today_visit_count = int(vs_rows[0].get("today_count", 0))
+                if feature_detail_on() and str(vs_rows[0].get("today_date", "")) != str(datetime.now(KST).date()):
+                    today_visit_count = 0
             else:
                 total_visit_count = 0
                 today_visit_count = 0
