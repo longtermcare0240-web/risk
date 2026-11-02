@@ -1650,6 +1650,7 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 #loadingBox{white-space:nowrap;background:#fff!important;color:#111827!important;padding:14px 20px 14px 50px!important;border-radius:999px!important;box-shadow:0 12px 32px rgba(17,24,39,.18);font-size:13.5px!important;font-weight:800!important;}
 #loadingBox::before{content:"";position:absolute;left:18px;top:50%;width:20px;height:20px;margin-top:-10px;border-radius:50%;border:3px solid #dbe5ff;border-top-color:#2563eb;animation:srSpin .8s linear infinite;box-sizing:border-box;}
 @keyframes srSpin{to{transform:rotate(360deg);}}
+.sr-trim{font-size:12px;font-weight:600;color:#9ca3af;margin-left:2px;}
 .mobile-result-item.sr-rich{display:flex;align-items:center;gap:12px;padding:10px 12px!important;}
 .mobile-result-item.sr-rich::before{display:none;}
 .sr-rv{position:relative;flex-shrink:0;width:84px;height:62px;border-radius:10px;overflow:hidden;background:#eef1f5;}
@@ -2662,15 +2663,24 @@ function srEnhanceList(){
   if(!list) return;
   const items = list.querySelectorAll(".mobile-result-item:not(.sr-rich)");
   if(!items.length) return;
+  window.srHasDist = false;
   if(srRvObserver) srRvObserver.disconnect();
   srRvObserver = ("IntersectionObserver" in window) ? new IntersectionObserver(function(ents){
     ents.forEach(function(en){
-      if(!en.isIntersecting) return;
       const box = en.target;
-      srRvObserver.unobserve(box);
-      initRoadview(box.dataset.pano, +box.dataset.lat, +box.dataset.lng, box.dataset.gubun);
+      if(en.isIntersecting && box.dataset.loaded !== "1"){
+        box.dataset.loaded = "1";
+        initRoadview(box.dataset.pano, +box.dataset.lat, +box.dataset.lng, box.dataset.gubun);
+      } else if(!en.isIntersecting && box.dataset.loaded === "1"){
+        // 화면 밖 로드뷰는 내려서 폰 메모리·그래픽 부담 줄이기
+        box.dataset.loaded = "0";
+        const pano = document.getElementById(box.dataset.pano);
+        if(pano) pano.innerHTML = "";
+        const msg = document.getElementById(box.dataset.pano + "_msg");
+        if(msg){ msg.style.display = ""; msg.textContent = "로드뷰"; }
+      }
     });
-  }, {root: list, rootMargin: "120px 0px"}) : null;
+  }, {root: list, rootMargin: "160px 0px"}) : null;
   items.forEach(function(el){
     if(!el.dataset.lat) return;
     const b = el.querySelector("b");
@@ -2692,7 +2702,29 @@ function srEnhanceList(){
   });
   srFillDistances();
 }
+const SR_LIST_MAX = 30;
+function srTrimList(){
+  const list = document.getElementById("mobileResultList");
+  if(!list) return;
+  const els = list.querySelectorAll(".mobile-result-item.sr-rich");
+  const total = Math.max(els.length, window.srCutFrom || 0);
+  if(total > SR_LIST_MAX){
+    for(let i = SR_LIST_MAX; i < els.length; i++) els[i].remove();
+  }
+  const cnt = document.getElementById("mobileResultCount");
+  const host = cnt && cnt.parentNode;
+  if(!host) return;
+  if(window.srCutFrom && total > SR_LIST_MAX) cnt.textContent = total;
+  let note = host.querySelector(".sr-trim");
+  if(total > SR_LIST_MAX){
+    if(!note){ note = document.createElement("small"); note.className = "sr-trim"; host.appendChild(note); }
+    const r = window.srRef;
+    const base = r ? (r.kind === "route" ? "출발지 기준 " : "주소 기준 ") : (window.srHasDist ? "내 위치 기준 " : "");
+    note.textContent = " · " + base + SR_LIST_MAX + "곳 표시";
+  } else if(note && total) { note.remove(); }
+}
 function srApplyDistances(lat, lng){
+  window.srHasDist = true;
   const list = document.getElementById("mobileResultList");
   if(!list) return;
   const els = Array.prototype.slice.call(list.querySelectorAll(".mobile-result-item.sr-rich"));
@@ -2706,23 +2738,25 @@ function srApplyDistances(lat, lng){
   els.sort(function(x, y){ return (+x.dataset.dm) - (+y.dataset.dm); });
   let sorted = true;
   for(let i = 0; i < els.length; i++){ if(list.children[i] !== els[i]){ sorted = false; break; } }
-  if(sorted) return;
+  if(sorted){ srTrimList(); return; }
   const frag = document.createDocumentFragment();
   els.forEach(function(el){ frag.appendChild(el); });
   list.appendChild(frag);
   list.scrollTop = 0;
+  srTrimList();
 }
 function srFillDistances(){
   if(window.srRef){ srApplyDistances(window.srRef.lat, window.srRef.lng); return; }
   if(typeof userLat !== "undefined" && userLat && userLng){ srApplyDistances(userLat, userLng); return; }
   if(window.srMyLat){ srApplyDistances(window.srMyLat, window.srMyLng); return; }
-  if(srLocAsked || !navigator.geolocation) return;
+  if(srLocAsked) return;
+  if(!navigator.geolocation){ srTrimList(); return; }
   srLocAsked = true;
   navigator.geolocation.getCurrentPosition(function(pos){
     srLocAsked = false;
     window.srMyLat = pos.coords.latitude; window.srMyLng = pos.coords.longitude;
     srApplyDistances(window.srMyLat, window.srMyLng);
-  }, function(){ srLocAsked = false; }, {enableHighAccuracy:false, timeout:8000, maximumAge:300000});
+  }, function(){ srLocAsked = false; srTrimList(); }, {enableHighAccuracy:false, timeout:8000, maximumAge:300000});
 }
 document.addEventListener("DOMContentLoaded", function(){
   if(!window.FEATURE_DETAIL) return;
@@ -6476,7 +6510,7 @@ async function runRouteSearch(){
   const endLat = endGeo.lat;
 
   const endLng = endGeo.lng;
-  if(window.FEATURE_DETAIL) window.srRef = {lat: startLat, lng: startLng};
+  if(window.FEATURE_DETAIL) window.srRef = {lat: startLat, lng: startLng, kind: "route"};
 
   const road = await getRoadRoute(startLat,startLng,endLat,endLng);
 
@@ -6894,7 +6928,7 @@ async function runAddressSearch(){
 
   const radius = 5000;
 
-  if(window.FEATURE_DETAIL) window.srRef = {lat: lat, lng: lng};
+  if(window.FEATURE_DETAIL) window.srRef = {lat: lat, lng: lng, kind: "addr"};
   const filtered = data.filter(item => {
 
     return calcDistance(lat, lng, item.위도, item.경도) <= radius && srCatOk(item, "addr");
@@ -6907,7 +6941,7 @@ async function runAddressSearch(){
 
 
 
-  if(window.FEATURE_DETAIL && filtered.length > 50) filtered.splice(50);
+  if(window.FEATURE_DETAIL && filtered.length > 30){ window.srCutFrom = filtered.length; filtered.splice(30); }
   if(filtered.length===0){
 
     closeMsg(); showMsg("5km 이내에 위험지역이 없습니다."); return;
@@ -8566,6 +8600,7 @@ backdrop-filter:blur(4px);">
     if(typeof f !== "function") return;
     window[name] = function(){
       window.srRef = null;
+      window.srCutFrom = null;
       window.srLoadMode = mode;
       var r = f.apply(this, arguments);
       Promise.resolve(r).then(function(){ if(refit) setTimeout(srRefit, 450); }, function(){});
@@ -8606,7 +8641,7 @@ backdrop-filter:blur(4px);">
     addChips("routePopup", "route");
     addChips("addrSearchPopup", "addr");
     var sub = document.querySelector("#addrSearchPopup > div > div:first-child > div:last-child");
-    if(sub) sub.textContent = "주소 5km 안에서 가까운 50곳을 보여줘요";
+    if(sub) sub.textContent = "주소 5km 안에서 가까운 30곳을 보여줘요";
   }
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 
