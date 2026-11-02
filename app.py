@@ -677,7 +677,7 @@ def row_to_dict(row):
 
     # 항목별 추가 정보는 값이 있는 것만 보냄 (전송량 절약)
 
-    for _c in EXTRA_INFO.get(category, []):
+    for _c in (EXTRA_INFO.get(category, []) if feature_detail_on() else []):
 
         _v = re.sub(r"\.0$", "", safe_str(row.get(_c, "")))   # 엑셀이 3 → 3.0 으로 읽는 것 정리
 
@@ -1818,6 +1818,8 @@ html,body{
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
 
+
+<script>window.FEATURE_DETAIL = {{ 'true' if detail_on else 'false' }};</script>
 
 {% raw %}<script>
 
@@ -7263,6 +7265,7 @@ function infoLine(html){
 }
 
 function facilityInfoHtml(item){
+  if(!window.FEATURE_DETAIL) return "";   // 관리자 페이지에서 OFF 이면 예전 팝업 그대로
   const g = item.구분;
   if(g === "공중화장실"){
     const hr = item.개방시간 || "";
@@ -7306,6 +7309,7 @@ function fchk(id){
 }
 
 function facilityFilterActive(targetType){
+  if(!window.FEATURE_DETAIL) return false;
   if(targetType === "공중화장실") return fchk("fabToiletOpen") || fchk("fabToiletBell") || fchk("fabToiletDis");
   if(targetType === "주차장") return fchk("fabParkFree") || fchk("fabParkOpen");
   if(targetType === "자동심장충격기") return fchk("fabAedOpen");
@@ -7316,6 +7320,7 @@ function facilityFilterActive(targetType){
 function toiletFilterActive(){ return facilityFilterActive("공중화장실"); }
 
 function facilityFilterPass(item, targetType){
+  if(!window.FEATURE_DETAIL) return true;
   const g = item.구분;
   if(targetType === "공중화장실"){
     if(fchk("fabToiletOpen") && timeRangeOpen(item.개방시간) !== true) return false;
@@ -7862,6 +7867,7 @@ backdrop-filter:blur(4px);">
       <button onclick="findNearestFacility('위험지역')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:13px;font-weight:700;color:#374151;cursor:pointer;"><span style="width:9px;height:9px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>위험지역</button>
       <button onclick="findNearestFacility('자동심장충격기')" style="display:flex;align-items:center;justify-content:center;gap:5px;height:48px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:12px;font-weight:700;color:#374151;cursor:pointer;line-height:1.2;text-align:center;padding:0 6px;"><span style="width:9px;height:9px;border-radius:50%;background:#16a34a;flex-shrink:0;"></span>자동심장충격기(AED)</button>
     </div>
+    {% if detail_on %}
     <div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px;color:#334155;line-height:1.9;">
       <div style="font-weight:800;color:#0f172a;">조건 (선택) — 체크 후 위 버튼을 누르세요</div>
       <div><b style="color:#b45309;">화장실</b>&nbsp;
@@ -7877,6 +7883,7 @@ backdrop-filter:blur(4px);">
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccWalk"> 보행자 사고</label>
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-right:12px;white-space:nowrap;"><input type="checkbox" id="fabAccNight"> 야간 사고</label></div>
     </div>
+    {% endif %}
     <button onclick="closeFacilityFab()" style="width:100%;height:42px;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-weight:700;font-size:14px;cursor:pointer;color:#475569;">취소</button>
   </div>
 </div>
@@ -8484,7 +8491,9 @@ def index():
 
         kakao_key=KAKAO_KEY or "",
 
-        kakao_js_key=KAKAO_JS_KEY or ""
+        kakao_js_key=KAKAO_JS_KEY or "",
+
+        detail_on=feature_detail_on()
 
     )
 
@@ -8777,6 +8786,78 @@ def admin_required(view):
             return redirect("/")
         return view(*args, **kwargs)
     return wrapped
+# ===== 시설 상세정보 기능 ON/OFF (관리자 페이지 스위치) =====
+# OFF: 예전 화면 그대로 / ON: 팝업 상세정보 + '내 주변 찾기' 조건
+FEATURE_KEY = "feature_detail"
+_FEATURE_CACHE = {"v": None, "t": 0.0}
+
+
+def _sb_headers(extra=None):
+    h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _fetch_feature():
+    """→ (값 True/False, 오류문구 또는 None)"""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return False, "Supabase 환경변수 없음"
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/app_settings?key=eq.{FEATURE_KEY}&select=value",
+                     headers=_sb_headers(), timeout=3)
+    if r.status_code >= 400:
+        return False, "app_settings 표가 없습니다 (SQL 먼저 실행)"
+    rows = r.json()
+    return bool(rows) and str(rows[0].get("value", "")).lower() == "on", None
+
+
+def feature_detail_on():
+    now = time.time()
+    if _FEATURE_CACHE["v"] is not None and now - _FEATURE_CACHE["t"] < 30:
+        return _FEATURE_CACHE["v"]
+    v = _FEATURE_CACHE["v"] or False
+    try:
+        v, _err = _fetch_feature()
+    except Exception:
+        pass   # 조회 실패 시 직전 값 유지 (처음이면 OFF)
+    _FEATURE_CACHE.update(v=v, t=now)
+    return v
+
+
+@app.route("/api/admin/feature", methods=["GET"])
+@admin_required
+def admin_get_feature():
+    try:
+        v, err = _fetch_feature()
+    except Exception as e:
+        return jsonify(ok=False, on=False, error=str(e))
+    if err:
+        return jsonify(ok=False, on=False, error=err)
+    _FEATURE_CACHE.update(v=v, t=time.time())
+    return jsonify(ok=True, on=v)
+
+
+@app.route("/api/admin/feature", methods=["POST"])
+@admin_required
+def admin_set_feature():
+    on = bool((request.get_json() or {}).get("on"))
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify(ok=False, error="Supabase 환경변수 없음")
+    try:
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/app_settings",
+                          headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+                          json={"key": FEATURE_KEY, "value": "on" if on else "off"}, timeout=5)
+        if r.status_code >= 400:
+            return jsonify(ok=False, error="저장 실패 — app_settings 표가 있는지 확인 (" + str(r.status_code) + ")")
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+    _FEATURE_CACHE.update(v=on, t=time.time())
+    return jsonify(ok=True, on=on)
+
+
+
+
+
 @app.route("/api/admin/login", methods=["POST"])
 def admin_login():
     data = request.get_json(silent=True) or {}
@@ -9379,6 +9460,29 @@ def stats():
         <a class="btn" href="/">돌아가기</a>
         <a class="btn" href="/stats_excel">엑셀 다운로드</a>
 
+        <style>
+        .ft-card{background:#fff;border-radius:14px;padding:14px 18px;margin:16px 0;box-shadow:0 1px 4px rgba(0,0,0,.08);max-width:620px;}
+        .ft-switch{position:relative;display:inline-block;width:56px;height:30px;vertical-align:middle;}
+        .ft-switch input{opacity:0;width:0;height:0;}
+        .ft-slider{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.2s;cursor:pointer;}
+        .ft-slider:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+        .ft-switch input:checked + .ft-slider{background:#22c55e;}
+        .ft-switch input:checked + .ft-slider:before{transform:translateX(26px);}
+        .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
+        </style>
+        <div class="ft-card">
+          <div style="font-size:16px;font-weight:800;margin-bottom:10px;">시설 상세정보 기능</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <b>지도에 적용</b>
+            <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
+            <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-top:8px;line-height:1.5;">
+            ON 하면 팝업에 화장실 개방시간·비상벨·장애인용, 주차장 요금·운영시간, AED 설치위치·사용시간, 교통사고 건수가 나오고
+            '내 주변 찾기'에 조건 체크가 생깁니다. OFF 하면 예전 화면으로 돌아갑니다. (적용까지 최대 30초)
+          </div>
+        </div>
+
         <div class="page-nav">
           <button class="page-btn active" data-page="0" onclick="goToPage(0)">0.방문자</button>
           <button class="page-btn" data-page="1" onclick="goToPage(1)">1.지역</button>
@@ -9662,6 +9766,33 @@ def stats():
         paginateTable('regionTable', 10);
         paginateTable('categoryTable', 10);
         paginateTable('downloadTable', 10);
+        function showFeatureDetail(on, msg){
+          const t = document.getElementById('featureDetailToggle');
+          const st = document.getElementById('featureDetailState');
+          if(t) t.checked = !!on;
+          if(!st) return;
+          if(msg){ st.textContent = msg; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; return; }
+          st.textContent = on ? 'ON' : 'OFF';
+          st.style.background = on ? '#dcfce7' : '#f1f5f9';
+          st.style.color = on ? '#166534' : '#64748b';
+        }
+        async function loadFeatureDetail(){
+          try{
+            const r = await fetch('/api/admin/feature');
+            const d = await r.json();
+            showFeatureDetail(d.on, d.ok ? '' : (d.error || '확인 실패'));
+          }catch(e){ showFeatureDetail(false, '확인 실패'); }
+        }
+        async function setFeatureDetail(on){
+          showFeatureDetail(on, '');
+          try{
+            const r = await fetch('/api/admin/feature', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({on: on})});
+            const d = await r.json();
+            if(!d.ok){ alert('저장 실패: ' + (d.error || '')); showFeatureDetail(!on, ''); return; }
+            showFeatureDetail(d.on, '');
+          }catch(e){ alert('저장 실패: ' + e.message); showFeatureDetail(!on, ''); }
+        }
+        loadFeatureDetail();
         loadAdminComments();
         loadAdminRatings();
         initCharts();
