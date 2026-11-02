@@ -9554,6 +9554,35 @@ def admin_required(view):
             return redirect("/")
         return view(*args, **kwargs)
     return wrapped
+# ===== 데이터 갱신 프로그램(exe) 내려받기 — 관리자만 =====
+# 저장소에 아래 이름 중 하나로 올려두면 됨 (exe 안에 인증키가 있으니 저장소는 꼭 비공개로)
+REFRESH_EXE_CANDIDATES = [
+    os.path.join(BASE_DIR, "tools", "안전로드_데이터갱신.exe"),
+    os.path.join(BASE_DIR, "안전로드_데이터갱신.exe"),
+    os.path.join(BASE_DIR, "tools", "SafetyRoadRefresh.exe"),
+    os.path.join(BASE_DIR, "SafetyRoadRefresh.exe"),
+]
+
+
+def refresh_exe_info():
+    for fp in REFRESH_EXE_CANDIDATES:
+        if os.path.isfile(fp):
+            st = os.stat(fp)
+            return {"ok": True, "size": f"{st.st_size / 1024 / 1024:.1f}MB",
+                    "date": datetime.fromtimestamp(st.st_mtime, KST).strftime("%Y-%m-%d")}
+    return {"ok": False}
+
+
+@app.route("/admin/refresh_tool")
+@admin_required
+def download_refresh_tool():
+    for fp in REFRESH_EXE_CANDIDATES:
+        if os.path.isfile(fp):
+            return send_file(fp, as_attachment=True, download_name="안전로드_데이터갱신.exe",
+                             mimetype="application/octet-stream")
+    return "갱신 프로그램 파일이 서버에 없습니다. 저장소에 안전로드_데이터갱신.exe 를 올려 주세요.", 404
+
+
 # ===== 시설 상세정보 기능 ON/OFF (관리자 페이지 스위치) =====
 # OFF: 예전 화면 그대로 / ON: 팝업 상세정보 + '내 주변 찾기' 조건
 FEATURE_KEY = "feature_detail"
@@ -10323,6 +10352,24 @@ def stats():
         .ft-switch input:checked + .ft-slider:before{transform:translateX(26px);}
         .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
         </style>
+        {% if detail_on %}
+        <style>@media (max-width:700px){ .sr-tool-card{display:none!important;} }</style>
+        <div class="ft-card sr-tool-card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <div style="width:44px;height:44px;border-radius:13px;background:#eff6ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+          </div>
+          <div style="flex:1;min-width:180px;">
+            <div style="font-size:16px;font-weight:800;">데이터 갱신 프로그램</div>
+            <div style="font-size:12.5px;color:#6b7280;margin-top:3px;">지도 엑셀 5개를 공공 API로 새로 만드는 프로그램 · Windows
+              {% if refresh_exe.ok %} · {{ refresh_exe.size }} · {{ refresh_exe.date }} 올림{% endif %}</div>
+          </div>
+          {% if refresh_exe.ok %}
+          <a href="/admin/refresh_tool" download="안전로드_데이터갱신.exe" style="display:inline-flex;align-items:center;height:42px;padding:0 18px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;font-weight:800;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(37,99,235,.25);">다운로드</a>
+          {% else %}
+          <span style="font-size:12.5px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;">서버에 파일 없음 — 저장소에 안전로드_데이터갱신.exe 를 올려 주세요</span>
+          {% endif %}
+        </div>
+        {% endif %}
         <div class="ft-card">
           <div style="font-size:16px;font-weight:800;margin-bottom:10px;">안전로드 Ver.2</div>
           <div style="display:flex;align-items:center;gap:10px;">
@@ -10862,7 +10909,8 @@ def stats():
         total_visit_count=total_visit_count,
         today_visit_count=today_visit_count,
         visit_chart_data=visit_chart_data,
-        detail_on=feature_detail_on()
+        detail_on=feature_detail_on(),
+        refresh_exe=refresh_exe_info()
         )
 
     except Exception as e:
