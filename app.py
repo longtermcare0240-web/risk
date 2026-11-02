@@ -1597,6 +1597,8 @@ html,body{font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo','
 .mobile-result-item .mobile-result-distance{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0!important;}
 .mobile-result-item .mobile-result-distance:empty{display:none;}
 .mobile-result-header{border-bottom:none!important;}
+html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!important;height:60px!important;opacity:.18!important;}
+@media (max-width:600px){ html body .sr-hero-deco{right:14px!important;bottom:12px!important;width:50px!important;height:50px!important;} html body .sr-hero-s{padding-right:58px!important;} }
 /* 모바일: 한 화면에 더 많이 */
 @media (max-width:600px){
   .sr-hero{padding:18px 18px 18px!important;border-radius:20px!important;margin-bottom:10px!important;}
@@ -1726,7 +1728,7 @@ html,body{font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo','
       <!-- 새 디자인: 첫 문구 -->
       <div class="sr-hero">
         <div class="sr-hero-t">출장 지역의 위험구간과 편의시설을 한눈에 확인합니다.</div>
-        <div class="sr-hero-s">화장실, 주차장, 결빙, 사고지역 등</div>
+        <div class="sr-hero-s">화장실, 주차장, AED, 결빙, 사고지역</div>
         <svg class="sr-hero-deco" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
       </div>
       <!-- 새 디자인: 빠른 찾기 (순서는 기존과 같음) -->
@@ -2364,7 +2366,7 @@ function showLoadingLocation(){
     loadingStartTime = Date.now();
     const _m = document.getElementById("msgModal"), _t = document.getElementById("msgText"), _b = document.getElementById("msgBtn"), _x = document.getElementById("msgBox");
     if(!_m || !_t) return;
-    _t.innerHTML = '<div class="sr-ld"><div class="sr-radar"><i></i><i></i><i></i><b><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></b></div><div class="sr-ld-t">내 위치를 찾고 있어요</div><div class="sr-ld-s">처음에는 몇 초 걸릴 수 있어요</div></div>';
+    _t.innerHTML = '<div class="sr-ld"><div class="sr-radar"><i></i><i></i><i></i><b><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></b></div><div class="sr-ld-t">' + (window.srLoadMode === "search" ? "위치를 찾고 있어요" : "내 위치를 찾고 있어요") + '</div><div class="sr-ld-s">' + (window.srLoadMode === "search" ? "입력한 곳을 지도에서 찾는 중이에요" : "처음에는 몇 초 걸릴 수 있어요") + '</div></div>';
     if(_b) _b.style.display = "none";
     if(_x) _x.classList.add("sr-loading");
     _m.style.display = "flex";
@@ -2709,6 +2711,7 @@ function srApplyDistances(lat, lng){
   list.scrollTop = 0;
 }
 function srFillDistances(){
+  if(window.srRef){ srApplyDistances(window.srRef.lat, window.srRef.lng); return; }
   if(typeof userLat !== "undefined" && userLat && userLng){ srApplyDistances(userLat, userLng); return; }
   if(window.srMyLat){ srApplyDistances(window.srMyLat, window.srMyLng); return; }
   if(srLocAsked || !navigator.geolocation) return;
@@ -6462,6 +6465,7 @@ async function runRouteSearch(){
   const endLat = endGeo.lat;
 
   const endLng = endGeo.lng;
+  if(window.FEATURE_DETAIL) window.srRef = {lat: startLat, lng: startLng};
 
   const road = await getRoadRoute(startLat,startLng,endLat,endLng);
 
@@ -6647,13 +6651,13 @@ if(isMobile() && window.mobileLeafletMap){
 
 
 
-  showResultList(filtered, userLat !== null ? userLat : startLat, userLng !== null ? userLng : startLng);
+  showResultList(filtered, (window.FEATURE_DETAIL || userLat === null) ? startLat : userLat, (window.FEATURE_DETAIL || userLng === null) ? startLng : userLng);
 
 
 
   if(isMobile()){
 
-  syncToMobileMap(filtered, userLat !== null ? userLat : startLat, userLng !== null ? userLng : startLng);
+  syncToMobileMap(filtered, (window.FEATURE_DETAIL || userLat === null) ? startLat : userLat, (window.FEATURE_DETAIL || userLng === null) ? startLng : userLng);
 
 }
 
@@ -6879,6 +6883,7 @@ async function runAddressSearch(){
 
   const radius = 5000;
 
+  if(window.FEATURE_DETAIL) window.srRef = {lat: lat, lng: lng};
   const filtered = data.filter(item => {
 
     return calcDistance(lat, lng, item.위도, item.경도) <= radius;
@@ -8522,6 +8527,44 @@ backdrop-filter:blur(4px);">
 
 
 
+{% if detail_on %}
+<script>
+(function(){
+  function srRefit(){
+    var mobile = isMobile();
+    var m = mobile ? window.mobileLeafletMap : (typeof map !== "undefined" ? map : null);
+    var grp = mobile ? window.mobileMarkerGroup : (typeof markerGroup !== "undefined" ? markerGroup : null);
+    if(!m || !grp) return;
+    var b = L.latLngBounds([]);
+    grp.eachLayer(function(l){ if(l.getLatLng && !(l instanceof L.CircleMarker)) b.extend(l.getLatLng()); });
+    var line = mobile ? window.mobileRouteLine : (typeof routeLine !== "undefined" ? routeLine : null);
+    if(line && m.hasLayer(line)) b.extend(line.getBounds());
+    if(!b.isValid()) return;
+    var panel = document.getElementById("mobileResultPanel");
+    var shown = panel && panel.style.display !== "none" && panel.offsetHeight > 0;
+    var opt = mobile
+      ? {paddingTopLeft: [28, 140], paddingBottomRight: [28, (shown ? panel.offsetHeight : 0) + 24], maxZoom: 16}
+      : {paddingTopLeft: [shown ? 400 : 60, 80], paddingBottomRight: [60, 60], maxZoom: 16};
+    m.fitBounds(b, opt);
+  }
+  window.srRefit = srRefit;
+  function wrap(name, mode, refit){
+    var f = window[name];
+    if(typeof f !== "function") return;
+    window[name] = function(){
+      window.srRef = null;
+      window.srLoadMode = mode;
+      var r = f.apply(this, arguments);
+      Promise.resolve(r).then(function(){ if(refit) setTimeout(srRefit, 450); }, function(){});
+      return r;
+    };
+  }
+  wrap("runAddressSearch", "search", true);
+  wrap("runRouteSearch", "search", true);
+  ["findNearestFacility", "findNearestToilet", "findNearestDanger", "loadData"].forEach(function(n){ wrap(n, "me", false); });
+})();
+</script>
+{% endif %}
 <div id="routePopup" style="
 
 position:fixed;inset:0;
