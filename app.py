@@ -9617,17 +9617,34 @@ def stats():
             el.parentElement.innerHTML = '<p style="color:#94a3b8;">표시할 데이터가 없습니다.</p>';
             return;
           }
+          // 모바일: 최근 7일만, 날짜는 "11/2"처럼 짧게, 글자 기울이지 않음
+          const isMobileView = window.matchMedia('(max-width: 600px)').matches;
+          let showLabels = labels;
+          let showSets = dataSets;
+          if(isMobileView){
+            const n = Math.min(7, labels.length);
+            showLabels = labels.slice(-n).map(function(d){
+              const m = String(d).match(/^[0-9]{4}-([0-9]{2})-([0-9]{2})/);
+              return m ? (parseInt(m[1], 10) + '/' + parseInt(m[2], 10)) : d;
+            });
+            showSets = dataSets.map(function(ds){
+              return Object.assign({}, ds, { data: ds.data.slice(-n) });
+            });
+          }
           window._dailyCharts[canvasId] = new Chart(el, {
             type: chartType || 'bar',
             data: {
-              labels: labels,
-              datasets: dataSets
+              labels: showLabels,
+              datasets: showSets
             },
             options: {
               responsive: true,
               maintainAspectRatio: false,
               plugins: { legend: { display: dataSets.length > 1 } },
-              scales: { y: { beginAtZero: true } }
+              scales: {
+                y: { beginAtZero: true },
+                x: { ticks: isMobileView ? { maxRotation: 0, minRotation: 0, autoSkip: false, font: { size: 11 } } : {} }
+              }
             }
           });
         }
