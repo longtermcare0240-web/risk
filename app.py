@@ -14830,6 +14830,19 @@ def trip_api_toilets():
         return jsonify(ok=False, message="화장실 데이터(공중화장실.xlsx)가 없어요. 관리자에게 알려주세요.")
     a = request.args
     found = trip_nearest_toilets(lat, lng, rows, a.get("always") == "1", a.get("bell") == "1", a.get("acc") == "1")
+    # 차로 몇 분: 카카오모빌리티 실제 경로(실패하면 직선거리로 추정, '약' 표시)
+    def car(t):
+        if not trip_demo():
+            try:
+                leg = trip_directions({"lat": lat, "lng": lng}, {"lat": t["lat"], "lng": t["lng"]})
+                return max(1, round(leg["duration"] / 60)), True
+            except Exception:
+                pass
+        return max(1, round(t["distance"] * 1.4 / 400)), False
+    if found:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for t, (m, real) in zip(found, ex.map(car, found)):
+                t["car_min"], t["car_real"] = m, real
     here = "광주 광산구 (예시 위치)" if trip_demo() else ""
     if not trip_demo():
         try:
@@ -15185,7 +15198,10 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .sr-rv-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:10px;line-height:1.3;color:#94a3b8;z-index:2}
 .sr-rv-cover{position:absolute;inset:0;z-index:3}
 .trow .dl{font-size:12.5px;color:var(--sub);margin-top:3px}
+.trow .dl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .trow .dl b{color:var(--toilet);font-weight:800}
+.trow .tm{display:inline-flex;align-items:center;gap:3px;font-weight:600;color:var(--sub)}
+.trow .tm svg{width:16px;height:16px;color:var(--muted)}
 
 /* 집 미리보기: 건축물대장 값 표 */
 .spec{display:grid;grid-template-columns:72px 1fr;gap:0;margin:6px 0 0;font-size:14.5px}
@@ -16906,6 +16922,8 @@ const $=s=>document.querySelector(s);
 const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const km=m=>m<1000?`${m}m`:`${(m/1000).toFixed(1)}km`;
 const DEMO={{ 'true' if demo else 'false' }};
+const CAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V11.5L7 6.5h10l2 5V16"/><path d="M3.5 16h17v2.5h-17z"/><circle cx="7.5" cy="18.5" r="1.6"/><circle cx="16.5" cy="18.5" r="1.6"/><path d="M5 11.5h14"/></svg>';
+const WALK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4.5" r="2"/><path d="M10.5 21l2-6-3-3 1-4.5 3.5 2.5 3 1"/><path d="M9.5 8.5 7 12"/><path d="M14.5 15l2 6"/></svg>';
 function search(lat,lng){
   const q=new URLSearchParams({lat,lng,always:$("#always").checked?1:0,bell:$("#bell").checked?1:0,acc:$("#acc").checked?1:0});
   fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
@@ -16915,7 +16933,9 @@ function search(lat,lng){
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
       <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}" data-i="${r.items.indexOf(t)}" role="button" title="로드뷰 크게 보기"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
         <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(t.address)}</div>
-          <div class="dl"><b>${km(t.distance)}</b> · 걸어서 ${t.walk_min}분</div>
+          <div class="dl"><b>${km(t.distance)}</b>
+            <span class="tm" title="차로">${CAR}${t.car_real?"":"약 "}${t.car_min}분</span>
+            <span class="tm" title="걸어서">${WALK}${t.walk_min}분</span></div>
           <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
           ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
         <button class="btn sm" type="button" data-i="${r.items.indexOf(t)}">길안내</button></div>`).join("")}</div>`;
