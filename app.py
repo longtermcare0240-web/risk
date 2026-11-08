@@ -13869,8 +13869,11 @@ def trip_where(lat, lng):
     if not docs:
         return ""
     d = docs[0]
-    return ((d.get("road_address") or {}).get("address_name")
+    full = ((d.get("road_address") or {}).get("address_name")
             or (d.get("address") or {}).get("address_name") or "")
+    # 시·도는 빼서 짧게: '전남광주통합특별시 광산구 소촌로 1' → '광산구 소촌로 1'
+    parts = full.split(" ", 1)
+    return parts[1] if len(parts) == 2 and parts[0].endswith(("시", "도")) else full
 
 
 def trip_addr_suggest(query, limit=5):
@@ -15272,6 +15275,16 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .bigrv .mrmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px;z-index:3;background:#dedbd2}
 .t-toilet .big .btn.main{background:var(--toilet)}
 
+/* 페이지 맨 아래 출처 */
+.src{margin:22px 4px 0;padding-top:12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted);line-height:1.7}
+.src b{display:block;font-weight:700;color:var(--sub);margin-bottom:2px}
+.src span{display:block}
+.src em{font-style:normal;display:inline-block;min-width:92px;color:var(--sub)}
+.here b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.here>div{min-width:0;flex:1}
+.gpsat{min-width:0}
+.gpsat .at{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -15368,6 +15381,10 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .note{max-width:none}
   .mbr{display:none}
   .minirv{height:260px!important}
+  .src{font-size:13px}
+  .src em{min-width:120px}
+  .src span{display:inline;margin-right:18px}
+  .src b{display:inline;margin-right:14px}
   .intro p{font-size:16px}
   .g1{font-size:16px}
   .g1 b{width:84px}
@@ -15448,6 +15465,10 @@ function attachSuggest(inp,onPick,onClear){
 {%- else -%}<path d="M12 4 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/>
 {%- endif -%}
 </svg>
+{%- endmacro %}
+
+{% macro src(items) -%}
+<div class="src"><b>출처</b>{% for k, v in items %}<span><em>{{ k }}</em>{{ v }}</span>{% endfor %}</div>
 {%- endmacro %}
 ''',
     "trip/_pill_cn.html": r'''{% raw %}
@@ -15708,7 +15729,7 @@ function attachSuggest(inp,onPick,onClear){
 
       <div class="pill-list" id="pillList"></div>
     </div>
-    <div class="pill-foot">참고용 후보입니다. 정확한 확인은 약사·의사에게 문의하세요.<br>자료: 식품의약품안전처 의약품 낱알식별 정보</div>
+    <div class="pill-foot">참고용 후보입니다. 정확한 확인은 약사·의사에게 문의하세요.</div>
   </div>
 </div>
 
@@ -16444,7 +16465,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/house.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar, wicon with context %}
+{% from "trip/_m.html" import src, topbar, wicon with context %}
 {% block title %}집 미리보기 · 출장 도구함{% endblock %}
 {% block theme %}t-house{% endblock %}
 {% block body %}
@@ -16481,6 +16502,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 </div>
 {% if demo %}<p class="hint">예시 모드: 라인2차, 미소래를 넣어보세요. 공개 자료로 확인한 값만 들어 있어요.</p>{% endif %}
 {% endif %}
+{{ src([("건물 정보","국토교통부 건축HUB 건축물대장"),("로드뷰·주소","카카오맵"),("범죄주의구간","행정안전부 생활안전지도")]) }}
 {% endblock %}
 {% block script %}
 {% include "trip/_ac.html" %}
@@ -16495,7 +16517,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/house_card.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar, wicon with context %}
+{% from "trip/_m.html" import src, topbar, wicon with context %}
 {% block title %}{{ (bld and bld.name) or loc.label }} · 집 미리보기{% endblock %}
 {% block theme %}t-house{% endblock %}
 {% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
@@ -16551,8 +16573,9 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   </div>
 </div>
 </div></div>
-<p class="hint">{% if source %}{{ source }} 기준.{% else %}건축물대장 기준.{% endif %} 집 안 구조는 현장에서 확인하세요.</p>
+<p class="hint">집 안 구조는 현장에서 확인하세요.</p>
 <a class="btn" style="width:100%;margin-top:10px" href="{{ url_for('trip.house_page') }}">다른 집</a>
+{{ src([("건물 정보", (source if demo and source else "국토교통부 건축HUB 건축물대장")),("로드뷰·주소","카카오맵"),("범죄주의구간","행정안전부 생활안전지도"),("지도","© OpenStreetMap")]) }}
 {% endblock %}
 {% block script %}
 {% if kakao_js_key %}
@@ -16617,11 +16640,12 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/pill.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar with context %}
+{% from "trip/_m.html" import src, topbar with context %}
 {% block title %}복용약 찾기 · 출장 도구함{% endblock %}
 {% block theme %}t-pill{% endblock %}
 {% block body %}
 {{ topbar('복용약 찾기') }}
+{{ src([("알약 정보","식품의약품안전처 의약품 낱알식별"),("사진 판독","OpenAI")]) }}
 {% endblock %}
 {% block script %}
 {% include "trip/_pill_cn.html" %}
@@ -16662,7 +16686,8 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   // 팝업 대신 화면 안에 펼쳐 둠: 열 때 기록을 추가하지 않게 하고, 화면 스크롤도 막지 않음
   var wrap=document.querySelector(".wrap"),modal=document.getElementById("pillModal");
   if(!modal)return;
-  wrap.appendChild(modal);
+  var srcEl=document.querySelector(".wrap > .src");
+  if(srcEl) wrap.insertBefore(modal, srcEl); else wrap.appendChild(modal);
   try{ if(!(history.state&&history.state.pillModal)) history.replaceState({pillModal:true},""); }catch(e){}
   if(!modal.classList.contains("show")) openPill(false);
   document.body.style.overflow="";
@@ -16675,7 +16700,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/route.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar with context %}
+{% from "trip/_m.html" import src, topbar with context %}
 {% block title %}최적 동선 · 출장 도구함{% endblock %}
 {% block theme %}t-route{% endblock %}
 {% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
@@ -16701,6 +16726,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 <div id="result" style="display:none"></div>
 <div class="ph" id="ph"><p>방문지를 넣고 <b>최적 동선 찾기</b>를 누르면<br>여기에 순서와 지도가 나와요</p></div>
 </div></div>
+{{ src([("경로·시간","카카오모빌리티 길찾기"),("주소 검색·로드뷰","카카오맵"),("지도","© OpenStreetMap")]) }}
 {% endblock %}
 {% block script %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -16746,7 +16772,7 @@ $("#gpsBtn").onclick=()=>{
     // 지금 어디인지 주소로 보여줌
     const at=$("#gpsAt");at.style.display="";at.textContent="위치 확인 중…";
     fetch("{{ url_for('trip.api_where') }}?lat="+gps[0]+"&lng="+gps[1]).then(r=>r.json()).then(d=>{
-      if(!gps)return;at.innerHTML=d.address?`<span class="pin"></span>${esc(d.address)}`:"주소를 찾지 못했어요. 지도에서 위치를 확인하세요.";
+      if(!gps)return;at.innerHTML=d.address?`<span class="pin"></span><span class="at">${esc(d.address)}</span>`:"주소를 찾지 못했어요. 지도에서 위치를 확인하세요.";
     }).catch(()=>{at.style.display="none";});},
     ()=>{$("#gpsBtn").textContent="현재 위치";alert("위치를 가져오지 못했어요.");},{enableHighAccuracy:true,timeout:10000});};
 $("#start").oninput=()=>{if(gps&&$("#start").value!=="현재 위치"){gps=null;$("#gpsBtn").textContent="현재 위치";$("#gpsAt").style.display="none";}};
@@ -16806,7 +16832,7 @@ function show(r){
         <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
       <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
     <div class="card"><ul class="tl">${tl}</ul></div>
-    <p class="hint">${r.demo?"예시 모드라 직선거리로 추정한 시간이에요.<br>실제 키를 넣으면 실시간 교통을 반영해요.":"카카오모빌리티 실시간 교통 기준이에요.<br>길안내는 카카오맵으로 열려요."}</p>`;
+    ${r.demo?'<p class="hint">예시 모드라 직선거리로 추정한 시간이에요.<br>실제 키를 넣으면 실시간 교통을 반영해요.</p>':'<p class="hint">실시간 교통을 반영한 자동차 기준이에요.</p>'}`;
   $("#result").style.display="";if($("#ph"))$("#ph").remove();
   drawMap(r);
   if(!r.fixed)$("#result").scrollIntoView({behavior:"smooth"});
@@ -16882,7 +16908,7 @@ function drawMap(r){
 {% endblock %}
 ''',
     "trip/toilet.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar with context %}
+{% from "trip/_m.html" import src, topbar with context %}
 {% block title %}내 근처 화장실 · 출장 도구함{% endblock %}
 {% block theme %}t-toilet{% endblock %}
 {% block body %}
@@ -16902,7 +16928,7 @@ function drawMap(r){
 </div><div class="colB">
 <div id="here" class="here" style="display:none"></div>
 <div id="list"></div>
-<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.<br>자료: 안전로드 공중화장실 데이터{% if demo %} (지금은 예시 3곳){% endif %}.</p>
+<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}</p>
 </div></div>
 <div class="big" id="big"><div class="bbox">
   <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
@@ -16916,6 +16942,7 @@ function drawMap(r){
   <a id="navNaver" class="navb" target="_blank" rel="noopener"><span style="background:#03c75a;color:#fff">N</span>네이버지도</a>
   <a id="navGoogle" class="navb" target="_blank" rel="noopener"><span style="background:#4285f4;color:#fff">G</span>구글지도</a>
 </div></div>
+{{ src([("공중화장실","행정안전부 전국공중화장실표준데이터"),("차 시간","카카오모빌리티 길찾기"),("내 위치·로드뷰","카카오맵")]) }}
 {% endblock %}
 {% block script %}
 {% if kakao_js_key %}<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>{% endif %}
