@@ -13899,6 +13899,13 @@ def trip_addr_suggest(query, limit=5):
     return out[:limit]
 
 
+class TripRouteFail(Exception):
+    """카카오모빌리티가 길을 못 찾음. code 102: 출발지 주변 도로 없음, 103: 도착지 주변 도로 없음"""
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
 def trip_directions(a, b, geometry=False):
     """a → b 자동차 경로. 실시간 교통 반영 추천 경로. 반환: 거리(m), 시간(초), 경로 좌표."""
     params = {"origin": f"{a['lng']},{a['lat']}", "destination": f"{b['lng']},{b['lat']}",
@@ -13906,8 +13913,11 @@ def trip_directions(a, b, geometry=False):
     r = requests.get(TRIP_KAKAO_NAVI, headers=_trip_kakao_headers(), params=params, timeout=TRIP_HTTP_TIMEOUT)
     r.raise_for_status()
     route = (r.json().get("routes") or [{}])[0]
-    if route.get("result_code", -1) != 0:
-        raise ValueError(route.get("result_msg", "경로 없음"))
+    code = route.get("result_code", -1)
+    if code == 104:   # 출발지와 도착지가 5m 안: 같은 곳으로 보고 0분
+        return {"distance": 0, "duration": 0, "path": [[a["lat"], a["lng"]], [b["lat"], b["lng"]]]}
+    if code != 0:
+        raise TripRouteFail(code, route.get("result_msg", "경로 없음"))
     s = route["summary"]
     path = []
     if geometry:
@@ -13934,6 +13944,17 @@ def trip_estimate_leg(a, b, geometry=False):
     d = _trip_haversine(a, b) * 1.35
     return {"distance": int(d), "duration": int(d / (35000 / 3600)),
             "path": [[a["lat"], a["lng"]], [b["lat"], b["lng"]]] if geometry else []}
+
+
+class TripPinConflict(Exception):
+    pass
+
+
+class TripLegFail(Exception):
+    """a → b 구간 길찾기 실패"""
+    def __init__(self, a, b, err):
+        super().__init__(str(err))
+        self.a, self.b, self.err = a, b, err
 
 
 def _trip_route_fixed(pts, leg_fn):
@@ -13965,7 +13986,12 @@ def trip_optimize(start, stops, end, leg_fn, keep_order=False, pins=None):
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {p: ex.submit(leg_fn, pts[p[0]], pts[p[1]], False) for p in pairs}
-        mat = {p: f.result() for p, f in futs.items()}
+        mat = {}
+        for p, f in futs.items():
+            try:
+                mat[p] = f.result()
+            except Exception as e:   # 어느 구간이 안 되는지 알려주기 위해 두 지점을 붙여서 올림
+                raise TripLegFail(pts[p[0]], pts[p[1]], e) from e
 
     def total(order):
         seq = [s_idx] + list(order) + [e_idx]
@@ -13981,7 +14007,7 @@ def trip_optimize(start, stops, end, leg_fn, keep_order=False, pins=None):
     orders = [o for o in permutations(range(1, n_s + 1))
               if all(o[pos] == i for pos, i in fixed.items())]
     if not orders:
-        raise ValueError("고정한 순서끼리 겹쳐요")
+        raise TripPinConflict("고정한 순서끼리 겹쳐요")
     scored = sorted((total(o), o) for o in orders)
     best_t, best = scored[0]
     worst_t = scored[-1][0]
@@ -14776,8 +14802,21 @@ def trip_api_route():
     leg = trip_estimate_leg if trip_demo() else trip_directions
     try:
         res = trip_optimize(found[0], found[1:-1], found[-1], leg, keep_order=bool(d.get("keep_order")), pins=pins)
-    except ValueError:
+    except TripPinConflict:
         return jsonify(ok=False, message="고정한 순서끼리 겹쳐요. 고정을 다시 확인해 주세요.")
+    except TripLegFail as e:
+        nm = lambda p: p.get("label") or p.get("input") or p.get("role")
+        code = getattr(e.err, "code", None)
+        if code is None:   # 통신 오류 등 길 자체 문제가 아님
+            return jsonify(ok=False, message="길찾기 서버 연결이 잠깐 안 돼요. 잠시 후 다시 눌러 주세요.")
+        if code == 102:
+            who = nm(e.a)
+        elif code == 103:
+            who = nm(e.b)
+        else:
+            who = f"{nm(e.a)} → {nm(e.b)}"
+        return jsonify(ok=False, message=f"'{who}' 쪽은 차로 가는 길을 찾지 못했어요. "
+                                         "섬·선착장·산길처럼 차도와 떨어진 곳이면 근처 도로 주소로 바꿔 넣어주세요.")
     except Exception:
         return jsonify(ok=False, message="길찾기에 실패했어요. 차로 갈 수 있는 주소인지 확인해 주세요.")
     res.update(ok=True, demo=trip_demo(), return_to_start=back)
