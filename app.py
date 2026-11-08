@@ -15242,6 +15242,18 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .gpsat{display:flex;align-items:center;gap:8px;margin:8px 2px 0;font-size:13.5px;color:var(--sub);font-weight:600}
 .gpsat .pin{flex:none;width:8px;height:8px;border-radius:50%;background:var(--route);box-shadow:0 0 0 4px var(--route-bg)}
 
+.sr-rv{cursor:pointer}
+.big{display:none;position:fixed;inset:0;z-index:49;background:rgba(15,20,18,.55);align-items:center;justify-content:center;padding:12px}
+.big.on{display:flex}
+.big .bbox{width:100%;max-width:720px;background:var(--card);border-radius:22px;padding:16px}
+.big .sh{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.big .sh b{display:block;font-size:16px}
+.big .sh small{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.big .sh button{flex:none;width:32px;height:32px;border:none;border-radius:50%;background:#f0eee7;font-size:18px;cursor:pointer}
+.bigrv{position:relative;height:min(62vh,520px);border-radius:14px;overflow:hidden;background:#dedbd2}
+.bigrv .mrmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px;z-index:3;background:#dedbd2}
+.t-toilet .big .btn.main{background:var(--toilet)}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -16874,6 +16886,11 @@ function drawMap(r){
 <div id="list"></div>
 <p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.<br>자료: 안전로드 공중화장실 데이터{% if demo %} (지금은 예시 3곳){% endif %}.</p>
 </div></div>
+<div class="big" id="big"><div class="bbox">
+  <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
+  <div class="bigrv"><div id="bigRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="bigMsg"></div></div>
+  <button class="btn main" type="button" id="bigNav" style="margin-top:12px">길안내</button>
+</div></div>
 <div class="nav" id="nav"><div class="sheet">
   <div class="sh"><b id="navT"></b><button type="button" id="navX" aria-label="닫기">×</button></div>
   <p class="hint" style="margin:0 0 10px">쓰는 지도 앱을 고르세요.<br>앱이 없으면 웹으로 열려요.</p>
@@ -16896,7 +16913,7 @@ function search(lat,lng){
     if(r.here){$("#here").innerHTML=`<span class="pin"></span><div><small>내 위치</small><b>${esc(r.here)}</b></div>`;$("#here").style.display="";}
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
-      <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
+      <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}" data-i="${r.items.indexOf(t)}" role="button" title="로드뷰 크게 보기"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
         <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(t.address)}</div>
           <div class="dl"><b>${km(t.distance)}</b> · 걸어서 ${t.walk_min}분</div>
           <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
@@ -16904,6 +16921,7 @@ function search(lat,lng){
         <button class="btn sm" type="button" data-i="${r.items.indexOf(t)}">길안내</button></div>`).join("")}</div>`;
     ITEMS=r.items;
     $("#list").querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>openNav(ITEMS[+b.dataset.i]));
+    $("#list").querySelectorAll(".sr-rv").forEach(b=>b.onclick=()=>openBig(ITEMS[+b.dataset.i]));
     watchRv();
   }).catch(()=>{done();$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';});
 }
@@ -16954,6 +16972,32 @@ function openNav(t){
   $("#nav").classList.add("on");
 }
 document.addEventListener("click",e=>{if(e.target.id==="nav"||e.target.id==="navX")$("#nav").classList.remove("on");});
+/* 작은 로드뷰를 누르면 큰 로드뷰 (돌려 볼 수 있음) */
+let BIG=null,BIGC=null;
+function bearingTo(p,lat,lng){const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(lng-p.getLng())*R;
+  const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
+  return ((Math.atan2(y,x)*180/Math.PI)+360)%360;}
+function openBig(t){
+  $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=t.address||"";
+  $("#bigNav").onclick=()=>{closeBig();openNav(t);};
+  $("#big").classList.add("on");
+  const msg=$("#bigMsg");msg.style.display="";msg.textContent="로드뷰 불러오는 중";
+  if(!(window.kakao&&kakao.maps)){msg.textContent="로드뷰를 불러오지 못했어요";return;}
+  kakao.maps.load(()=>{
+    const pos=new kakao.maps.LatLng(t.lat,t.lng);
+    if(!BIG){BIG=new kakao.maps.Roadview($("#bigRv"));BIGC=new kakao.maps.RoadviewClient();
+      kakao.maps.event.addListener(BIG,"init",()=>{const p=BIG.getPosition();if(p&&BIG._t)BIG.setViewpoint({pan:bearingTo(p,BIG._t[0],BIG._t[1]),tilt:0,zoom:0});msg.style.display="none";});}
+    BIG._t=[t.lat,t.lng];
+    (function tryR(rs){
+      if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
+      BIGC.getNearestPanoId(pos,rs[0],id=>{if(id===null)return tryR(rs.slice(1));
+        BIG.setPanoId(id,pos);BIG.relayout&&BIG.relayout();
+        setTimeout(()=>{const p=BIG.getPosition();if(p){BIG.setViewpoint({pan:bearingTo(p,t.lat,t.lng),tilt:0,zoom:0});msg.style.display="none";}},700);});
+    })([100,200]);
+  });
+}
+function closeBig(){$("#big").classList.remove("on");}
+document.addEventListener("click",e=>{if(e.target.id==="big"||e.target.id==="bigX")closeBig();});
 function done(){const b=$("#find");b.disabled=false;b.textContent="지금 위치에서 찾기";}
 $("#find").onclick=()=>{
   $("#msg").innerHTML="";const b=$("#find");b.disabled=true;b.innerHTML='<span class="spin"></span> 위치 확인 중';
