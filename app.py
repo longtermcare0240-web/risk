@@ -14045,7 +14045,7 @@ def trip_interpret(bld, floor, mountain, missing=False):
     """반환: notes=[(아이콘, 조심할 점, 짧은 설명)], checks=[가서 볼 것]"""
     facts, checks = [], []
     if missing:
-        facts.append(("alert", "대장에 없는 집", "무허가·미등기일 수 있어요"))
+        facts.append(("alert", "대장에 없는 집", "무허가·미등기일 수 있어요. 주거지원에서 빠졌는지 보세요"))
         checks += ["언제 지은 집인지, 증축한 곳이 있는지", "지붕 재질(슬레이트인지)"]
     if bld:
         age = (date.today().year - bld["year"]) if bld.get("year") else None
@@ -15079,7 +15079,12 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .ai ul{margin:6px 0 0;padding-left:18px;font-size:14.5px;line-height:1.6}
 .ai .sk{height:14px;border-radius:6px;background:linear-gradient(90deg,#f1ece4,#faf7f2,#f1ece4);background-size:200% 100%;animation:sk 1.2s infinite;margin:8px 0}
 @keyframes sk{to{background-position:-200% 0}}
-@media print{.ci{position:static}}
+@media print{.ci{position:static}
+  body{background:#fff}
+  .bar a.back,.bar .tag,.btn,.ctabs,.swap{display:none!important}
+  .card{break-inside:avoid;border-color:#ddd}
+  .cols{display:block!important}
+  .wt{break-inside:avoid}}
 
 .swap{display:flex;align-items:center;gap:4px;margin:-2px auto 6px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:3px 10px;font:600 12px/1.4 inherit;font-family:inherit;cursor:pointer}
 .swap:hover{color:var(--route);border-color:var(--route)}
@@ -16355,6 +16360,8 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   {% if rows %}
   <dl class="spec">{% for k, v in rows %}<dt>{{ k }}</dt><dd{% if v in ('대장에 안 적힘', '실제 조회하면 표시') %} class="muted"{% endif %}>{{ v }}</dd>{% endfor %}
   {% if floor is none %}<dt>거주층</dt><dd class="muted">넣으면 계단·꼭대기 층을 알려줘요</dd>{% endif %}</dl>
+  {% elif missing %}
+  <div class="fact"><div class="m">건축물대장에서 이 주소의 건물을 찾지 못했어요. 무허가·미등기 건물이거나, 대장에 다른 지번으로 올라가 있을 수 있어요.</div></div>
   {% elif not facts %}
   <div class="fact"><div class="m">건물 정보를 불러오지 못했어요. 현장에서 확인해 주세요.</div></div>
   {% endif %}
@@ -16384,7 +16391,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <ul class="checks">{% for c in checks %}<li>{{ c }}</li>{% endfor %}</ul>
   <div class="row" style="margin-top:14px">
     <a class="btn" style="flex:1" href="https://map.kakao.com/link/roadview/{{ loc.lat }},{{ loc.lng }}" target="_blank" rel="noopener">로드뷰 크게</a>
-    <button class="btn" style="flex:1" type="button" onclick="window.print()">PDF 저장</button>
+    <button class="btn" style="flex:1" type="button" onclick="window.print()">인쇄</button>
   </div>
 </div>
 </div></div>
