@@ -14034,8 +14034,6 @@ def trip_house_rows(bld, floor, mountain, unknown="대장에 안 적힘"):
     hh, dongs = bld.get("households") or 0, bld.get("dongs") or 0
     if hh or dongs > 1:
         rows.append(("규모", " · ".join(x for x in (f"{hh}세대" if hh else "", f"{dongs}개 동" if dongs > 1 else "") if x)))
-    if floor is not None:
-        rows.append(("거주층", f"지하 {-floor}층" if floor < 0 else f"{floor}층" + (" (꼭대기)" if grnd >= 2 and floor == grnd else "")))
     if mountain:
         rows.append(("땅", "산 지번"))
     return rows
@@ -14071,24 +14069,20 @@ def trip_interpret(bld, floor, mountain, missing=False):
         elif p and not any(w in p for w in ("주택", "아파트", "공동", "업무")):
             facts.append(("store", "주거용 아닌 건물", f"{p}에 살고 계세요"))
 
-        grnd, elev = bld.get("grnd") or 0, bld.get("elevators")
-        if floor is not None and floor < 0:
-            facts.append(("drop", "지하층", "습기·침수 위험이 있어요"))
-            checks.append("비 오는 날 물이 새거나 차는지")
-        elif floor is not None and floor >= 2 and elev == 0:
-            facts.append(("stairs", f"승강기 없이 {floor}층", f"계단 약 {(floor - 1) * 18}칸을 매일 올라요"))
-            checks.append("계단을 혼자 오르내리실 수 있는지")
-        elif floor is not None and floor >= 6 and elev == 1:
+        grnd, ugrnd, elev = bld.get("grnd") or 0, bld.get("ugrnd") or 0, bld.get("elevators")
+        if elev == 0 and grnd >= 3:
+            facts.append(("stairs", f"승강기 없는 {grnd}층 건물", "위층이면 매일 계단을 올라요"))
+            checks.append("몇 층에 사시는지, 계단을 혼자 오르내리실 수 있는지")
+        elif elev == 1 and grnd >= 6:
             facts.append(("lift", "승강기 1대뿐", "고장 나면 외출이 끊겨요"))
             checks.append("엘리베이터가 멈추면 어떻게 하시는지")
-        elif elev is None and floor is not None and floor >= 2:
+        elif elev is None and grnd >= 2:
             facts.append(("lift", "승강기 정보 없음", "현장에서 꼭 확인하세요"))
-            checks.append("엘리베이터가 있는지, 멈추면 어떻게 하시는지")
-        elif floor is None and grnd >= 3 and elev == 0:
-            facts.append(("stairs", f"승강기 없는 {grnd}층", "거주층을 넣으면 계단을 계산해요"))
-        if floor is not None and grnd >= 2 and floor == grnd:
-            facts.append(("sun", "꼭대기 층", "여름엔 덥고 겨울엔 추워요"))
-            checks.append("여름에 에어컨·선풍기를 쓰시는지")
+            checks.append("엘리베이터가 있는지, 몇 층에 사시는지")
+        # 지하층 있는 5층 이하 주택(빌라·다가구) — 아파트 지하주차장은 제외
+        if ugrnd and grnd <= 5 and any(w in p for w in ("주택", "공동")) and "아파트" not in p:
+            facts.append(("drop", "지하층이 있는 건물", "반지하에 사시면 습기·침수 주의"))
+            checks.append("반지하인지, 비 오면 물이 새거나 차는지")
     if mountain:
         facts.append(("hill", "산 지번", "집 앞이 언덕길일 수 있어요"))
         checks.append("집 밖 오르막을 혼자 다니실 수 있는지")
@@ -14725,7 +14719,7 @@ def trip_house_search():
         return render_template("trip/house.html", error="주소나 단지명을 넣어주세요.")
     if trip_has_pii(q, floor_raw):
         return render_template("trip/house.html", q=q, error="주민번호나 전화번호는 넣지 마세요. 주소만 입력하면 돼요.")
-    floor = _trip_floor(floor_raw)
+    floor = None   # 거주층은 받지 않음 (대장 값만으로 판단)
     if trip_demo():
         h = trip_demo_house(q)
         if not h:
@@ -14918,6 +14912,10 @@ TRIP_CSS = r'''@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v
   --r:18px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* 한글 줄바꿈: 단어 중간에서 끊지 않고, 마지막 줄이 한 글자만 남지 않게 */
+body{word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+.t,.nm,.hname,.wt .t{text-wrap:balance}
+p,.d,.m,.hint,.note,.ad,.wt .d,.fact .m{text-wrap:pretty}
 html,body{margin:0;background:var(--bg);color:var(--ink);
   font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans CJK KR","Malgun Gothic",sans-serif;font-size:15px;line-height:1.55;letter-spacing:-0.01em}
 a{color:inherit}
@@ -14926,7 +14924,9 @@ a{color:inherit}
 .bar{padding-right:96px}
 .bar h1{white-space:nowrap}
 .bar .tag{white-space:nowrap;flex:none}
-.hello{padding-right:150px}
+.hello{padding-right:0}
+.hello .date{padding-right:110px}
+.hello h1{margin-top:22px}
 
 /* 상단 */
 .bar{display:flex;align-items:center;gap:10px;margin:2px 0 16px}
@@ -16319,9 +16319,6 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <label class="l" for="q">주소 또는 단지명</label>
   <span class="ac" style="display:block"><input type="text" id="q" name="q" value="{{ q or '' }}" placeholder="예: 광주전라제주지역본부"></span>
   <input type="hidden" name="addr" id="addr"><input type="hidden" name="label" id="label">
-  <label class="l" for="floor">거주층 <span class="muted" style="font-weight:500">· 선택</span></label>
-  <input type="text" id="floor" name="floor" placeholder="3 또는 지하1">
-  <p class="hint">거주층을 넣으면 계단·꼭대기 층·지하 여부까지 알려줘요.</p>
   <button class="btn main" type="submit">집 미리보기</button>
 </form>
 {% if demo %}<p class="hint">예시 모드: 라인2차, 미소래를 넣어보세요. 공개 자료로 확인한 값만 들어 있어요.</p>{% endif %}
@@ -16355,12 +16352,12 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 
 <div class="card">
   <p class="hname">{{ (bld and bld.name) or loc.label }}</p>
-  <p class="haddr">{{ loc.road_address or loc.jibun_address }}{% if floor is not none %} · {{ '지하 %d'|format(-floor) if floor < 0 else floor }}층 거주{% endif %}</p>
+  <p class="haddr">{{ loc.road_address or loc.jibun_address }}</p>
 
   <div class="sec">이 집은</div>
   {% if rows %}
   <dl class="spec">{% for k, v in rows %}<dt>{{ k }}</dt><dd{% if v in ('대장에 안 적힘', '실제 조회하면 표시') %} class="muted"{% endif %}>{{ v }}</dd>{% endfor %}
-  {% if floor is none %}<dt>거주층</dt><dd class="muted">넣으면 계단·꼭대기 층을 알려줘요</dd>{% endif %}</dl>
+</dl>
   {% elif missing %}
   <div class="fact"><div class="m">건축물대장에서 이 주소의 건물을 찾지 못했어요. 무허가·미등기 건물이거나, 대장에 다른 지번으로 올라가 있을 수 있어요.</div></div>
   {% elif not facts %}
@@ -16370,7 +16367,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   {% if facts %}
   <div class="sec" style="margin-top:18px">이런 점을 조심하세요</div>
   <div class="warns">{% for ic, f, m in facts %}
-    <div class="wt"><span class="wi">{{ wicon(ic) }}</span><div class="t">{{ f }}</div><div class="d">{{ m }}</div></div>
+    <div class="wt"><span class="wi">{{ wicon(ic) }}</span><div class="t">{{ f|replace("·", "⁠·⁠") }}</div><div class="d">{{ m|replace("·", "⁠·⁠") }}</div></div>
   {% endfor %}</div>
   {% elif rows %}
   <p class="hint" style="margin:14px 0 0">대장 정보로는 특별히 조심할 점이 보이지 않아요.</p>
