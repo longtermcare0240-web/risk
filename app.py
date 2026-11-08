@@ -15390,7 +15390,11 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .pint{display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:2px 8px;border-radius:999px;background:var(--route);color:#fff;font-size:11.5px;font-weight:700;vertical-align:2px}
 .pint svg{width:12px;height:12px}
 .tl .cum{font-size:12px;color:var(--muted);margin-top:2px}
-.mini .mh #miniHouse{font-size:12.5px;color:#e0782f;font-weight:700;text-decoration:none;flex:none}
+.mini .mh{margin:0 4px 8px}
+.macts{display:flex;gap:6px;margin:0 0 8px}
+.macts .ma{flex:1;display:flex;align-items:center;justify-content:center;height:38px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font-family:inherit;font-size:13.5px;font-weight:700;line-height:1;padding:0;text-decoration:none;cursor:pointer;white-space:nowrap}
+.macts .ma:active{transform:scale(.96)}
+.macts .ma[style*="none"]{display:none!important}
 
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
@@ -16970,8 +16974,12 @@ function restoreLast(){
     if(b.pins&&b.pins[i])setPin(row,b.pins[i]);});
   $("#back").checked=b.return_to_start;$("#endBox").style.display=b.return_to_start?"none":"";$("#end").value=b.end||"";
   checkPins();lastBody=b;bestRes=d.r;show(d.r);
+  if(history.state&&history.state.tripFocus!=null)setTimeout(()=>focusPt(history.state.tripFocus,true),300);   // 집 미리보기에서 돌아오면 보던 곳 그대로
 }
+// 맨 위 ‹ 버튼도 한 곳을 보는 중이면 전체 경로로
+document.querySelector(".bar a.back").addEventListener("click",e=>{if(FOCUS!=null){e.preventDefault();closeFocus();}});
 $("#go").onclick=async()=>{
+  if(history.state&&history.state.tripFocus!=null)history.replaceState(null,"");
   const stopInputs=[...document.querySelectorAll("#stops input")].filter(i=>i.value.trim());
   const stops=stopInputs.map(i=>i.value.trim());
   const picks={start:pickOf($("#start")),end:pickOf($("#end")),stops:stopInputs.map(pickOf)};
@@ -17024,9 +17032,9 @@ function show(r){
       <div class="sm">${km(r.total_distance)} · ${r.fixed?"":r.orders_checked+"가지 순서 비교 · "}${saved}</div>
       ${r.fixed?'<button type="button" class="btn sm back2" onclick="show(bestRes)">최적 순서로 되돌리기</button>':""}</div>
     <div class="card" style="padding:10px"><div class="map" id="map"></div>
-      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b><a id="miniBig" target="_blank" rel="noopener">로드뷰 크게</a><a id="miniHouse">집 미리보기</a><button type="button" class="allv" onclick="unfocus()">✕ 전체 보기</button></div>
+      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b></div><div class="macts"><a id="miniHouse" class="ma">집 미리보기</a><a id="miniBig" class="ma" target="_blank" rel="noopener">로드뷰 크게</a><button type="button" class="ma" onclick="closeFocus()">전체 경로</button></div>
         <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
-      <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
+      <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르거나 '전체 경로'를 누르면 원래대로 돌아가요.</p></div>
     <div class="card"><ul class="tl">${tl}</ul></div>
     ${r.demo?'<p class="hint">예시 모드라 직선거리로 추정한 시간이에요.<br>실제 키를 넣으면 실시간 교통을 반영해요.</p>':'<p class="hint">실시간 교통을 반영한 자동차 기준이에요.</p>'}`;
   $("#result").style.display="";if($("#ph"))$("#ph").remove();
@@ -17045,10 +17053,24 @@ function unfocus(){
 function bearing(a,b){const r=Math.PI/180,y=Math.sin((b.lng-a.lng)*r)*Math.cos(b.lat*r),
   x=Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos((b.lng-a.lng)*r);
   return (Math.atan2(y,x)/r+360)%360;}
-function focusPt(i){
+/* 번호를 눌러 한 곳을 볼 때 기록을 하나 쌓아서, 폰 뒤로가기·‹ 버튼이 '전체 경로'와 같게 동작 */
+function closeFocus(){
+  if(history.state&&history.state.tripFocus!=null)history.back();   // popstate에서 unfocus
+  else unfocus();
+}
+window.addEventListener("popstate",e=>{
+  const f=e.state&&e.state.tripFocus;
+  if(f==null){if(FOCUS!=null)unfocus();}
+  else if(window._curRes&&FOCUS!==f)focusPt(f,true);
+});
+function focusPt(i,noHist){
   const r=window._curRes,o=r.order,last=o.length-1;
   if(i===last&&r.return_to_start)i=0;
-  if(FOCUS===i){unfocus();return;}   // 같은 번호를 다시 누르면 원래대로
+  if(FOCUS===i&&!noHist){closeFocus();return;}   // 같은 번호를 다시 누르면 원래대로
+  if(!noHist){
+    if(history.state&&history.state.tripFocus!=null)history.replaceState({tripFocus:i},"");
+    else history.pushState({tripFocus:i},"");
+  }
   FOCUS=i;
   const p=o[i],nm=i===0?(p.label||p.input||"출발"):(p.label||p.input);
   document.querySelectorAll("#result .tl li").forEach((li,k)=>li.classList.toggle("on",k===i||(i===0&&k===last&&r.return_to_start)));
