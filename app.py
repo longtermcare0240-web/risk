@@ -15160,9 +15160,9 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .acl .rh+button{border-top:0}
 .acl .none{padding:12px 14px;color:var(--muted);font-size:13px}
 
-.ctabs{display:flex;gap:6px;overflow-x:auto;margin:2px 0 10px;scrollbar-width:none}
+.ctabs{display:flex;gap:5px;overflow-x:auto;margin:2px 0 10px;scrollbar-width:none}
 .ctabs::-webkit-scrollbar{display:none}
-.ctabs button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:999px;padding:6px 12px;font:600 13px/1 inherit;font-family:inherit;cursor:pointer}
+.ctabs button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:999px;padding:6px 9px;font:600 12.5px/1 inherit;font-family:inherit;cursor:pointer}
 .ctabs button.on{background:var(--house);border-color:var(--house);color:#fff}
 .ai{background:linear-gradient(135deg,#fff7ef,#fff);border:1px solid #f3d9c2}
 .ai .sec{display:flex;align-items:center;gap:6px}
@@ -16588,7 +16588,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <div class="map" id="safeMap">{% if not safemap_key %}<div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--sub);font-size:13px;padding:16px">생활안전지도 키를 넣으면<br>집 주변 범죄주의구간이 색으로 겹쳐져요</div>{% endif %}</div>
   <div class="legend">낮음<span class="bar2"></span>높음 (10등급)</div>
   <p class="hint" id="safeNote">치안 정보 불러오는 중</p>
-  <p class="hint">5대 범죄(살인·강도·성폭력·절도·폭력) 발생 밀도예요. 전체는 합산, 나머지는 종류별이에요. 등급이 높다고 지금 위험하다는 뜻은 아니에요. 진한 길이 집 앞에 있으면 야간·단독 방문은 피하세요.</p>
+  <p class="hint">5대 범죄(살인·강도·성폭력·절도·폭력) 발생 밀도예요.<br>전체는 합산, 나머지는 종류별이에요.<br>등급이 높다고 지금 위험하다는 뜻은 아니에요.<br>진한 길이 집 앞에 있으면 야간·단독 방문은 피하세요.</p>
 </div>
 
 <div class="card">
@@ -16652,7 +16652,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
       if(bad&&!ok){note.textContent=(i?L0.name+" 지도를":"치안 정보를")+" 불러오지 못했어요. 생활안전지도 키 승인·사이트 주소를 확인해 주세요.";note.style.color="#b4332f";}
       else{note.textContent="["+L0.name+"] 색이 칠해진 길이 없으면 이 주변은 "+(i?L0.name+" ":"")+"범죄주의구간이 아니에요.";}
     });
-    cur.addTo(m);cur.bringToBack();
+    cur.addTo(m);cur.setZIndex(5);
   }
   document.querySelectorAll("#crimeChips button").forEach(function(b){
     b.onclick=function(){document.querySelectorAll("#crimeChips button").forEach(function(x){x.classList.remove("on");});
