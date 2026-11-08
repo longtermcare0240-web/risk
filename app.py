@@ -16317,7 +16317,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% else %}
 <form class="card" method="post" action="{{ url_for('trip.house_search') }}" autocomplete="off">
   <label class="l" for="q">주소 또는 단지명</label>
-  <span class="ac" style="display:block"><input type="text" id="q" name="q" value="{{ q or '' }}" placeholder="국민건강보험공단 광주전라제주지역본부"></span>
+  <span class="ac" style="display:block"><input type="text" id="q" name="q" value="{{ q or '' }}" placeholder="예: 광주전라제주지역본부"></span>
   <input type="hidden" name="addr" id="addr"><input type="hidden" name="label" id="label">
   <label class="l" for="floor">거주층 <span class="muted" style="font-weight:500">· 선택</span></label>
   <input type="text" id="floor" name="floor" placeholder="3 또는 지하1">
@@ -16529,7 +16529,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 <div class="cols"><div class="colA">
 <div class="card" id="form">
   <label class="l">출발지</label>
-  <div class="row"><span class="ac"><input type="text" id="start" placeholder="예: 국민건강보험공단 광주전라제주지역본부" autocomplete="off"></span>
+  <div class="row"><span class="ac"><input type="text" id="start" placeholder="예: 광주전라제주지역본부" autocomplete="off"></span>
     <button class="btn sm" type="button" id="gpsBtn">현재 위치</button></div>
   <label class="l">방문지 <span class="muted" style="font-weight:500">· 순서 상관없이 넣으세요 (최대 {{ max_stops }}곳)</span></label>
   <div id="stops"></div>
