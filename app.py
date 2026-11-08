@@ -13796,6 +13796,1953 @@ async function renameTeam(){
 # ================================================================
 
 
+# ================================================================================
+# ===============  출장 도구함 모듈 (/trip)  ======================================
+#   - 안전로드 지도앱·매식비 코드와 완전히 분리, /trip 하위 경로로만 동작
+#   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기
+#   - 이름·주민번호·전화번호는 받지 않고, 입력·사진·위치는 저장하지 않음 (DB 안 씀)
+#   - 환경변수: KAKAO_KEY, KAKAO_JS_KEY(기존) / DATA_GO_KR_KEY, SAFEMAP_KEY, OPENAI_API_KEY(추가)
+#   - 데이터 파일: 공중화장실.xlsx(기존), pills.csv(케어내비에서 복사)
+#   - 주소 자동완성은 안전로드 /search_place 를 그대로 씀
+#   - TRIP_DEMO=1 이면 키 없이 예시 화면
+# ================================================================================
+import math as _trip_math
+from concurrent.futures import ThreadPoolExecutor
+from itertools import permutations
+from flask import Blueprint, render_template
+from jinja2 import ChoiceLoader as _TripChoiceLoader, DictLoader as _TripDictLoader
+try:
+    from openai import OpenAI
+except ImportError:          # openai 패키지가 없어도 안전로드는 정상 동작 (복용약 사진 판독만 안 됨)
+    OpenAI = None
+_trip_log = logging.getLogger("trip")
+
+# ---------- 출장 도구함: kakao ----------
+TRIP_KAKAO_LOCAL = "https://dapi.kakao.com/v2/local"
+TRIP_KAKAO_NAVI = "https://apis-navi.kakaomobility.com/v1/directions"
+TRIP_HTTP_TIMEOUT = 6
+
+
+def _trip_kakao_headers():
+    return {"Authorization": f"KakaoAK {os.environ.get('KAKAO_KEY', '')}"}
+
+
+def _trip_kakao_local(path, params):
+    r = requests.get(f"{TRIP_KAKAO_LOCAL}{path}", headers=_trip_kakao_headers(), params=params, timeout=TRIP_HTTP_TIMEOUT)
+    r.raise_for_status()
+    return r.json().get("documents", [])
+
+
+def _trip_addr_doc(doc, label=None):
+    addr = doc.get("address") or {}
+    road = doc.get("road_address") or {}
+    b_code = addr.get("b_code", "")
+    return {
+        "label": label or road.get("building_name") or doc.get("address_name"),
+        "road_address": road.get("address_name") or "",
+        "jibun_address": addr.get("address_name") or doc.get("address_name", ""),
+        "lat": float(doc["y"]), "lng": float(doc["x"]),
+        "sigungu_cd": b_code[:5], "bjdong_cd": b_code[5:10],
+        "plat_gb_cd": "1" if addr.get("mountain_yn") == "Y" else "0",
+        "bun": (addr.get("main_address_no") or "0").zfill(4),
+        "ji": (addr.get("sub_address_no") or "0").zfill(4),
+        "dong": addr.get("region_3depth_name", ""),
+    }
+
+
+def trip_addr_search(query, limit=5):
+    """도로명·지번이면 주소 검색, 단지명·건물명이면 장소 검색. 후보 목록."""
+    docs = _trip_kakao_local("/search/address.json", {"query": query, "size": limit})
+    if docs:
+        return [_trip_addr_doc(d) for d in docs]
+    out = []
+    for p in _trip_kakao_local("/search/keyword.json", {"query": query, "size": limit}):
+        a = _trip_kakao_local("/search/address.json", {"query": p.get("address_name", ""), "size": 1})
+        if a:
+            out.append(_trip_addr_doc(a[0], label=p.get("place_name")))
+    return out
+
+
+def trip_directions(a, b, geometry=False):
+    """a → b 자동차 경로. 실시간 교통 반영 추천 경로. 반환: 거리(m), 시간(초), 경로 좌표."""
+    params = {"origin": f"{a['lng']},{a['lat']}", "destination": f"{b['lng']},{b['lat']}",
+              "priority": "RECOMMEND", "summary": "false" if geometry else "true"}
+    r = requests.get(TRIP_KAKAO_NAVI, headers=_trip_kakao_headers(), params=params, timeout=TRIP_HTTP_TIMEOUT)
+    r.raise_for_status()
+    route = (r.json().get("routes") or [{}])[0]
+    if route.get("result_code", -1) != 0:
+        raise ValueError(route.get("result_msg", "경로 없음"))
+    s = route["summary"]
+    path = []
+    if geometry:
+        for sec in route.get("sections", []):
+            for road in sec.get("roads", []):
+                v = road.get("vertexes", [])
+                path += [[v[i + 1], v[i]] for i in range(0, len(v) - 1, 2)]
+    return {"distance": s["distance"], "duration": s["duration"], "path": path}
+
+# ---------- 출장 도구함: route_opt ----------
+TRIP_MAX_STOPS = 6
+
+
+def _trip_haversine(a, b):
+    r = 6371000
+    p1, p2 = _trip_math.radians(a["lat"]), _trip_math.radians(b["lat"])
+    dp, dl = p2 - p1, _trip_math.radians(b["lng"] - a["lng"])
+    h = _trip_math.sin(dp / 2) ** 2 + _trip_math.cos(p1) * _trip_math.cos(p2) * _trip_math.sin(dl / 2) ** 2
+    return 2 * r * _trip_math.asin(_trip_math.sqrt(h))
+
+
+def trip_estimate_leg(a, b, geometry=False):
+    """키 없는 예시 모드용 추정: 직선거리 ×1.35, 평균 시속 35km. 실제 길찾기가 아님."""
+    d = _trip_haversine(a, b) * 1.35
+    return {"distance": int(d), "duration": int(d / (35000 / 3600)),
+            "path": [[a["lat"], a["lng"]], [b["lat"], b["lng"]]] if geometry else []}
+
+
+def _trip_route_fixed(pts, leg_fn):
+    """사용자가 순서를 직접 바꾼 경우: 그 순서 그대로 구간만 계산"""
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        legs = list(ex.map(lambda k: leg_fn(pts[k], pts[k + 1], True), range(len(pts) - 1)))
+    return {
+        "order": pts,
+        "legs": [{"distance": l["distance"], "duration": l["duration"], "path": l["path"]} for l in legs],
+        "total_duration": sum(l["duration"] for l in legs),
+        "total_distance": sum(l["distance"] for l in legs),
+        "saved_vs_worst": 0, "saved_vs_input": 0, "orders_checked": 1, "fixed": True,
+    }
+
+
+def trip_optimize(start, stops, end, leg_fn, keep_order=False):
+    """start/end: 지점 dict, stops: 경유지 목록. leg_fn(a, b, geometry) → {distance, duration, path}
+    keep_order=True 이면 순서를 바꾸지 않고 넣은 순서대로 계산"""
+    pts = [start] + stops + [end]
+    if keep_order:
+        return _trip_route_fixed(pts, leg_fn)
+    n_s = len(stops)
+    s_idx, e_idx = 0, n_s + 1
+    pairs = {(s_idx, i) for i in range(1, n_s + 1)} | {(i, e_idx) for i in range(1, n_s + 1)} \
+        | {(i, j) for i in range(1, n_s + 1) for j in range(1, n_s + 1) if i != j}
+    if n_s == 0:
+        pairs = {(s_idx, e_idx)}
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {p: ex.submit(leg_fn, pts[p[0]], pts[p[1]], False) for p in pairs}
+        mat = {p: f.result() for p, f in futs.items()}
+
+    def total(order):
+        seq = [s_idx] + list(order) + [e_idx]
+        return sum(mat[(seq[k], seq[k + 1])]["duration"] for k in range(len(seq) - 1))
+
+    orders = list(permutations(range(1, n_s + 1)))
+    scored = sorted((total(o), o) for o in orders)
+    best_t, best = scored[0]
+    worst_t = scored[-1][0]
+    given_t = total(tuple(range(1, n_s + 1)))
+
+    seq = [s_idx] + list(best) + [e_idx]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        legs = list(ex.map(lambda k: leg_fn(pts[seq[k]], pts[seq[k + 1]], True), range(len(seq) - 1)))
+
+    return {
+        "order": [pts[i] for i in seq],
+        "legs": [{"distance": l["distance"], "duration": l["duration"], "path": l["path"]} for l in legs],
+        "total_duration": best_t,
+        "total_distance": sum(l["distance"] for l in legs),
+        "saved_vs_worst": worst_t - best_t,
+        "saved_vs_input": given_t - best_t,
+        "orders_checked": len(orders),
+    }
+
+# ---------- 출장 도구함: house ----------
+TRIP_BLD_TITLE_URL = "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+TRIP_WOOD = ("목조", "목구조", "흙")
+TRIP_MASONRY = ("조적", "벽돌", "블록")
+
+
+def _trip_int(v):
+    try:
+        return int(str(v).strip() or 0)
+    except ValueError:
+        return 0
+
+
+def trip_building(loc):
+    """표제부. 반환: dict / None(대장 없음). 조회 실패는 예외."""
+    params = {"serviceKey": os.environ.get("DATA_GO_KR_KEY") or os.environ.get("MEAL_HOLIDAY_API_KEY", ""), "_type": "json", "numOfRows": 50,
+              "sigunguCd": loc["sigungu_cd"], "bjdongCd": loc["bjdong_cd"], "platGbCd": loc["plat_gb_cd"],
+              "bun": loc["bun"], "ji": loc["ji"]}
+    r = requests.get(TRIP_BLD_TITLE_URL, params=params, timeout=6)
+    r.raise_for_status()
+    body = (r.json().get("response") or {}).get("body") or {}
+    items = body.get("items") or {}
+    rows = items.get("item") if isinstance(items, dict) else []
+    rows = rows if isinstance(rows, list) else ([rows] if rows else [])
+    if not rows:
+        return None
+    main = [x for x in rows if str(x.get("mainAtchGbCd", "0")) == "0"] or rows
+    rep = max(main, key=lambda x: _trip_int(x.get("grndFlrCnt")))
+    # 승강기: 동마다 따로 적혀 있어서 주건축물 중 가장 많이 적힌 값을 씀
+    elev = max(_trip_int(x.get("rideUseElvtCnt")) + _trip_int(x.get("emgenUseElvtCnt")) for x in main)
+    grnd = _trip_int(rep.get("grndFlrCnt"))
+    if elev == 0 and grnd >= 6:
+        elev = None   # 6층 이상은 승강기 설치 의무라 0은 '대장에 안 적힘'으로 봄
+    apr = str(rep.get("useAprDay") or "").strip()
+    year = int(apr[:4]) if apr[:4].isdigit() else None
+    return {
+        "name": rep.get("bldNm") or "",
+        "purpose": rep.get("mainPurpsCdNm") or "",
+        "structure": rep.get("strctCdNm") or rep.get("etcStrct") or "",
+        "roof": rep.get("roofCdNm") or rep.get("etcRoof") or "",
+        "year": year,
+        "grnd": grnd,
+        "ugrnd": _trip_int(rep.get("ugrndFlrCnt")),
+        "elevators": elev,
+        "households": _trip_int(rep.get("hhldCnt")) or _trip_int(rep.get("fmlyCnt")) or _trip_int(rep.get("hoCnt")),
+        "dongs": len(main),
+    }
+
+
+def trip_interpret(bld, floor, mountain, missing=False):
+    """반환: facts=[(사실, 그래서)], checks=[가서 볼 것]"""
+    facts, checks = [], []
+    if missing:
+        facts.append(("건축물대장에 없는 집",
+                      "무허가·미등기일 수 있어요. 주거지원 사업에서 빠져 있었는지 확인하세요."))
+        checks += ["언제 지은 집인지, 증축한 곳이 있는지", "지붕 재질(슬레이트인지)"]
+    if bld:
+        age = (date.today().year - bld["year"]) if bld.get("year") else None
+        if age is not None:
+            if age >= 30:
+                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
+                              "단열·배관이 낡았을 가능성이 커요. 겨울 난방과 욕실을 먼저 보세요."))
+                checks.append("겨울에 난방을 실제로 켜시는지")
+            elif age >= 20:
+                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
+                              "욕실·배관 같은 설비가 교체 시기예요. 욕실 바닥과 손잡이를 먼저 보세요."))
+                checks.append("욕실 손잡이, 미끄럼 방지 매트")
+            else:
+                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
+                              "비교적 새 집이에요. 집 구조보다 가사·외출 같은 생활 쪽을 보세요."))
+        s = bld.get("structure") or ""
+        if any(w in s for w in TRIP_WOOD):
+            facts.append((s, "나무·흙으로 지은 집이라 화재와 겨울 추위에 약해요."))
+            checks.append("전열기구·화기 사용과 화재경보기")
+        elif any(w in s for w in TRIP_MASONRY):
+            facts.append((s, "벽돌·블록 집은 단열이 약한 경우가 많아요."))
+        if "슬레이트" in (bld.get("roof") or ""):
+            facts.append(("슬레이트 지붕", "석면이 들어 있을 수 있어요. 지붕 개량 지원 대상인지 확인하세요."))
+        p = bld.get("purpose") or ""
+        if p and not any(w in p for w in ("주택", "아파트", "공동")):
+            facts.append((f"{p} 건물에 거주", "주거용이 아닌 건물이에요. 쪽방·고시원형 주거일 수 있어요."))
+
+        grnd, elev = bld.get("grnd") or 0, bld.get("elevators")
+        if floor is not None and floor < 0:
+            facts.append((f"지하 {-floor}층 거주", "습기·곰팡이·침수 위험이 있어요. 환기와 배수를 보세요."))
+            checks.append("비 오는 날 물이 새거나 차는지")
+        elif floor is not None and floor >= 2 and elev == 0:
+            facts.append((f"승강기 없는 {floor}층", f"매일 계단 약 {(floor - 1) * 18}칸을 오르내려야 해요."))
+            checks.append("계단을 혼자 오르내리실 수 있는지")
+        elif floor is not None and floor >= 6 and elev == 1:
+            facts.append((f"{floor}층 · 승강기 1대", "점검·고장 날엔 외출이 끊길 수 있어요."))
+            checks.append("엘리베이터가 멈추면 어떻게 하시는지")
+        elif elev is None and floor is not None and floor >= 2:
+            facts.append((f"{floor}층 거주 · 승강기 정보 없음",
+                          "건축물대장에 승강기 수가 비어 있어요. 승강기가 있는지 현장에서 확인하세요."))
+            checks.append("엘리베이터가 있는지, 멈추면 어떻게 하시는지")
+        elif floor is None and grnd >= 3 and elev == 0:
+            facts.append((f"승강기 없는 {grnd}층 건물", "거주층을 넣으면 계단 부담을 계산해요."))
+        elif grnd >= 6 and elev:
+            facts.append((f"지상 {grnd}층 · 승강기 {elev}대", "층 이동은 승강기에 의존해요."))
+        if floor is not None and grnd >= 2 and floor == grnd:
+            facts.append(("꼭대기 층", "여름엔 덥고 겨울엔 추워요. 냉난방 여부를 보세요."))
+            checks.append("여름에 에어컨·선풍기를 쓰시는지")
+    if mountain:
+        facts.append(("산 지번", "산을 깎은 땅이라 언덕길일 수 있어요. 외출·장보기가 힘든지 보세요."))
+        checks.append("집 밖 오르막을 혼자 다니실 수 있는지")
+    for d in ("지금 몇 분이 같이 사시는지", "장보기·청소는 누가 하시는지"):
+        if len(checks) < 3:
+            checks.append(d)
+    return facts, list(dict.fromkeys(checks))[:3]
+
+# ---------- 출장 도구함: toilets ----------
+_TRIP_TOILET_CACHE = {"mtime": None, "rows": []}
+TRIP_TOILET_RADIUS = 5000
+TRIP_TOILET_LIMIT = 10
+TRIP_OPEN_LABEL = {"상시": "상시 개방", "정시": "정해진 시간 개방", "불규칙": "개방 불규칙", "미개방": "개방 안 함"}
+
+
+def _trip_toilet_path():
+    return os.environ.get("TOILET_FILE", "공중화장실.xlsx")
+
+
+def _trip_s(v):
+    return "" if pd.isna(v) else str(v).strip()
+
+
+def trip_load_toilets():
+    path = _trip_toilet_path()
+    if not os.path.exists(path) and os.path.exists(os.path.join("mapdata", path)):
+        path = os.path.join("mapdata", path)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return []
+    if _TRIP_TOILET_CACHE["mtime"] == mtime:
+        return _TRIP_TOILET_CACHE["rows"]
+    df = pd.read_excel(path)
+    if "구분" in df.columns:
+        df = df[df["구분"].astype(str).str.strip() == "공중화장실"]
+    df["위도"] = pd.to_numeric(df["위도"], errors="coerce")
+    df["경도"] = pd.to_numeric(df["경도"], errors="coerce")
+    df = df[df["위도"].notna() & df["경도"].notna()]
+    name_col = next((c for c in ("화장실명", "시설명", "명칭") if c in df.columns), None)
+    rows = []
+    for r in df.to_dict("records"):
+        rows.append({
+            "name": _trip_s(r.get(name_col)) if name_col else "",
+            "address": _trip_s(r.get("주소")),
+            "lat": float(r["위도"]), "lng": float(r["경도"]),
+            "open": _trip_s(r.get("개방시간")),
+            "bell": _trip_s(r.get("비상벨")) == "Y",
+            "accessible": _trip_s(r.get("장애인화장실")) == "Y",
+        })
+    _TRIP_TOILET_CACHE.update(mtime=mtime, rows=rows)
+    return rows
+
+
+def _trip_dist(lat1, lng1, lat2, lng2):
+    r = 6371000
+    p1, p2 = _trip_math.radians(lat1), _trip_math.radians(lat2)
+    dp, dl = p2 - p1, _trip_math.radians(lng2 - lng1)
+    h = _trip_math.sin(dp / 2) ** 2 + _trip_math.cos(p1) * _trip_math.cos(p2) * _trip_math.sin(dl / 2) ** 2
+    return 2 * r * _trip_math.asin(_trip_math.sqrt(h))
+
+
+def trip_nearest_toilets(lat, lng, rows, only_always=False, need_bell=False, need_accessible=False):
+    out = []
+    for t in rows:
+        if t["open"] == "미개방":
+            continue
+        if only_always and t["open"] != "상시":
+            continue
+        if need_bell and not t["bell"]:
+            continue
+        if need_accessible and not t["accessible"]:
+            continue
+        d = _trip_dist(lat, lng, t["lat"], t["lng"])
+        if d <= TRIP_TOILET_RADIUS:
+            out.append({**t, "distance": int(d), "open_label": TRIP_OPEN_LABEL.get(t["open"], t["open"] or "정보 없음"),
+                        "walk_min": max(1, round(d / 67))})
+    out.sort(key=lambda x: x["distance"])
+    return out[:TRIP_TOILET_LIMIT]
+
+# ---------- 출장 도구함: pills ----------
+_trip_log = logging.getLogger(__name__)
+
+TRIP_PILL_FILE = os.environ.get("PILL_FILE", "pills.csv")
+_TRIP_PILL_CACHE = {"mtime": None, "rows": []}
+TRIP_PILL_DEMENTIA_KW = ["도네페질", "리바스티그민", "갈란타민", "메만틴", "아리셉트", "엑셀론", "레미닐", "에빅사"]
+TRIP_PILL_COLORS = ["하양", "노랑", "주황", "분홍", "빨강", "갈색", "연두", "초록", "청록", "파랑", "남색", "자주", "보라", "회색", "검정", "투명"]
+TRIP_PILL_SHAPES = ["원형", "타원형", "장방형", "반원형", "삼각형", "사각형", "마름모형", "오각형", "육각형", "팔각형", "기타"]
+TRIP_PILL_FORMS = ["정제", "경질캡슐", "연질캡슐"]
+
+
+def _trip_pill_form_kind(form_name):
+    """식약처 제형명(FORM_CODE_NAME) → 정제 / 경질캡슐 / 연질캡슐 (그 외는 빈 값)"""
+    f = str(form_name or "")
+    if "연질" in f:
+        return "연질캡슐"
+    if "캡슐" in f:
+        return "경질캡슐"
+    if "정" in f:
+        return "정제"
+    return ""
+
+
+def _trip_pill_norm(s):
+    """각인 비교용 정규화: 대문자, '분할선'·'마크' 등 설명어 제거, 글자·숫자만 남김"""
+    s = str(s or "").upper()
+    for w in ("분할선", "마크", "각인", "없음"):
+        s = s.replace(w, "")
+    return re.sub(r"[^0-9A-Z가-힣]", "", s)
+
+
+def trip_load_pills():
+    try:
+        mtime = os.path.getmtime(TRIP_PILL_FILE)
+    except OSError:
+        return []
+    if _TRIP_PILL_CACHE["mtime"] == mtime:
+        return _TRIP_PILL_CACHE["rows"]
+    try:
+        pdf = pd.read_csv(TRIP_PILL_FILE, dtype=str).fillna("")
+    except Exception as e:
+        _trip_log.exception(e)
+        return _TRIP_PILL_CACHE["rows"]
+    rows = []
+    for r in pdf.to_dict("records"):
+        name = r.get("ITEM_NAME", "")
+        prints = [p for p in (_trip_pill_norm(r.get("PRINT_FRONT")), _trip_pill_norm(r.get("PRINT_BACK"))) if p]
+        colors = set()
+        for c in (r.get("COLOR_CLASS1", ""), r.get("COLOR_CLASS2", "")):
+            for x in str(c).split(","):
+                x = x.strip()
+                if x and x != "옅은":
+                    colors.add(x)
+        rows.append({
+            "seq": r.get("ITEM_SEQ", ""),
+            "name": name,
+            "company": r.get("ENTP_NAME", ""),
+            "cls": r.get("CLASS_NAME", ""),
+            "etc_otc": r.get("ETC_OTC_NAME", ""),
+            "form": r.get("FORM_CODE_NAME", ""),
+            "shape": r.get("DRUG_SHAPE", ""),
+            "color": r.get("COLOR_CLASS1", ""),
+            "print_front": r.get("PRINT_FRONT", ""),
+            "print_back": r.get("PRINT_BACK", ""),
+            "image": r.get("ITEM_IMAGE", ""),
+            "_prints": prints,
+            "_colors": colors,
+            "_capsule": "캡슐" in r.get("FORM_CODE_NAME", ""),
+            "_kind": _trip_pill_form_kind(r.get("FORM_CODE_NAME", "")),
+            "dementia": any(k in name for k in TRIP_PILL_DEMENTIA_KW),
+        })
+    _TRIP_PILL_CACHE["mtime"] = mtime
+    _TRIP_PILL_CACHE["rows"] = rows
+    return rows
+
+
+# 사진에서 자주 헷갈리는 글자 → 같은 대표 글자로 바꿔 비교 (정확히 같은 글자보다는 낮게 인정)
+_TRIP_PILL_CONFUSE = str.maketrans({"O": "0", "Q": "0", "I": "1", "L": "1", "B": "8",
+                               "S": "5", "Z": "2", "T": "7", "G": "6"})
+
+
+def _trip_pill_canon(s):
+    return s.translate(_TRIP_PILL_CONFUSE)
+
+
+def _trip_pill_imprint_score(photo_prints, pill_prints):
+    """사진에서 읽은 각인들과 알약 각인(앞/뒤)의 일치도 0~1
+    - 정확히 같음 1.0 / 헷갈리는 글자만 다름(0↔O, 1↔I·L, 8↔B, 5↔S, 2↔Z, 7↔T, 6↔G) 0.8
+    - 한쪽이 다른 쪽에 포함 0.7 / 그 외 비슷한 정도에 따라 최대 0.6"""
+    import difflib
+    if not photo_prints or not pill_prints:
+        return 0.0
+    total = 0.0
+    for p in photo_prints:
+        best = 0.0
+        for d in pill_prints:
+            if p == d:
+                best = 1.0
+                break
+            cp, cd = _trip_pill_canon(p), _trip_pill_canon(d)
+            if cp == cd:
+                best = max(best, 0.8)
+                continue
+            if len(p) >= 2 and len(d) >= 2 and (p in d or d in p):
+                best = max(best, 0.7)
+                continue
+            if len(cp) >= 2 and len(cd) >= 2 and (cp in cd or cd in cp):
+                best = max(best, 0.65)
+                continue
+            sm = difflib.SequenceMatcher(None, cp, cd)
+            if sm.real_quick_ratio() >= 0.6 and sm.quick_ratio() >= 0.6:
+                r = sm.ratio()
+                if r >= 0.6:
+                    best = max(best, r * 0.6)
+        total += best
+    score = total / len(photo_prints)
+    # 사진의 앞·뒤 각인 수와 알약의 각인 수가 같으면 약간 가산
+    if len(photo_prints) == len(pill_prints) and score >= 0.7:
+        score = min(1.0, score + 0.05)
+    return score
+
+
+# 식약처 약 분류명(CLASS_NAME) → 쉬운 이름, 돌봄 관점에서 검토할 신호
+# - 의학적 판단이 아니라 '검토해 볼 돌봄'을 안내하기 위한 참고용 표. 분류명이 바뀌면 여기만 고치면 됨
+TRIP_PILL_CARE_MAP = {
+    "최면진정제": ("수면제", ["낙상 주의"]),
+    "정신신경용제": ("신경정신과 약", ["낙상 주의"]),
+    "항전간제": ("뇌전증약", ["낙상 주의"]),
+    "골격근이완제": ("근육이완제", ["낙상 주의"]),
+    "항히스타민제": ("알레르기약", ["낙상 주의"]),
+    "혈압강하제": ("혈압약", ["어지럼 주의"]),
+    "이뇨제": ("이뇨제", ["야간 화장실 낙상 주의"]),
+    "당뇨병용제": ("당뇨약", ["식사·영양 관리"]),
+    "혈액응고저지제": ("항응고제", ["넘어짐 시 출혈 주의"]),
+    "동맥경화용제": ("고지혈증약", []),
+    "부정맥용제": ("심장약", []),
+    "관상혈관확장제": ("심장약", []),
+    "해열.진통.소염제": ("진통소염제", []),
+    "소화성궤양용제": ("위장약", []),
+    "진해거담제": ("기침·가래약", []),
+}
+
+
+def _trip_pill_care(cls, dementia=False):
+    """약 1개의 쉬운 이름과 돌봄 신호. 치매약은 이름으로 판별(분류명이 '기타의 중추신경용약' 등으로 흩어져 있음)"""
+    if dementia:
+        return {"kind": "치매약", "signals": ["인지 지원"]}
+    cls = str(cls or "").strip()
+    for key, (kind, signals) in TRIP_PILL_CARE_MAP.items():
+        if key in cls:
+            return {"kind": kind, "signals": list(signals)}
+    kind = re.sub(r"^\[\d+\]\s*", "", cls).replace("기타의 ", "").strip() or "기타 약"
+    return {"kind": kind, "signals": []}
+
+
+def trip_search_pills(imprints, color="", shape="", capsule=None, limit=3, form=""):
+    """각인(필수) + 색·모양(보조)으로 후보를 점수순으로 반환
+    form: 사용자가 고른 제형(정제/경질캡슐/연질캡슐). 고르면 해당 제형만, 빈 값이면 전체"""
+    photo_prints = [p for p in (_trip_pill_norm(x) for x in (imprints or [])) if p]
+    if not photo_prints:
+        return []
+    results = []
+    for row in trip_load_pills():
+        if form and row["_kind"] != form:
+            continue
+        s_imp = _trip_pill_imprint_score(photo_prints, row["_prints"])
+        if s_imp <= 0:
+            continue
+        score = s_imp * 70
+        if color and color in row["_colors"]:
+            score += 15
+        if shape and shape == row["shape"]:
+            score += 10
+        if capsule is not None and capsule == row["_capsule"]:
+            score += 5
+        if score >= 40:
+            results.append((score, row))
+    results.sort(key=lambda x: -x[0])
+    # 1등보다 확연히 낮은 후보(20점 이상 차이)는 혼동을 줄이기 위해 제외
+    if results:
+        cut = max(40, results[0][0] - 20)
+        results = [x for x in results if x[0] >= cut]
+    # 확신도: 입력한 단서(각인·색·모양·제형)로 받을 수 있는 최고점 대비 비율
+    #   거의 확실(90%↑, 단 1등이 2등보다 3점 이상 앞설 때만) / 유력(70%↑) / 참고
+    max_score = 70 + (15 if color else 0) + (10 if shape else 0) + (5 if capsule is not None else 0)
+    top = results[:limit]
+    lead_ok = len(top) == 1 or (len(top) > 1 and top[0][0] - top[1][0] >= 3)
+    out = []
+    for score, row in top:
+        item = {k: v for k, v in row.items() if not k.startswith("_")}
+        item["score"] = round(score)
+        ratio = score / max_score
+        if ratio >= 0.9 and lead_ok and row is top[0][1]:
+            item["conf"], item["conf_label"] = "high", "거의 확실"
+        elif ratio >= 0.7:
+            item["conf"], item["conf_label"] = "mid", "유력"
+        else:
+            item["conf"], item["conf_label"] = "low", "참고"
+        item["detail_url"] = "https://nedrug.mfds.go.kr/pbp/CCBBB01/getItemDetail?itemSeq=" + row["seq"]
+        item["care"] = _trip_pill_care(row["cls"], row["dementia"])
+        out.append(item)
+    return out
+
+
+TRIP_PILL_MAX = 10          # 한 번에 처리하는 최대 알약 수
+TRIP_PILL_RECOMMEND = 5     # 권장 알약 수 (넘으면 안내)
+
+
+def _trip_pill_features_from_images(images):
+    """GPT로 알약 사진의 '보이는 특징'만 읽음 (약 이름 추정 금지).
+    images: [(label, mimetype, bytes)]  label = "front" | "back"
+    한 사진에 알약이 여러 개일 수 있음 → 알약마다 각인·색·모양·위치(x, y)를 따로 읽음"""
+    import base64
+    client = OpenAI()
+    labels = [lb for lb, _, _ in images]
+    if labels == ["front", "back"]:
+        desc = ("첫 번째 사진은 알약들의 앞면, 두 번째 사진은 같은 알약들을 놓인 자리 그대로 하나씩 뒤집어 찍은 뒷면이다.\n")
+    else:
+        desc = "사진은 알약들을 한쪽 면만 찍은 것이다.\n"
+    content = [{"type": "input_text", "text": (
+        "사진 속 알약의 겉모습만 읽어서 JSON으로만 답해. 약 이름은 절대 추측하지 마.\n"
+        + desc +
+        f"사진마다 보이는 알약을 하나씩 모두 적어 (최대 {TRIP_PILL_MAX}개).\n"
+        "알약 1개는 반드시 1개로만 적어. 한 알약의 글자가 분할선 등으로 나뉘어 있어도 별도 알약으로 나누지 말고, 같은 알약을 두 번 적지 마.\n"
+        "알약마다 imprint(알약에 새겨지거나 인쇄된 글자·숫자를 보이는 그대로, 로고나 그림이면 빈 문자열, "
+        "분할선으로 나뉜 글자는 이어서), color, shape, form, 그리고 사진 안에서 알약 중심의 위치 x, y"
+        "(사진 너비·높이 대비 비율 0~1, 왼쪽 위가 0)를 적어.\n"
+        f"color는 다음 중 하나: {', '.join(TRIP_PILL_COLORS)}\n"
+        f"shape는 다음 중 하나: {', '.join(TRIP_PILL_SHAPES)}\n"
+        "form은 '정제', '캡슐', '모름' 중 하나.\n"
+        "photos 배열은 사진 순서대로 하나씩, 각 사진의 pills 배열에 알약을 넣어.\n"
+        '형식: {"photos":[{"pills":[{"imprint":"","color":"","shape":"","form":"정제","x":0.5,"y":0.5}]}]}'
+    )}]
+    for _, mime, data in images:
+        b64 = base64.b64encode(data).decode("utf-8")
+        content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64}", "detail": "high"})
+
+    res = client.responses.create(model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"), input=[{"role": "user", "content": content}], temperature=0)
+    text = res.output_text or ""
+    try:
+        data = json.loads(text)
+    except Exception:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        data = json.loads(m.group()) if m else {"photos": []}
+
+    def _num(v):
+        try:
+            return min(1.0, max(0.0, float(v)))
+        except Exception:
+            return None
+
+    out = {}
+    photos = data.get("photos") or []
+    for i, lb in enumerate(labels):
+        pills = (photos[i].get("pills") if i < len(photos) and isinstance(photos[i], dict) else None) or []
+        clean = []
+        for p in pills[:TRIP_PILL_MAX]:
+            if not isinstance(p, dict):
+                continue
+            form = p.get("form", "모름")
+            clean.append({
+                "imprint": str(p.get("imprint", "") or "").strip(),
+                "color": p.get("color") if p.get("color") in TRIP_PILL_COLORS else "",
+                "shape": p.get("shape") if p.get("shape") in TRIP_PILL_SHAPES else "",
+                "capsule": True if form == "캡슐" else (False if form == "정제" else None),
+                "x": _num(p.get("x")),
+                "y": _num(p.get("y")),
+            })
+        out[lb] = clean
+    return out
+
+
+def _trip_pill_norm_positions(pills):
+    """알약 위치를 '알약들이 놓인 범위' 기준으로 0~1 정규화
+    (앞·뒷면을 찍을 때 거리·위치가 조금 달라도 배치 모양으로 비교되도록)"""
+    pts = [(p["x"], p["y"]) for p in pills]
+    if any(x is None or y is None for x, y in pts):
+        return None
+    out = []
+    xs, ys = [x for x, _ in pts], [y for _, y in pts]
+    for x, y in pts:
+        rx, ry = max(xs) - min(xs), max(ys) - min(ys)
+        nx = (x - min(xs)) / rx if rx > 0.05 else 0.5      # 한 줄로 놓였으면 그 방향은 비교 안 함
+        ny = (y - min(ys)) / ry if ry > 0.05 else 0.5
+        out.append((nx, ny))
+    return out
+
+
+def _trip_pill_pair_by_position(front, back):
+    """같은 자리에서 뒤집었으므로 '배치상 같은 위치'끼리 앞·뒷면 짝을 맞춤.
+    반환: [(앞면 index 또는 None, 뒷면 index 또는 None), ...]  앞면 순서 유지"""
+    from itertools import permutations
+    fp, bp = _trip_pill_norm_positions(front), _trip_pill_norm_positions(back)
+    pairs = []
+    if fp is None or bp is None or not front or not back:
+        # 위치 정보가 없으면 AI가 적은 순서대로
+        n = max(len(front), len(back))
+        return [(i if i < len(front) else None, i if i < len(back) else None) for i in range(n)]
+
+    def d(i, j):
+        return (fp[i][0] - bp[j][0]) ** 2 + (fp[i][1] - bp[j][1]) ** 2
+
+    nf, nb = len(front), len(back)
+    best = None
+    if min(nf, nb) <= 8 and max(nf, nb) <= 8:
+        # 가능한 짝을 모두 비교해 전체 거리가 가장 작은 조합 (최대 8개면 충분히 빠름)
+        if nf <= nb:
+            for perm in permutations(range(nb), nf):
+                cost = sum(d(i, perm[i]) for i in range(nf))
+                if best is None or cost < best[0]:
+                    best = (cost, {i: perm[i] for i in range(nf)})
+        else:
+            for perm in permutations(range(nf), nb):
+                cost = sum(d(perm[j], j) for j in range(nb))
+                if best is None or cost < best[0]:
+                    best = (cost, {perm[j]: j for j in range(nb)})
+        match = best[1]
+    else:
+        # 9개 이상: 가까운 것부터 차례로 짝
+        cand = sorted((d(i, j), i, j) for i in range(nf) for j in range(nb))
+        match, used_f, used_b = {}, set(), set()
+        for _, i, j in cand:
+            if i not in used_f and j not in used_b:
+                match[i] = j; used_f.add(i); used_b.add(j)
+    for i in range(nf):
+        pairs.append((i, match.get(i)))
+    for j in range(nb):
+        if j not in match.values():
+            pairs.append((None, j))
+    return pairs
+
+
+def _trip_pill_group(no, imprints, color, shape, capsule=None):
+    """알약 1개 결과 묶음 만들기"""
+    # AI가 '정제'로 읽은 경우만 제형을 미리 채움 (캡슐은 경질/연질 구분이 어려워 '전체'로 둠)
+    feats = {"imprint": " / ".join(imprints), "color": color, "shape": shape,
+             "form": "정제" if capsule is False else ""}
+    if not imprints:
+        return {"no": no, "features": feats, "candidates": [],
+                "message": "각인(글자)을 읽지 못했습니다. 이 알약은 글자가 보이도록 가까이 따로 찍거나, 위에 각인을 직접 입력해 주세요."}
+    cands = trip_search_pills(imprints, color, shape, capsule)
+    return {"no": no, "features": feats, "candidates": cands,
+            "message": "" if cands else "일치하는 알약을 찾지 못했습니다. 인식된 각인을 직접 고쳐서 다시 찾아보세요."}
+
+
+def _trip_pill_build_groups(front, back):
+    """앞·뒷면을 배치 위치로 짝지어 알약마다 결과 묶음 만들기 (1알이면 기존과 동일)"""
+    if not front and back:
+        front, back = back, []
+    groups = []
+    for fi, bi in _trip_pill_pair_by_position(front, back):
+        if fi is None:
+            continue   # 뒷면에서만 보인 것(바닥 무늬 오인식 등)은 별도 알약으로 만들지 않음
+        sides = ([front[fi]] if fi is not None else []) + ([back[bi]] if bi is not None else [])
+        imprints = [s["imprint"] for s in sides if s["imprint"]]
+        color = next((s["color"] for s in sides if s["color"]), "")
+        shape = next((s["shape"] for s in sides if s["shape"]), "")
+        capsule = next((s["capsule"] for s in sides if s["capsule"] is not None), None)
+        groups.append(_trip_pill_group(len(groups) + 1, imprints, color, shape, capsule))
+    return groups
+
+
+# ---------- 출장 도구함: demo_data ----------
+TRIP_DEMO_PLACES = {
+    "지사": {"label": "출발지 (예시)", "road_address": "광주 광산구 (예시 좌표)", "lat": 35.1395, "lng": 126.7935},
+    "라인2차": {"label": "소촌라인2차", "road_address": "광주 광산구 금봉로 18", "lat": 35.1420, "lng": 126.7980},
+    "미소래": {"label": "소촌2차 국제미소래", "road_address": "광주 광산구 소촌로42번길 163", "lat": 35.1475, "lng": 126.8060},
+    "라인1차": {"label": "소촌라인1차", "road_address": "광주 광산구 소촌동", "lat": 35.1455, "lng": 126.7955},
+}
+
+TRIP_DEMO_HOUSES = {
+    "라인2차": {"loc": {**TRIP_DEMO_PLACES["라인2차"], "plat_gb_cd": "0"},
+             "bld": {"name": "소촌라인2차", "purpose": "공동주택", "structure": None, "roof": None, "year": 1997,
+                     "grnd": 10, "ugrnd": None, "elevators": None, "households": 436, "dongs": 7},
+             "extra": [], "source": "아파트지인·리치고 단지정보"},
+    "미소래": {"loc": {**TRIP_DEMO_PLACES["미소래"], "plat_gb_cd": "1"},
+            "bld": {"name": "소촌2차 국제미소래", "purpose": "공동주택", "structure": None, "roof": None, "year": None,
+                    "grnd": None, "ugrnd": None, "elevators": None, "households": 382, "dongs": 9},
+            "extra": [], "source": "노잉애셋 단지정보"},
+}
+
+TRIP_DEMO_TOILETS = [
+    {"name": "예시 공중화장실 A", "address": "예시 주소", "lat": 35.1402, "lng": 126.7948, "open": "상시", "bell": True, "accessible": True},
+    {"name": "예시 공중화장실 B", "address": "예시 주소", "lat": 35.1431, "lng": 126.7901, "open": "정시", "bell": False, "accessible": True},
+    {"name": "예시 공중화장실 C", "address": "예시 주소", "lat": 35.1465, "lng": 126.8012, "open": "상시", "bell": True, "accessible": False},
+]
+
+
+def trip_demo_place(q):
+    for k, v in TRIP_DEMO_PLACES.items():
+        if k in q:
+            return dict(v)
+    return None
+
+
+def trip_demo_house(q):
+    for k, v in TRIP_DEMO_HOUSES.items():
+        if k in q:
+            return v
+    return None
+
+# ---------- 출장 도구함: init ----------
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+trip_bp = Blueprint("trip", __name__, url_prefix="/trip")
+
+TRIP_PII = [re.compile(r"\d{6}\s*-?\s*[1-4]\d{6}"), re.compile(r"01[016789]\s*-?\s*\d{3,4}\s*-?\s*\d{4}")]
+
+
+def trip_demo():
+    return os.environ.get("TRIP_DEMO") == "1" or not os.environ.get("KAKAO_KEY")
+
+
+def trip_has_pii(*texts):
+    return any(p.search(t or "") for p in TRIP_PII for t in texts)
+
+
+@trip_bp.context_processor
+def trip_inject():
+    return {"demo": trip_demo(), "kakao_js_key": os.environ.get("KAKAO_JS_KEY") or os.environ.get("KAKAO_KEY", ""),
+            "safemap_key": os.environ.get("SAFEMAP_KEY", ""),
+            "safemap_wms": os.environ.get("SAFEMAP_WMS_URL", "https://www.safemap.go.kr/openapi2/IF_0087_WMS"),
+            "crime_layers": trip_crime_layers()}
+
+
+# 범죄주의구간 종류별 레이어. IF 번호가 바뀌면 SAFEMAP_IF_<키> 환경변수로 덮어쓰면 됨 (예: SAFEMAP_IF_RAPE=IF_0085)
+TRIP_CRIME_LAYERS = [  # (키, 이름, 기본 IF 번호, 스타일)
+    ("TOT", "전체", "IF_0087", "A2SM_CrmnlHspot_Tot_Tot"),
+    ("RAPE", "성폭력", "IF_0085", "A2SM_CrmnlHspot_Tot_Rape"),
+    ("BRGLR", "강도", "IF_0086", "A2SM_CrmnlHspot_Tot_Brglr"),
+    ("VIOLN", "폭력", "IF_0083", "A2SM_CrmnlHspot_Tot_Violn"),
+    ("THEFT", "절도", "IF_0084", "A2SM_CrmnlHspot_Tot_Theft"),
+    ("MURDER", "살인", "IF_0082", "A2SM_CrmnlHspot_Tot_Murder"),
+]
+
+
+def trip_crime_layers():
+    base = "https://www.safemap.go.kr/openapi2/"
+    out = []
+    for key, name, if_id, style in TRIP_CRIME_LAYERS:
+        if_id = os.environ.get(f"SAFEMAP_IF_{key}", if_id)
+        url = os.environ.get("SAFEMAP_WMS_URL") if key == "TOT" and os.environ.get("SAFEMAP_WMS_URL") else f"{base}{if_id}_WMS"
+        out.append({"key": key, "name": name, "url": url,
+                    "style": os.environ.get(f"SAFEMAP_STYLE_{key}", style)})
+    return out
+
+
+@trip_bp.app_template_filter("trip_km")
+def trip_km(m):
+    return "-" if m is None else (f"{m}m" if m < 1000 else f"{m / 1000:.1f}km")
+
+
+@trip_bp.get("/", endpoint="home")
+def trip_home():
+    return render_template("trip/home.html")
+
+
+# ---------- 1. 최적 동선 ----------
+@trip_bp.get("/route", endpoint="route_page")
+def trip_route_page():
+    return render_template("trip/route.html", max_stops=TRIP_MAX_STOPS)
+
+
+def _trip_picked(p):
+    """자동완성에서 고른 곳이면 좌표를 그대로 씀 (다시 검색하지 않음)"""
+    try:
+        return {"label": str(p.get("label") or ""), "road_address": str(p.get("road_address") or ""),
+                "lat": float(p["lat"]), "lng": float(p["lng"])}
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _trip_resolve(q, gps=None, pick=None):
+    if pick:
+        return pick
+    if gps:
+        return {"label": "현재 위치", "road_address": "", "lat": gps[0], "lng": gps[1]}
+    if trip_demo():
+        return trip_demo_place(q)
+    c = trip_addr_search(q, limit=1)
+    return c[0] if c else None
+
+
+@trip_bp.post("/api/route", endpoint="api_route")
+def trip_api_route():
+    d = request.get_json(silent=True) or {}
+    start_q = (d.get("start") or "").strip()
+    stops_q = [s.strip() for s in d.get("stops", []) if s and s.strip()][: TRIP_MAX_STOPS]
+    back = bool(d.get("return_to_start", True))
+    end_q = start_q if back else (d.get("end") or "").strip()
+    gps = d.get("gps")
+    if not (start_q or gps) or not stops_q or not (end_q or gps):
+        return jsonify(ok=False, message="출발지와 방문지를 한 곳 이상 넣어주세요.")
+    if trip_has_pii(start_q, end_q, *stops_q):
+        return jsonify(ok=False, message="주민번호나 전화번호는 넣지 마세요. 주소만 입력하면 돼요.")
+    picks = d.get("picks") or {}
+    stop_picks = [_trip_picked(p) for p in (picks.get("stops") or [])] + [None] * len(stops_q)
+    start_pick = _trip_picked(picks.get("start"))
+    end_pick = start_pick if back else _trip_picked(picks.get("end"))
+    queries = [("출발", start_q, gps, start_pick)] \
+        + [(f"방문지 {i + 1}", q, None, stop_picks[i]) for i, q in enumerate(stops_q)] \
+        + [("도착", end_q, gps if back else None, end_pick)]
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            found = list(ex.map(lambda x: _trip_resolve(x[1], x[2], x[3]), queries))
+    except Exception:
+        return jsonify(ok=False, message="주소 검색에 실패했어요. 잠시 후 다시 시도하세요.")
+    missing = [f"{name} '{q}'" for (name, q, _, _), f in zip(queries, found) if not f]
+    if missing:
+        return jsonify(ok=False, message=f"{', '.join(missing)}을(를) 찾지 못했어요. 도로명 주소나 단지명으로 다시 넣어주세요.")
+    found = [dict(f) if f else f for f in found]
+    for (name, q, _, _), f in zip(queries, found):
+        f["input"], f["role"] = q, name
+    leg = trip_estimate_leg if trip_demo() else trip_directions
+    try:
+        res = trip_optimize(found[0], found[1:-1], found[-1], leg, keep_order=bool(d.get("keep_order")))
+    except Exception:
+        return jsonify(ok=False, message="길찾기에 실패했어요. 차로 갈 수 있는 주소인지 확인해 주세요.")
+    res.update(ok=True, demo=trip_demo(), return_to_start=back)
+    return jsonify(res)
+
+
+# ---------- 2. 집 미리보기 ----------
+def _trip_rule_summary(facts, checks):
+    out = [f for f, _ in facts[:3]]
+    out += [c for c in checks[:3] if not any(c[:6] in m for _, m in facts)][:2]
+    return out[:4]
+
+
+@trip_bp.post("/api/house/summary", endpoint="house_summary")
+def trip_house_summary():
+    d = request.get_json(silent=True) or {}
+    facts = [(str(f)[:80], str(m)[:160]) for f, m in (d.get("facts") or [])][:12]
+    checks = [str(c)[:160] for c in (d.get("checks") or [])][:10]
+    name = str(d.get("name") or "")[:60]
+    if not facts and not checks:
+        return jsonify(ok=False)
+    if trip_demo() or not os.environ.get("OPENAI_API_KEY"):
+        return jsonify(ok=True, ai=False, lines=_trip_rule_summary(facts, checks))
+    text = "\n".join([f"집: {name}", "건물 정보:"] + [f"- {f}: {m}" for f, m in facts]
+                     + ["현장 확인 사항:"] + [f"- {c}" for c in checks])
+    prompt = ("당신은 장기요양 방문 직원을 돕는 도우미입니다. 아래 건축물대장 해석과 확인 사항만 근거로, "
+              "방문 전에 꼭 알아야 할 핵심을 3~4줄로 요약하세요. 각 줄은 40자 안팎의 한국어 문장, "
+              "이동(계단·승강기)·건물 노후·안전 순으로. 주어진 내용에 없는 사실은 절대 만들지 말고, "
+              "치안은 언급하지 마세요. 줄마다 '- '로 시작하고 다른 말은 쓰지 마세요.\n\n" + text)
+    try:
+        client = OpenAI()
+        res = client.responses.create(model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+                                      input=[{"role": "user", "content": prompt}], temperature=0.2)
+        lines = [l.strip().lstrip("-•· ").strip() for l in (res.output_text or "").splitlines()]
+        lines = [l for l in lines if l][:4]
+        if not lines:
+            raise ValueError("empty")
+        return jsonify(ok=True, ai=True, lines=lines)
+    except Exception:
+        return jsonify(ok=True, ai=False, lines=_trip_rule_summary(facts, checks))
+
+
+@trip_bp.get("/house", endpoint="house_page")
+def trip_house_page():
+    return render_template("trip/house.html")
+
+
+def _trip_floor(raw):
+    raw = (raw or "").strip().replace("층", "")
+    if not raw:
+        return None
+    if raw.startswith(("지하", "B", "b")):
+        return -int(re.sub(r"\D", "", raw) or 1)
+    return int(raw) if raw.lstrip("-").isdigit() else None
+
+
+def _trip_house_card(loc, bld, floor, missing=False, extra=None, source=None):
+    facts, checks = trip_interpret(bld, floor, loc.get("plat_gb_cd") == "1", missing)
+    facts = facts[:1] + (extra or []) + facts[1:]
+    return render_template("trip/house_card.html", loc=loc, bld=bld, floor=floor, facts=facts,
+                           checks=checks, source=source, missing=missing)
+
+
+@trip_bp.post("/house", endpoint="house_search")
+def trip_house_search():
+    q, floor_raw = request.form.get("q", "").strip(), request.form.get("floor", "")
+    if not q:
+        return render_template("trip/house.html", error="주소나 단지명을 넣어주세요.")
+    if trip_has_pii(q, floor_raw):
+        return render_template("trip/house.html", q=q, error="주민번호나 전화번호는 넣지 마세요. 주소만 입력하면 돼요.")
+    floor = _trip_floor(floor_raw)
+    if trip_demo():
+        h = trip_demo_house(q)
+        if not h:
+            return render_template("trip/house.html", q=q, error="예시 모드에서는 라인2차, 미소래만 돼요.")
+        return _trip_house_card(h["loc"], h["bld"], floor, extra=h["extra"], source=h["source"])
+    picked_addr, picked_label = request.form.get("addr", "").strip(), request.form.get("label", "").strip()
+    try:
+        cands = trip_addr_search(picked_addr or q)
+        if picked_addr and cands:
+            cands = cands[:1]
+            if picked_label:
+                cands[0]["label"] = picked_label
+    except Exception:
+        return render_template("trip/house.html", q=q, error="주소 검색에 실패했어요. 잠시 후 다시 시도하세요.")
+    if not cands:
+        return render_template("trip/house.html", q=q, error="주소를 찾지 못했어요. 도로명 주소로 다시 넣어보세요.")
+    pick = request.form.get("pick")
+    if len(cands) > 1 and pick is None:
+        return render_template("trip/house.html", q=q, floor=floor_raw, cands=cands)
+    loc = cands[min(int(pick or 0), len(cands) - 1)]
+    try:
+        bld = trip_building(loc)
+    except Exception:
+        return _trip_house_card(loc, None, floor, source="건축물대장 조회 실패")
+    return _trip_house_card(loc, bld, floor, missing=bld is None)
+
+
+# ---------- 3. 내 근처 화장실 ----------
+@trip_bp.get("/toilet", endpoint="toilet_page")
+def trip_toilet_page():
+    return render_template("trip/toilet.html")
+
+
+@trip_bp.get("/api/toilets", endpoint="api_toilets")
+def trip_api_toilets():
+    try:
+        lat, lng = float(request.args["lat"]), float(request.args["lng"])
+    except (KeyError, ValueError):
+        return jsonify(ok=False, message="위치를 가져오지 못했어요.")
+    rows = TRIP_DEMO_TOILETS if trip_demo() else trip_load_toilets()
+    if not rows:
+        return jsonify(ok=False, message="화장실 데이터(공중화장실.xlsx)가 없어요. 관리자에게 알려주세요.")
+    a = request.args
+    found = trip_nearest_toilets(lat, lng, rows, a.get("always") == "1", a.get("bell") == "1", a.get("acc") == "1")
+    return jsonify(ok=True, items=found, demo=trip_demo(),
+                   message="" if found else "주변 5km 안에 조건에 맞는 화장실이 없어요.")
+
+
+# ---------- 4. 복용약 찾기 ----------
+@trip_bp.get("/pill", endpoint="pill_page")
+def trip_pill_page():
+    return render_template("trip/pill.html", colors=TRIP_PILL_COLORS, shapes=TRIP_PILL_SHAPES, forms=TRIP_PILL_FORMS)
+
+
+@trip_bp.post("/api/pill/identify", endpoint="api_pill_identify")
+def trip_api_pill_identify():
+    if not trip_load_pills():
+        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없어요. 관리자에게 알려주세요.")
+    if not os.environ.get("OPENAI_API_KEY"):
+        return jsonify(ok=False, message="사진 판독(AI) 설정이 안 되어 있어요. 아래 '직접 입력'으로 찾아주세요.")
+    images = []
+    for key in ("front", "back"):
+        f = request.files.get(key)
+        if not f:
+            continue
+        data = f.read()
+        if not (f.mimetype or "").startswith("image/") or len(data) > 8 * 1024 * 1024:
+            return jsonify(ok=False, message="8MB 이하 사진만 올릴 수 있어요.")
+        images.append((key, f.mimetype, data))
+    if not images:
+        return jsonify(ok=False, message="알약 사진을 찍어주세요.")
+    try:
+        feat = _trip_pill_features_from_images(images)
+    except Exception:
+        return jsonify(ok=False, message="사진 분석 중 오류가 났어요. 다시 시도해 주세요.")
+    front, back = feat.get("front", []), feat.get("back", [])
+    if not front and not back:
+        return jsonify(ok=True, groups=[], message="사진에서 알약을 찾지 못했어요. 밝은 곳에서 가까이 찍어주세요.")
+    return jsonify(ok=True, groups=_trip_pill_build_groups(front, back), message="")
+
+
+@trip_bp.post("/api/pill/search", endpoint="api_pill_search")
+def trip_api_pill_search():
+    d = request.get_json(silent=True) or {}
+    imprints = [x.strip() for x in str(d.get("imprint", "")).split("/") if x.strip()]
+    if not imprints:
+        return jsonify(ok=True, candidates=[], message="알약에 새겨진 글자(각인)를 넣어주세요.")
+    if not trip_load_pills():
+        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없어요. 관리자에게 알려주세요.")
+    color = d.get("color") if d.get("color") in TRIP_PILL_COLORS else ""
+    shape = d.get("shape") if d.get("shape") in TRIP_PILL_SHAPES else ""
+    form = d.get("form") if d.get("form") in TRIP_PILL_FORMS else ""
+    c = trip_search_pills(imprints, color, shape, form=form)
+    return jsonify(ok=True, candidates=c, message="" if c else "일치하는 알약을 찾지 못했어요.")
+
+
+@trip_bp.get("/static/app.css", endpoint="css")
+def trip_css():
+    return Response(TRIP_CSS, mimetype="text/css")
+
+
+TRIP_CSS = r'''@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+:root{
+  --bg:#f4f2ec; --card:#fff; --ink:#1b1d1c; --sub:#5f625f; --muted:#9a9d98; --line:#e7e4dc;
+  --route:#2f6fed; --route-bg:#e9f0fe;
+  --house:#e0782f; --house-bg:#fdf0e5;
+  --toilet:#13997a; --toilet-bg:#e4f5ef;
+  --pill:#8b55d6; --pill-bg:#f1eafb;
+  --warn:#9a5b06; --warn-bg:#fdf3dc; --bad:#b4332f; --bad-bg:#fcebea;
+  --r:18px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans CJK KR","Malgun Gothic",sans-serif;font-size:15px;line-height:1.55;letter-spacing:-0.01em}
+a{color:inherit}
+.wrap{max-width:480px;margin:0 auto;padding:18px 16px 40px;position:relative}
+.ci{position:absolute;top:16px;right:16px;height:44px;width:auto;z-index:5;pointer-events:none}
+.bar{padding-right:150px}
+.hello{padding-right:150px}
+
+/* 상단 */
+.bar{display:flex;align-items:center;gap:10px;margin:2px 0 16px}
+.bar a.back{width:38px;height:38px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;text-decoration:none}
+.bar h1{font-size:19px;margin:0;font-weight:700}
+.bar .tag{margin-left:6px;font-size:12px;padding:3px 9px;border-radius:999px;background:var(--warn-bg);color:var(--warn);font-weight:600}
+
+/* 홈 */
+.hello{margin:6px 2px 18px}
+.hello .date{font-size:13px;color:var(--muted);font-weight:600}
+.hello h1{font-size:26px;line-height:1.3;margin:4px 0 0;font-weight:800;letter-spacing:-0.03em}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:168px;padding:16px;border-radius:22px;
+  text-decoration:none;color:var(--ink);background:var(--card);border:1px solid var(--line);overflow:hidden;transition:transform .15s}
+.tile:active{transform:scale(.97)}
+.tile .ico{width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center}
+.tile .ico svg{width:26px;height:26px}
+.tile .t{font-size:17px;font-weight:700;margin:14px 0 2px}
+.tile .d{font-size:12.5px;color:var(--sub);line-height:1.45}
+.tile .no{position:absolute;right:14px;top:12px;font-size:12px;font-weight:700;color:var(--muted)}
+.tile.route .ico{background:var(--route-bg);color:var(--route)}
+.tile.house .ico{background:var(--house-bg);color:var(--house)}
+.tile.toilet .ico{background:var(--toilet-bg);color:var(--toilet)}
+.tile.pill .ico{background:var(--pill-bg);color:var(--pill)}
+.tile.wide{grid-column:span 2;min-height:auto;flex-direction:row;align-items:center;gap:14px}
+.tile.wide .t{margin:0}
+.note{font-size:12px;color:var(--muted);margin:18px 4px 0;line-height:1.6}
+
+/* 공통 카드 */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 16px;margin-bottom:12px}
+.hero{border-radius:var(--r);padding:16px;margin-bottom:12px;color:#fff}
+.hero b{display:block;font-size:13px;opacity:.85;font-weight:600}
+.hero .big{font-size:30px;font-weight:800;letter-spacing:-0.03em;line-height:1.2}
+.hero .sm{font-size:13px;opacity:.9;margin-top:4px}
+label.l{display:block;font-size:13px;color:var(--sub);font-weight:600;margin:12px 0 6px}
+label.l:first-child{margin-top:0}
+input[type=text],select{width:100%;height:48px;border:1px solid var(--line);border-radius:13px;padding:0 14px;font-size:16px;background:#fbfaf7;font-family:inherit;color:var(--ink)}
+input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);background:#fff}
+.row{display:flex;gap:8px;align-items:center}
+.row>input{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:48px;padding:0 16px;border-radius:13px;border:1px solid var(--line);
+  background:#fff;font-size:15px;font-weight:600;font-family:inherit;color:var(--ink);text-decoration:none;cursor:pointer;white-space:nowrap}
+.btn.sm{height:38px;font-size:13px;padding:0 12px;border-radius:11px}
+.btn.main{width:100%;margin-top:16px;border:none;color:#fff;font-size:16px;font-weight:700;height:54px;border-radius:15px}
+.btn.ghost{border-style:dashed;color:var(--sub);width:100%;margin-top:8px}
+.btn:disabled{opacity:.5}
+.err{background:var(--bad-bg);color:var(--bad);border-radius:13px;padding:11px 13px;font-size:14px;margin-bottom:12px}
+.hint{font-size:12.5px;color:var(--muted);margin:8px 2px 0}
+.muted{color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:999px;background:#f2f0ea;color:var(--sub);font-size:12.5px;font-weight:600}
+.toggle{display:flex;gap:6px;flex-wrap:wrap}
+.toggle input{display:none}
+.toggle label{height:36px;padding:0 13px;border-radius:999px;border:1px solid var(--line);display:inline-flex;align-items:center;font-size:13px;font-weight:600;color:var(--sub);background:#fff;cursor:pointer}
+.toggle input:checked+label{background:var(--ink);color:#fff;border-color:var(--ink)}
+.spin{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* 1. 동선 */
+.t-route .btn.main{background:var(--route)} .t-route .hero{background:var(--route)}
+.stop{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.stop .n{width:28px;height:28px;flex:none;border-radius:50%;background:var(--route-bg);color:var(--route);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+.stop .x{width:38px;height:48px;flex:none;border:none;background:none;color:var(--muted);font-size:20px;cursor:pointer}
+.map{height:240px;border-radius:14px;overflow:hidden;background:#e9e7e0;border:1px solid var(--line)}
+.tl{list-style:none;margin:0;padding:0}
+.tl li{position:relative;display:flex;gap:12px;padding:0 0 14px 0}
+.tl li:last-child{padding-bottom:0}
+.tl .dot{width:30px;height:30px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;background:var(--route);color:#fff;z-index:1}
+.tl .dot.se{background:var(--ink)}
+.tl li:not(:last-child)::before{content:"";position:absolute;left:14px;top:30px;bottom:0;width:2px;background:var(--route-bg)}
+.tl .body{flex:1;min-width:0}
+.tl .nm{font-weight:700}
+.tl .ad{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl .leg{font-size:12.5px;color:var(--route);font-weight:600;margin-top:4px}
+.tl .go{margin-left:auto;align-self:center}
+
+/* 2. 집 */
+.t-house .btn.main{background:var(--house)}
+.rv{position:relative;height:200px;border-radius:var(--r);overflow:hidden;background:#dedbd2;margin-bottom:12px;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px;text-align:center}
+.rv #roadview{position:absolute;inset:0}
+.rv .tg{position:absolute;left:10px;bottom:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:2px 9px;border-radius:7px;z-index:2}
+.hname{font-size:19px;font-weight:800;margin:0}
+.haddr{font-size:13px;color:var(--sub);margin:2px 0 12px}
+.sec{font-size:14px;font-weight:700;margin:4px 0 4px;display:flex;align-items:center;gap:6px}
+.fact{padding:11px 0;border-top:1px solid #f0eee7}
+.fact:first-of-type{border-top:none}
+.fact .f{font-weight:700}
+.fact .m{font-size:13.5px;color:var(--sub);margin-top:2px}
+.checks{margin:6px 0 0;padding-left:20px;color:#3b3e3b;font-size:14px;line-height:1.8}
+.safe .map{height:200px}
+.legend{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend .bar2{flex:1;height:7px;border-radius:4px;background:linear-gradient(90deg,#ffffb2,#fed976,#feb24c,#fd8d3c,#f03b20,#bd0026)}
+.cand{display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px 14px;margin-bottom:8px;font-family:inherit;font-size:15px;cursor:pointer}
+.cand small{display:block;color:var(--muted);font-size:12.5px}
+
+/* 3. 화장실 */
+.t-toilet .btn.main{background:var(--toilet)}
+.trow{display:flex;gap:12px;align-items:center;padding:13px 0;border-top:1px solid #f0eee7}
+.trow:first-child{border-top:none;padding-top:2px}
+.trow .d{width:58px;flex:none;text-align:center}
+.trow .d b{display:block;font-size:17px;font-weight:800;color:var(--toilet);line-height:1.2}
+.trow .d span{font-size:11.5px;color:var(--muted)}
+.trow .body{flex:1;min-width:0}
+.trow .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .ad{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .chips{margin-top:5px}
+.chip.ok{background:var(--toilet-bg);color:var(--toilet)}
+
+/* 4. 약 */
+.t-pill .btn.main{background:var(--pill)}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.shot{position:relative;aspect-ratio:1/1;border-radius:16px;border:1.5px dashed #d6cfe6;background:var(--pill-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--pill);font-weight:700;font-size:14px;overflow:hidden;cursor:pointer}
+.shot input{display:none}
+.shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.shot small{color:#8f7fb0;font-weight:500;font-size:12px}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12.5px;margin:18px 0 6px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pc{display:flex;gap:12px;padding:12px 0;border-top:1px solid #f0eee7}
+.pc:first-child{border-top:none}
+.pc img{width:76px;height:42px;object-fit:contain;border-radius:8px;background:#f6f4ef;flex:none}
+.pc .nm{font-weight:700;line-height:1.35}
+.pc .co{font-size:12.5px;color:var(--muted)}
+.conf{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:4px;vertical-align:1px}
+.conf.high{background:var(--toilet-bg);color:var(--toilet)} .conf.mid{background:var(--route-bg);color:var(--route)} .conf.low{background:#f2f0ea;color:var(--sub)}
+.chip.sig{background:var(--warn-bg);color:var(--warn)}
+.gh{font-size:13px;color:var(--sub);margin:2px 0 6px}
+
+/* 주소 자동완성 */
+.ac{position:relative;flex:1;min-width:0}
+.ac input{width:100%}
+.ac input.picked{border-color:var(--route);background:#fff}
+.acl{position:absolute;left:0;right:0;top:52px;background:#fff;border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 10px 28px rgba(0,0,0,.12);z-index:50;max-height:280px;overflow:auto;display:none}
+.acl.on{display:block}
+.acl button{display:block;width:100%;text-align:left;padding:10px 14px;border:0;border-top:1px solid #f0eee7;background:none;font:inherit;font-size:15px;color:var(--ink);cursor:pointer}
+.acl button:first-child{border-top:0}
+.acl button:active,.acl button:hover{background:#f6f4ef}
+.acl small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acl small.j{color:#b4b6b1;font-size:11.5px}
+.acl .none{padding:12px 14px;color:var(--muted);font-size:13px}
+
+.ctabs{display:flex;gap:6px;overflow-x:auto;margin:2px 0 10px;scrollbar-width:none}
+.ctabs::-webkit-scrollbar{display:none}
+.ctabs button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:999px;padding:6px 12px;font:600 13px/1 inherit;font-family:inherit;cursor:pointer}
+.ctabs button.on{background:var(--house);border-color:var(--house);color:#fff}
+.ai{background:linear-gradient(135deg,#fff7ef,#fff);border:1px solid #f3d9c2}
+.ai .sec{display:flex;align-items:center;gap:6px}
+.ai .sec i{font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#e0782f;border-radius:6px;padding:2px 6px}
+.ai ul{margin:6px 0 0;padding-left:18px;font-size:14.5px;line-height:1.6}
+.ai .sk{height:14px;border-radius:6px;background:linear-gradient(90deg,#f1ece4,#faf7f2,#f1ece4);background-size:200% 100%;animation:sk 1.2s infinite;margin:8px 0}
+@keyframes sk{to{background-position:-200% 0}}
+@media print{.ci{position:static}}
+
+.swap{display:flex;align-items:center;gap:4px;margin:-2px auto 6px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:3px 10px;font:600 12px/1.4 inherit;font-family:inherit;cursor:pointer}
+.swap:hover{color:var(--route);border-color:var(--route)}
+.swap.in{display:inline-flex;margin:0 0 0 8px;vertical-align:middle;padding:2px 8px}
+.swap:disabled{opacity:.5}
+.hero.mine{background:#4b5563!important}
+.hero .back2{margin-top:10px;background:#fff;color:#1b1d1c;border:0}
+
+.tl .dot{cursor:pointer;transition:transform .15s}
+.tl .dot:hover{transform:scale(1.1)}
+.tl li.on .nm{color:var(--route)}
+.tl li.on .dot{box-shadow:0 0 0 4px var(--route-bg)}
+.mini{margin-top:10px}
+.mini .mh{display:flex;align-items:center;gap:8px;margin:0 4px 6px;font-size:14px}
+.mini .mh b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini .mh a{font-size:12.5px;color:var(--route);font-weight:600;text-decoration:none;flex:none}
+.minirv{position:relative;height:180px;border-radius:12px;overflow:hidden;background:#dedbd2}
+.minirv .mrmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px;z-index:3;background:#dedbd2}
+
+.mini .allv{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 10px;font:600 12.5px/1.2 inherit;font-family:inherit;color:var(--sub);cursor:pointer}
+.mini .allv:hover{color:var(--ink)}
+
+/* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
+.ph{display:none}
+@media (min-width:960px){
+
+  /* PC 글자·요소 크게 (폰 대비 약 1.2배) */
+  html,body{font-size:18.0px}
+  .bar h1{font-size:22.8px}
+  .bar .tag{font-size:14.4px}
+  .hello .date{font-size:15.6px}
+  .hello h1{font-size:31.2px}
+  .tile .t{font-size:20.4px}
+  .tile .d{font-size:15.0px}
+  .tile .no{font-size:14.4px}
+  .note{font-size:14.4px}
+  .hero b{font-size:15.6px}
+  .hero .big{font-size:36.0px}
+  .hero .sm{font-size:15.6px}
+  label.l{font-size:15.6px}
+  input[type=text],select{font-size:19.2px}
+  .btn{font-size:18.0px}
+  .btn.sm{font-size:15.6px}
+  .btn.main{font-size:19.2px}
+  .err{font-size:16.8px}
+  .hint{font-size:15.0px}
+  .chip{font-size:15.0px}
+  .toggle label{font-size:15.6px}
+  .stop .n{font-size:15.6px}
+  .stop .x{font-size:24.0px}
+  .tl .dot{font-size:15.6px}
+  .tl .ad{font-size:15.0px}
+  .tl .leg{font-size:15.0px}
+  .rv{font-size:15.6px}
+  .rv .tg{font-size:14.4px}
+  .hname{font-size:22.8px}
+  .haddr{font-size:15.6px}
+  .sec{font-size:16.8px}
+  .fact .m{font-size:16.2px}
+  .checks{font-size:16.8px}
+  .legend{font-size:14.4px}
+  .cand{font-size:18.0px}
+  .cand small{font-size:15.0px}
+  .trow .d b{font-size:20.4px}
+  .trow .d span{font-size:13.8px}
+  .trow .ad{font-size:15.0px}
+  .shot{font-size:16.8px}
+  .shot small{font-size:14.4px}
+  .or{font-size:15.0px}
+  .pc .co{font-size:15.0px}
+  .conf{font-size:13.8px}
+  .gh{font-size:15.6px}
+  .acl button{font-size:18.0px}
+  .acl small{font-size:14.4px}
+  .acl small.j{font-size:13.8px}
+  .acl .none{font-size:15.6px}
+  .ai .sec i{font-size:13.2px}
+  .ai ul{font-size:17.4px}
+  .mini .mh{font-size:16.8px}
+  .mini .mh a{font-size:15.0px}
+  .minirv .mrmsg{font-size:15.6px}
+  .wrap{max-width:1320px}
+  .bar h1{font-size:26px}
+  .hello h1{font-size:40px}
+  .tile .t{font-size:21px} .tile .d{font-size:15px}
+  input[type=text],select{height:58px;padding:0 18px;font-size:19px}
+  .btn{height:56px;padding:0 20px}
+  .btn.sm{height:44px;padding:0 14px}
+  .btn.main{height:62px;font-size:19px}
+  .tl li:not(:last-child)::before{left:17px;top:36px}
+  .tl li{padding-bottom:18px}
+  .bar a.back{width:46px;height:46px}
+  .stop .n{width:34px;height:34px}
+  .tl .dot{width:36px;height:36px;min-width:36px}
+  .hero{padding:22px}
+  .hero .big{font-size:40px}
+  .cols{grid-template-columns:480px 1fr;gap:24px}
+  .card{padding:24px;border-radius:22px}
+  .sec{margin-bottom:10px}
+  .wrap{padding:28px 32px 60px}
+  .ci{top:22px;right:32px;height:64px}
+  .bar{padding-right:260px}
+  .tiles{grid-template-columns:repeat(4,1fr);gap:16px}
+  .tile{min-height:220px;padding:22px}
+  .cols{display:grid;align-items:start}
+  .colA{position:sticky;top:16px}
+  .t-house .cols{grid-template-columns:1fr 1fr}
+  .t-house .colA{position:static}
+  .rv{height:340px}
+  .map{height:420px}
+  #map{height:480px}
+  .card{padding:20px}
+  .ph p{margin:0}
+  .ph{display:flex;align-items:center;justify-content:center;text-align:center;min-height:420px;border:2px dashed var(--line);border-radius:var(--r);color:var(--muted);font-size:15px;line-height:1.7}
+  .t-house form.card,.t-house .wrap>.card{max-width:640px;margin-left:auto;margin-right:auto}
+  .note{max-width:720px}
+  .minirv{height:260px!important}
+}
+'''
+
+TRIP_TEMPLATES = {
+    "trip/_ac.html": r'''<script>
+// 주소 자동완성 (동선·집 미리보기 공용)
+var _acEsc=(t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])));
+// 주소 자동완성: 안전로드 경로찾기와 같은 방식 (/search_place, 3글자부터, 0.4초 뒤, 5개까지)
+function debounce(fn,ms){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),ms);};}
+function attachSuggest(inp,onPick,onClear){
+  const box=document.createElement("div");box.className="acl";inp.parentElement.appendChild(box);
+  const close=()=>{box.classList.remove("on");box.innerHTML="";};
+  inp.addEventListener("input",()=>{if(onClear)onClear();});
+  inp.addEventListener("input",debounce(async function(){
+    const q=inp.value.trim();
+    if(q.length<3||q==="현재 위치"){close();return;}
+    try{
+      const data=await (await fetch("/search_place?q="+encodeURIComponent(q))).json();
+      const docs=(data.documents||[]).slice(0,5);
+      if(inp.value.trim()!==q)return;
+      if(!docs.length){box.innerHTML='<div class="none">검색 결과가 없습니다.</div>';box.classList.add("on");return;}
+      box.innerHTML=docs.map((pl,i)=>{
+        const road=pl.road_address_name||"",jibun=pl.address_name||"";
+        return `<button type="button" data-i="${i}">${_acEsc(pl.place_name||"")}${road?`<small>${_acEsc(road)}</small><small class="j">${_acEsc(jibun)}</small>`:`<small>${_acEsc(jibun)}</small>`}</button>`;
+      }).join("");
+      box.querySelectorAll("button").forEach(b=>b.onmousedown=e=>{e.preventDefault();const pl=docs[+b.dataset.i];
+        inp.value=pl.place_name||"";close();if(onPick)onPick(pl);});
+      box.classList.add("on");
+    }catch(err){close();}
+  },400));
+  document.addEventListener("click",e=>{if(e.target!==inp&&!box.contains(e.target))close();});
+}
+</script>
+''',
+    "trip/_m.html": r'''{% macro icon(name) -%}
+{%- if name == 'route' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="5" r="2.2"/><path d="M8.2 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.8"/></svg>
+{%- elif name == 'house' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/><path d="M10 20v-5.5h4V20"/></svg>
+{%- elif name == 'toilet' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="4.5" r="1.8"/><circle cx="17" cy="4.5" r="1.8"/><path d="M5 9h4l.6 6H8.5v5.5h-3V15H4.4z"/><path d="M15 9h4l2 7h-2.5v4.5h-3V16H13z"/><path d="M12 7v14"/></svg>
+{%- elif name == 'pill' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.8" y="8.2" width="18.4" height="7.6" rx="3.8" transform="rotate(-40 12 12)"/><path d="m9.2 8.6 5.6 6.8"/></svg>
+{%- elif name == 'back' -%}
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+{%- endif -%}
+{%- endmacro %}
+{% macro topbar(title) -%}
+<div class="bar"><a class="back" href="{{ url_for('trip.home') }}" aria-label="홈으로">{{ icon('back') }}</a><h1>{{ title }}</h1>{% if demo %}<span class="tag">예시 모드</span>{% endif %}</div>
+{%- endmacro %}
+''',
+    "trip/base.html": r'''<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f2ec">
+<title>{% block title %}출장 도구함{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('trip.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body class="{% block theme %}{% endblock %}">
+<div class="wrap">
+<img class="ci" src="/ci" alt="국민건강보험공단" onerror="this.remove()">
+{% block body %}{% endblock %}
+</div>
+{% block script %}{% endblock %}
+</body>
+</html>
+''',
+    "trip/home.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import icon %}
+{% block body %}
+<div class="hello">
+  <div class="date" id="today"></div>
+  <h1>오늘 출장,<br>무엇부터 할까요?</h1>
+</div>
+<div class="tiles">
+  <a class="tile route" href="{{ url_for('trip.route_page') }}"><span class="no">01</span>
+    <span class="ico">{{ icon('route') }}</span>
+    <span><div class="t">최적 동선</div><div class="d">방문지를 넣으면 가장 빠른 순서로 짜드려요</div></span></a>
+  <a class="tile house" href="{{ url_for('trip.house_page') }}"><span class="no">02</span>
+    <span class="ico">{{ icon('house') }}</span>
+    <span><div class="t">집 미리보기</div><div class="d">주소 하나로 어떤 집인지 미리 알고 가요</div></span></a>
+  <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}"><span class="no">03</span>
+    <span class="ico">{{ icon('toilet') }}</span>
+    <span><div class="t">내 근처 화장실</div><div class="d">지금 위치에서 가까운 공중화장실</div></span></a>
+  <a class="tile pill" href="{{ url_for('trip.pill_page') }}"><span class="no">04</span>
+    <span class="ico">{{ icon('pill') }}</span>
+    <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
+</div>
+<p class="note">이름·주민번호·전화번호는 받지 않고, 입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
+{% endblock %}
+{% block script %}
+<script>
+var d=new Date(),w="일월화수목금토"[d.getDay()];
+document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()+"일 "+w+"요일";
+</script>
+{% endblock %}
+''',
+    "trip/house.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}집 미리보기 · 출장 도구함{% endblock %}
+{% block theme %}t-house{% endblock %}
+{% block body %}
+{{ topbar('집 미리보기') }}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if cands %}
+<div class="card">
+  <div class="sec">'{{ q }}'(으)로 여러 곳이 나왔어요</div>
+  <p class="hint" style="margin:0 0 10px">방문할 곳을 고르세요.</p>
+  {% for c in cands %}
+  <form method="post" action="{{ url_for('trip.house_search') }}">
+    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="floor" value="{{ floor }}"><input type="hidden" name="pick" value="{{ loop.index0 }}">
+    <button class="cand" type="submit">{{ c.label }}<small>{{ c.road_address or c.jibun_address }}</small></button>
+  </form>
+  {% endfor %}
+</div>
+{% else %}
+<form class="card" method="post" action="{{ url_for('trip.house_search') }}" autocomplete="off">
+  <label class="l" for="q">주소 또는 단지명</label>
+  <span class="ac" style="display:block"><input type="text" id="q" name="q" value="{{ q or '' }}" placeholder="국민건강보험공단 광주전라제주지역본부"></span>
+  <input type="hidden" name="addr" id="addr"><input type="hidden" name="label" id="label">
+  <label class="l" for="floor">거주층 <span class="muted" style="font-weight:500">· 선택</span></label>
+  <input type="text" id="floor" name="floor" placeholder="3 또는 지하1">
+  <p class="hint">거주층을 넣으면 계단·꼭대기 층·지하 여부까지 알려줘요.</p>
+  <button class="btn main" type="submit">집 미리보기</button>
+</form>
+{% if demo %}<p class="hint">예시 모드: 라인2차, 미소래를 넣어보세요. 공개 자료로 확인한 값만 들어 있어요.</p>{% endif %}
+{% endif %}
+{% endblock %}
+{% block script %}
+{% include "trip/_ac.html" %}
+<script>
+(function(){
+  var q=document.getElementById("q");if(!q)return;
+  attachSuggest(q,function(pl){document.getElementById("addr").value=pl.address_name||pl.road_address_name||"";
+      document.getElementById("label").value=pl.place_name||"";q.classList.add("picked");},
+    function(){document.getElementById("addr").value="";document.getElementById("label").value="";q.classList.remove("picked");});
+})();
+</script>
+{% endblock %}
+''',
+    "trip/house_card.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}{{ (bld and bld.name) or loc.label }} · 집 미리보기{% endblock %}
+{% block theme %}t-house{% endblock %}
+{% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
+{% block body %}
+{{ topbar('집 미리보기') }}
+<div class="cols"><div class="colA">
+<div class="rv">
+  <div id="roadview"></div>
+  <div id="rvMsg">{% if kakao_js_key %}건물 사진 불러오는 중{% else %}건물 정면 로드뷰<br><small class="muted">카카오 JavaScript 키를 넣으면 보여요</small>{% endif %}</div>
+  <span class="tg">{{ (bld and bld.name) or loc.label }}</span>
+</div>
+
+<div class="card ai" id="aiCard">
+  <div class="sec"><i>AI</i> 한눈에 보기 <span class="muted" id="aiSrc" style="font-weight:500;font-size:12px;margin-left:auto"></span></div>
+  <div id="aiBody"><div class="sk"></div><div class="sk" style="width:80%"></div><div class="sk" style="width:60%"></div></div>
+</div>
+
+<div class="card">
+  <p class="hname">{{ (bld and bld.name) or loc.label }}</p>
+  <p class="haddr">{{ loc.road_address or loc.jibun_address }}{% if floor is not none %} · {{ '지하 %d'|format(-floor) if floor < 0 else floor }}층 거주{% endif %}</p>
+
+  <div class="sec">이 집은</div>
+  {% for f, m in facts %}
+  <div class="fact"><div class="f">{{ f }}</div><div class="m">{{ m }}</div></div>
+  {% else %}
+  <div class="fact"><div class="m">건물 정보를 불러오지 못했어요. 현장에서 확인해 주세요.</div></div>
+  {% endfor %}
+  {% if bld and floor is none %}
+  <div class="fact"><div class="f muted">거주층</div><div class="m muted">거주층을 넣으면 계단·꼭대기 층 여부를 알려줘요.</div></div>
+  {% elif demo and bld and bld.elevators is none %}
+  <div class="fact"><div class="f muted">승강기 수</div><div class="m muted">실제 조회하면 표시돼요.</div></div>
+  {% endif %}
+</div>
+
+</div><div class="colB">
+<div class="card safe">
+  <div class="sec">주변 치안 <span class="muted" style="font-weight:500;font-size:12px">생활안전지도 · 범죄주의구간</span></div>
+  {% if safemap_key %}<div class="ctabs" id="crimeChips">{% for c in crime_layers %}<button type="button" data-i="{{ loop.index0 }}"{% if loop.first %} class="on"{% endif %}>{{ c.name }}</button>{% endfor %}</div>{% endif %}
+  <div class="map" id="safeMap">{% if not safemap_key %}<div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--sub);font-size:13px;padding:16px">생활안전지도 키를 넣으면<br>집 주변 범죄주의구간이 색으로 겹쳐져요</div>{% endif %}</div>
+  <div class="legend">낮음<span class="bar2"></span>높음 (10등급)</div>
+  <p class="hint" id="safeNote">치안 정보 불러오는 중</p>
+  <p class="hint">5대 범죄(살인·강도·성폭력·절도·폭력) 발생 밀도예요. 전체는 합산, 나머지는 종류별이에요. 등급이 높다고 지금 위험하다는 뜻은 아니에요. 진한 길이 집 앞에 있으면 야간·단독 방문은 피하세요.</p>
+</div>
+
+<div class="card">
+  <div class="sec">가서 볼 것</div>
+  <ul class="checks">{% for c in checks %}<li>{{ c }}</li>{% endfor %}</ul>
+  <div class="row" style="margin-top:14px">
+    <a class="btn" style="flex:1" href="https://map.kakao.com/link/roadview/{{ loc.lat }},{{ loc.lng }}" target="_blank" rel="noopener">로드뷰 크게</a>
+    <button class="btn" style="flex:1" type="button" onclick="window.print()">PDF 저장</button>
+  </div>
+</div>
+</div></div>
+<p class="hint">{% if source %}{{ source }} 기준.{% else %}건축물대장 기준.{% endif %} 집 안 구조는 현장에서 확인하세요.</p>
+<a class="btn" style="width:100%;margin-top:10px" href="{{ url_for('trip.house_page') }}">다른 집</a>
+{% endblock %}
+{% block script %}
+<script>
+(function(){
+  var body=document.getElementById("aiBody"),src=document.getElementById("aiSrc");
+  fetch("{{ url_for('trip.house_summary') }}",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name:{{ ((bld and bld.name) or loc.label)|tojson }},facts:{{ facts|tojson }},checks:{{ checks|tojson }}})})
+  .then(function(r){return r.json();}).then(function(d){
+    if(!d.ok||!d.lines||!d.lines.length){document.getElementById("aiCard").remove();return;}
+    var ul=document.createElement("ul");
+    d.lines.forEach(function(t){var li=document.createElement("li");li.textContent=t;ul.appendChild(li);});
+    body.innerHTML="";body.appendChild(ul);
+    src.textContent=d.ai?"아래 내용을 AI가 요약":"아래 내용 요약";
+  }).catch(function(){document.getElementById("aiCard").remove();});
+})();
+</script>
+{% if kakao_js_key %}
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>
+<script>
+(function(){
+  var LAT={{ loc.lat }},LNG={{ loc.lng }},msg=document.getElementById("rvMsg");
+  function bearing(a,b){var r=Math.PI/180,y=Math.sin((b.getLng()-a.getLng())*r)*Math.cos(b.getLat()*r),
+    x=Math.cos(a.getLat()*r)*Math.sin(b.getLat()*r)-Math.sin(a.getLat()*r)*Math.cos(b.getLat()*r)*Math.cos((b.getLng()-a.getLng())*r);
+    return (Math.atan2(y,x)/r+360)%360;}
+  kakao.maps.load(function(){
+    var t=new kakao.maps.LatLng(LAT,LNG),el=document.getElementById("roadview"),
+        rv=new kakao.maps.Roadview(el),cl=new kakao.maps.RoadviewClient();
+    (function tryR(rs){
+      if(!rs.length){msg.style.display="none";var m=new kakao.maps.Map(el,{center:t,level:3});new kakao.maps.Marker({position:t,map:m});return;}
+      cl.getNearestPanoId(t,rs[0],function(id){
+        if(id===null)return tryR(rs.slice(1));
+        rv.setPanoId(id,t);
+        kakao.maps.event.addListener(rv,"init",function(){rv.setViewpoint({pan:bearing(rv.getPosition(),t),tilt:5,zoom:0});msg.style.display="none";});
+      });
+    })([50,100,200]);
+  });
+})();
+</script>
+{% endif %}
+{% if safemap_key %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  if(!window.L)return;
+  var c=[{{ loc.lat }},{{ loc.lng }}];
+  var m=L.map("safeMap",{zoomControl:false,attributionControl:false}).setView(c,16);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(m);
+  // 생활안전지도 범죄주의구간(전체) WMS. 공식 예제: openapi2/IF_0087_WMS, serviceKey, 파라미터는 소문자
+  // 생활안전지도 범죄주의구간 WMS. 종류별로 IF 번호·스타일이 다름 (서버 설정 TRIP_CRIME_LAYERS)
+  var LAYERS={{ crime_layers|tojson }},note=document.getElementById("safeNote"),cur=null;
+  function show(i){
+    var L0=LAYERS[i],bad=0,ok=0;
+    if(cur)m.removeLayer(cur);
+    note.style.color="";note.textContent=L0.name+" 불러오는 중";
+    cur=L.tileLayer.wms(L0.url,{layers:"A2SM_CRMNLHSPOT_TOT",styles:L0.style,
+      format:"image/png",transparent:true,serviceKey:"{{ safemap_key }}",opacity:.85});
+    cur.on("tileerror",function(){bad++;});
+    cur.on("tileload",function(){ok++;});
+    cur.on("load",function(){
+      if(bad&&!ok){note.textContent=(i?L0.name+" 지도를":"치안 정보를")+" 불러오지 못했어요. 생활안전지도 키 승인·사이트 주소를 확인해 주세요.";note.style.color="#b4332f";}
+      else{note.textContent="["+L0.name+"] 색이 칠해진 길이 없으면 이 주변은 "+(i?L0.name+" ":"")+"범죄주의구간이 아니에요.";}
+    });
+    cur.addTo(m);cur.bringToBack();
+  }
+  document.querySelectorAll("#crimeChips button").forEach(function(b){
+    b.onclick=function(){document.querySelectorAll("#crimeChips button").forEach(function(x){x.classList.remove("on");});
+      b.classList.add("on");show(+b.dataset.i);};
+  });
+  show(0);
+  L.circle(c,{radius:300,color:"#e0782f",weight:1.5,dashArray:"4 4",fill:false}).addTo(m);
+  L.circleMarker(c,{radius:8,color:"#fff",weight:3,fillColor:"#e0782f",fillOpacity:1}).addTo(m);
+})();
+</script>
+{% endif %}
+{% endblock %}
+''',
+    "trip/pill.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}복용약 찾기 · 출장 도구함{% endblock %}
+{% block theme %}t-pill{% endblock %}
+{% block body %}
+{{ topbar('복용약 찾기') }}
+<div class="cols"><div class="colA">
+<div class="card">
+  <div class="sec">알약 사진</div>
+  <p class="hint" style="margin:0 0 10px">앞면을 찍고, 그 자리에서 뒤집어 뒷면도 찍으면 더 정확해요. 여러 알도 한 번에 돼요(5알 이하 권장).</p>
+  <div class="shots">
+    <label class="shot" id="sFront"><input type="file" accept="image/*" capture="environment" data-k="front">
+      <span style="font-size:26px">+</span>앞면<small>필수</small></label>
+    <label class="shot" id="sBack"><input type="file" accept="image/*" capture="environment" data-k="back">
+      <span style="font-size:26px">+</span>뒷면<small>선택</small></label>
+  </div>
+  <button class="btn main" id="photoGo" type="button">사진으로 찾기</button>
+
+  <div class="or">또는 직접 입력</div>
+  <label class="l">각인 <span class="muted" style="font-weight:500">· 알약에 새겨진 글자, 앞/뒤는 / 로 구분</span></label>
+  <input type="text" id="imprint" placeholder="예: YH / 10" autocomplete="off">
+  <div class="grid2" style="margin-top:8px">
+    <select id="color"><option value="">색 (모름)</option>{% for c in colors %}<option>{{ c }}</option>{% endfor %}</select>
+    <select id="shape"><option value="">모양 (모름)</option>{% for s in shapes %}<option>{{ s }}</option>{% endfor %}</select>
+  </div>
+  <div class="toggle" style="margin-top:8px">
+    <input type="radio" name="form" id="f0" value="" checked><label for="f0">제형 전체</label>
+    {% for f in forms %}<input type="radio" name="form" id="f{{ loop.index }}" value="{{ f }}"><label for="f{{ loop.index }}">{{ f }}</label>{% endfor %}
+  </div>
+  <button class="btn" id="textGo" type="button" style="width:100%;margin-top:12px">직접 입력으로 찾기</button>
+  <div id="msg"></div>
+</div>
+</div><div class="colB">
+<div id="out"></div>
+<p class="hint">참고용 후보예요. 정확한 확인은 약사·의사에게 문의하세요. 사진은 저장하지 않아요.<br>자료: 식품의약품안전처 의약품 낱알식별 정보</p>
+</div></div>
+{% endblock %}
+{% block script %}
+<script>
+const $=s=>document.querySelector(s);
+const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const files={};
+// 큰 사진은 휴대폰에서 줄여서 보냄 (긴 변 1600px)
+function shrink(file){return new Promise(res=>{const img=new Image();img.onload=()=>{const s=Math.min(1,1600/Math.max(img.width,img.height));
+  const c=document.createElement("canvas");c.width=img.width*s;c.height=img.height*s;c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  c.toBlob(b=>res(b),"image/jpeg",.9);};img.src=URL.createObjectURL(file);});}
+document.querySelectorAll(".shot input").forEach(inp=>inp.onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;files[inp.dataset.k]=await shrink(f);
+  const box=inp.parentElement;box.querySelectorAll("img").forEach(i=>i.remove());
+  const im=document.createElement("img");im.src=URL.createObjectURL(files[inp.dataset.k]);box.appendChild(im);});
+
+function cand(c){
+  const sig=(c.care&&c.care.signals||[]).map(s=>`<span class="chip sig">${esc(s)}</span>`).join("");
+  return `<div class="pc">${c.image?`<img src="${esc(c.image)}" alt="" loading="lazy">`:""}
+    <div style="min-width:0"><div class="nm">${esc(c.name)}<span class="conf ${c.conf}">${esc(c.conf_label)}</span></div>
+    <div class="co">${esc(c.company)} · ${esc(c.etc_otc||"")}</div>
+    <div class="chips" style="margin-top:6px"><span class="chip">${esc(c.care?c.care.kind:c.cls)}</span>${sig}</div>
+    <a href="${esc(c.detail_url)}" target="_blank" rel="noopener" style="font-size:12.5px;color:var(--pill);font-weight:600;display:inline-block;margin-top:6px">식약처 상세 보기 ›</a></div></div>`;
+}
+function group(g){
+  const f=g.features||{};
+  return `<div class="card"><div class="sec">알약 ${g.no}</div>
+    <div class="gh">읽은 각인 <b>${esc(f.imprint||"없음")}</b>${f.color?" · "+esc(f.color):""}${f.shape?" · "+esc(f.shape):""}</div>
+    ${g.candidates.length?g.candidates.map(cand).join(""):`<p class="hint" style="margin:0">${esc(g.message)}</p>`}</div>`;
+}
+function busy(b,on,label){b.disabled=on;b.innerHTML=on?'<span class="spin" style="border-color:rgba(139,85,214,.3);border-top-color:#8b55d6"></span> 찾는 중':label;}
+function err(m){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(m)}</div>`;}
+
+$("#photoGo").onclick=async()=>{
+  $("#msg").innerHTML="";if(!files.front&&!files.back)return err("앞면 사진을 찍어주세요.");
+  const fd=new FormData();for(const k in files)fd.append(k,files[k],k+".jpg");
+  const b=$("#photoGo");b.disabled=true;b.innerHTML='<span class="spin"></span> 사진 읽는 중';
+  try{const r=await (await fetch("/trip/api/pill/identify",{method:"POST",body:fd})).json();
+    if(!r.ok)return err(r.message);
+    $("#out").innerHTML=(r.message?`<div class="err" style="background:var(--warn-bg);color:var(--warn)">${esc(r.message)}</div>`:"")+(r.groups.length?r.groups.map(group).join(""):"");
+    $("#out").scrollIntoView({behavior:"smooth"});}
+  catch(e){err("연결에 실패했어요.");}
+  finally{b.disabled=false;b.textContent="사진으로 찾기";}
+};
+$("#textGo").onclick=async()=>{
+  $("#msg").innerHTML="";const b=$("#textGo");busy(b,true);
+  const body={imprint:$("#imprint").value,color:$("#color").value,shape:$("#shape").value,form:(document.querySelector('input[name=form]:checked')||{}).value||""};
+  try{const r=await (await fetch("/trip/api/pill/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    if(!r.ok)return err(r.message);
+    $("#out").innerHTML=`<div class="card"><div class="sec">찾은 약</div>${r.candidates.length?r.candidates.map(cand).join(""):`<p class="hint" style="margin:0">${esc(r.message)}</p>`}</div>`;
+    $("#out").scrollIntoView({behavior:"smooth"});}
+  catch(e){err("연결에 실패했어요.");}
+  finally{busy(b,false,"직접 입력으로 찾기");}
+};
+</script>
+{% endblock %}
+''',
+    "trip/route.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}최적 동선 · 출장 도구함{% endblock %}
+{% block theme %}t-route{% endblock %}
+{% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
+{% block body %}
+{{ topbar('최적 동선') }}
+<div class="cols"><div class="colA">
+<div class="card" id="form">
+  <label class="l">출발지</label>
+  <div class="row"><span class="ac"><input type="text" id="start" placeholder="예: 국민건강보험공단 광주전라제주지역본부" autocomplete="off"></span>
+    <button class="btn sm" type="button" id="gpsBtn">현재 위치</button></div>
+  <label class="l">방문지 <span class="muted" style="font-weight:500">· 순서 상관없이 넣으세요 (최대 {{ max_stops }}곳)</span></label>
+  <div id="stops"></div>
+  <button class="btn ghost" type="button" id="addStop">+ 방문지 추가</button>
+  <label class="l">도착</label>
+  <div class="toggle"><input type="checkbox" id="back" checked><label for="back">출발지로 돌아오기</label></div>
+  <div id="endBox" style="display:none;margin-top:8px"><span class="ac" style="display:block"><input type="text" id="end" placeholder="도착지 주소" autocomplete="off"></span></div>
+  <button class="btn main" id="go" type="button">최적 동선 찾기</button>
+  <div id="msg"></div>
+  {% if demo %}<p class="hint">예시 모드: 지사, 라인2차, 미소래, 라인1차를 넣어보세요. 시간은 직선거리로 추정한 값이에요.</p>{% endif %}
+</div>
+</div><div class="colB">
+<div id="result" style="display:none"></div>
+<div class="ph" id="ph"><p>방문지를 넣고 <b>최적 동선 찾기</b>를 누르면<br>여기에 순서와 지도가 나와요</p></div>
+</div></div>
+{% endblock %}
+{% block script %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% if kakao_js_key %}<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>{% endif %}
+{% include "trip/_ac.html" %}
+<script>
+const MAX={{ max_stops }}; let gps=null,lastBody=null,bestRes=null;
+const $=s=>document.querySelector(s);
+const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dur=s=>{const m=Math.round(s/60);return m>=60?`${Math.floor(m/60)}시간 ${m%60}분`:`${m}분`};
+const km=m=>m<1000?`${m}m`:`${(m/1000).toFixed(1)}km`;
+
+const pickOf=inp=>{try{return inp.dataset.pick?JSON.parse(inp.dataset.pick):null}catch(e){return null}};
+function routePick(inp){
+  attachSuggest(inp,pl=>{inp.dataset.pick=JSON.stringify({label:pl.place_name||"",road_address:pl.road_address_name||pl.address_name||"",lat:+pl.y,lng:+pl.x});inp.classList.add("picked");},
+    ()=>{delete inp.dataset.pick;inp.classList.remove("picked");});
+}
+routePick($("#start"));routePick($("#end"));
+
+function swapInputs(a,b){
+  [a.value,b.value]=[b.value,a.value];
+  const pa=a.dataset.pick,pb=b.dataset.pick;
+  if(pb)a.dataset.pick=pb;else delete a.dataset.pick;
+  if(pa)b.dataset.pick=pa;else delete b.dataset.pick;
+  a.classList.toggle("picked",!!a.dataset.pick);b.classList.toggle("picked",!!b.dataset.pick);
+}
+function renumber(){
+  const rows=[...document.querySelectorAll("#stops .stop")];
+  rows.forEach((r,i)=>r.querySelector(".n").textContent=i+1);
+  $("#addStop").style.display=rows.length>=MAX?"none":"";}
+function addStop(v=""){const d=document.createElement("div");d.className="stop";
+  d.innerHTML=`<span class="n"></span><span class="ac"><input type="text" placeholder="방문할 집 주소나 단지명" value="${esc(v)}" autocomplete="off"></span><button class="x" type="button" aria-label="삭제">×</button>`;
+  routePick(d.querySelector("input"));
+  d.querySelector(".x").onclick=()=>{if(document.querySelectorAll("#stops .stop").length>1){d.remove();renumber();}};
+  $("#stops").appendChild(d);renumber();}
+addStop();addStop();addStop();
+$("#addStop").onclick=()=>addStop();
+$("#back").onchange=e=>$("#endBox").style.display=e.target.checked?"none":"";
+$("#gpsBtn").onclick=()=>{
+  if(!navigator.geolocation){alert("위치를 쓸 수 없는 기기예요.");return;}
+  $("#gpsBtn").textContent="찾는 중…";
+  navigator.geolocation.getCurrentPosition(p=>{gps=[p.coords.latitude,p.coords.longitude];$("#start").value="현재 위치";$("#gpsBtn").textContent="현재 위치 ✓";},
+    ()=>{$("#gpsBtn").textContent="현재 위치";alert("위치를 가져오지 못했어요.");},{enableHighAccuracy:true,timeout:10000});};
+$("#start").oninput=()=>{if(gps&&$("#start").value!=="현재 위치"){gps=null;$("#gpsBtn").textContent="현재 위치";}};
+
+$("#go").onclick=async()=>{
+  const stopInputs=[...document.querySelectorAll("#stops input")].filter(i=>i.value.trim());
+  const stops=stopInputs.map(i=>i.value.trim());
+  const picks={start:pickOf($("#start")),end:pickOf($("#end")),stops:stopInputs.map(pickOf)};
+  const body={start:$("#start").value.trim(),stops,end:$("#end").value.trim(),return_to_start:$("#back").checked,gps,picks};
+  lastBody=body;
+  $("#msg").innerHTML="";const b=$("#go");b.disabled=true;b.innerHTML='<span class="spin"></span> 순서 비교하는 중';
+  try{const r=await (await fetch("/trip/api/route",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    if(!r.ok){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message)}</div>`;return;}
+    bestRes=r;show(r);}
+  catch(e){$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';}
+  finally{b.disabled=false;b.textContent="최적 동선 찾기";}
+};
+
+async function reorder(i){
+  // 결과에서 i번째와 i+1번째 방문지를 바꿔 그 순서대로 다시 계산
+  const cur=window._curRes,o=cur.order.slice(1,-1);
+  [o[i-1],o[i]]=[o[i],o[i-1]];
+  const body=Object.assign({},lastBody,{keep_order:true,stops:o.map(p=>p.label||p.input),
+    picks:Object.assign({},lastBody.picks,{stops:o.map(p=>({label:p.label||p.input,road_address:p.road_address||"",lat:p.lat,lng:p.lng}))})});
+  document.querySelectorAll("#result .swap").forEach(b=>b.disabled=true);
+  try{const r=await (await fetch("/trip/api/route",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    if(!r.ok){alert(r.message);return;}
+    r.order.slice(1,-1).forEach((p,k)=>{p.input=o[k].input;p.label=o[k].label;});
+    show(r);}
+  catch(e){alert("연결에 실패했어요.");}
+  finally{document.querySelectorAll("#result .swap").forEach(b=>b.disabled=false);}
+}
+
+function show(r){
+  window._curRes=r;
+  const o=r.order,last=o.length-1;
+  let saved="";
+  if(r.fixed){const diff=r.total_duration-bestRes.total_duration;
+    saved=diff>=60?`최적 순서보다 ${dur(diff)} 더 걸려요`:diff<=-60?`최적 순서보다 ${dur(-diff)} 빨라요`:"최적 순서와 거의 같아요";}
+  else if(r.saved_vs_input>=60)saved=`입력한 순서보다 ${dur(r.saved_vs_input)} 빨라요`;
+  else if(r.saved_vs_worst>=60)saved=`가장 느린 순서보다 ${dur(r.saved_vs_worst)} 빨라요`;
+  else saved="입력한 순서가 이미 가장 빨라요";
+  let tl="";
+  o.forEach((p,i)=>{
+    const se=i===0||i===last, label=i===0?"출발":i===last?"도착":i;
+    const nm=se?(i===last&&r.return_to_start?"출발지로 복귀":p.label||p.input):(p.label||p.input);
+    const go=se?"":`<a class="btn sm go" href="https://map.kakao.com/link/to/${encodeURIComponent(p.label||p.input)},${p.lat},${p.lng}" target="_blank" rel="noopener">길안내</a>`;
+    const leg=i<last?`<div class="leg">↓ ${dur(r.legs[i].duration)} · ${km(r.legs[i].distance)}</div>`:"";
+    tl+=`<li><span class="dot ${se?"se":""}" role="button" tabindex="0" title="지도에서 보기" onclick="focusPt(${i})">${label}</span><div class="body"><div class="nm">${esc(nm)}</div><div class="ad">${esc(p.road_address||p.input||"")}</div>${leg}</div>${go}</li>`;
+  });
+  $("#result").innerHTML=`
+    <div class="hero${r.fixed?" mine":""}"><b>${r.fixed?"내가 바꾼 순서":"최적 동선"}${r.demo?" (예시 추정)":""}</b><div class="big">${dur(r.total_duration)}</div>
+      <div class="sm">${km(r.total_distance)} · ${r.fixed?"":r.orders_checked+"가지 순서 비교 · "}${saved}</div>
+      ${r.fixed?'<button type="button" class="btn sm back2" onclick="show(bestRes)">최적 순서로 되돌리기</button>':""}</div>
+    <div class="card" style="padding:10px"><div class="map" id="map"></div>
+      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b><a id="miniBig" target="_blank" rel="noopener">로드뷰 크게</a><button type="button" class="allv" onclick="unfocus()">✕ 전체 보기</button></div>
+        <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
+      <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요. 같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
+    <div class="card"><ul class="tl">${tl}</ul></div>
+    <p class="hint">${r.demo?"예시 모드라 직선거리로 추정한 시간이에요. 실제 키를 넣으면 실시간 교통을 반영해요.":"카카오모빌리티 실시간 교통 기준이에요. 길안내는 카카오맵으로 열려요."}</p>`;
+  $("#result").style.display="";if($("#ph"))$("#ph").remove();
+  drawMap(r);
+  if(!r.fixed)$("#result").scrollIntoView({behavior:"smooth"});
+}
+
+let MAP=null,MARK=[],RV=null,RVC=null,ALL=[],FOCUS=null;
+function unfocus(){
+  // 번호 누르기 전 상태로: 전체 경로가 보이게, 로드뷰 닫기
+  FOCUS=null;
+  document.querySelectorAll("#result .tl li").forEach(li=>li.classList.remove("on"));
+  if(MAP){MAP.closePopup();if(ALL.length)MAP.fitBounds(ALL,{padding:[28,28]});}
+  $("#mini").style.display="none";
+}
+function bearing(a,b){const r=Math.PI/180,y=Math.sin((b.lng-a.lng)*r)*Math.cos(b.lat*r),
+  x=Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos((b.lng-a.lng)*r);
+  return (Math.atan2(y,x)/r+360)%360;}
+function focusPt(i){
+  const r=window._curRes,o=r.order,last=o.length-1;
+  if(i===last&&r.return_to_start)i=0;
+  if(FOCUS===i){unfocus();return;}   // 같은 번호를 다시 누르면 원래대로
+  FOCUS=i;
+  const p=o[i],nm=i===0?(p.label||p.input||"출발"):(p.label||p.input);
+  document.querySelectorAll("#result .tl li").forEach((li,k)=>li.classList.toggle("on",k===i||(i===0&&k===last&&r.return_to_start)));
+  if(MAP){MAP.setView([p.lat,p.lng],17,{animate:true});
+    const mk=MARK[i];if(mk)mk.bindPopup(`<b>${esc(nm)}</b><br><small>${esc(p.road_address||p.input||"")}</small>`).openPopup();}
+  const box=$("#mini");box.style.display="";$("#miniT").textContent=(i===0?"출발 · ":i===last?"도착 · ":i+"번 · ")+nm;
+  $("#miniBig").href=`https://map.kakao.com/link/roadview/${p.lat},${p.lng}`;
+  const msg=$("#miniMsg");msg.style.display="";
+  if(!window.kakao||!kakao.maps){msg.textContent="카카오 JavaScript 키를 넣으면 로드뷰가 보여요";return;}
+  msg.textContent="로드뷰 불러오는 중";
+  kakao.maps.load(()=>{
+    const t=new kakao.maps.LatLng(p.lat,p.lng);
+    if(!RV){RV=new kakao.maps.Roadview($("#miniRv"));RVC=new kakao.maps.RoadviewClient();
+      kakao.maps.event.addListener(RV,"init",()=>{const q=RV.getPosition(),g=RV._tgt;
+        RV.setViewpoint({pan:bearing({lat:q.getLat(),lng:q.getLng()},g),tilt:5,zoom:0});msg.style.display="none";});}
+    RV._tgt={lat:p.lat,lng:p.lng};
+    (function tryR(rs){
+      if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
+      RVC.getNearestPanoId(t,rs[0],id=>{if(id===null)return tryR(rs.slice(1));
+        RV.setPanoId(id,t);
+        setTimeout(()=>{const q=RV.getPosition();if(q){RV.setViewpoint({pan:bearing({lat:q.getLat(),lng:q.getLng()},RV._tgt),tilt:5,zoom:0});msg.style.display="none";}},700);});
+    })([50,100,200]);
+  });
+  if(innerWidth<960)box.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+function drawMap(r){
+  const el=$("#map"),o=r.order,last=o.length-1;
+  RV=null;MARK=[];ALL=[];FOCUS=null;
+  if(window.L){
+    const m=L.map(el,{zoomControl:false,attributionControl:false});MAP=m;
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(m);
+    const all=[];
+    r.legs.forEach(l=>{if(l.path.length){L.polyline(l.path,{color:"#2f6fed",weight:5,opacity:.85}).addTo(m);all.push(...l.path);}});
+    o.forEach((p,i)=>{if(i===last&&r.return_to_start)return;
+      const t=i===0?"출발":i===last?"도착":i;
+      MARK[i]=L.marker([p.lat,p.lng],{icon:L.divIcon({className:"",html:`<div style="background:${i===0||i===last?"#1b1d1c":"#2f6fed"};color:#fff;border:3px solid #fff;border-radius:999px;min-width:30px;height:30px;padding:0 6px;display:flex;align-items:center;justify-content:center;font:800 12px Pretendard,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.25)">${t}</div>`,iconSize:[30,30],iconAnchor:[15,15]})}).addTo(m).on("click",()=>focusPt(i));
+      all.push([p.lat,p.lng]);});
+    ALL=all;m.fitBounds(all,{padding:[28,28]});
+    return;
+  }
+  // 지도 라이브러리를 못 불러오면 간단한 그림으로 대신
+  const lats=o.map(p=>p.lat),lngs=o.map(p=>p.lng),pad=30,W=el.clientWidth||340,H=el.clientHeight||240;
+  const x0=Math.min(...lngs),x1=Math.max(...lngs),y0=Math.min(...lats),y1=Math.max(...lats);
+  const sx=v=>pad+(v-x0)/((x1-x0)||1)*(W-2*pad),sy=v=>H-pad-(v-y0)/((y1-y0)||1)*(H-2*pad);
+  let svg=`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#eceae3"/>`;
+  svg+=`<polyline fill="none" stroke="#2f6fed" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" points="${o.map(p=>sx(p.lng)+","+sy(p.lat)).join(" ")}"/>`;
+  o.forEach((p,i)=>{if(i===last&&r.return_to_start)return;const t=i===0?"출발":i===last?"도착":i,c=i===0||i===last?"#1b1d1c":"#2f6fed";
+    svg+=`<circle cx="${sx(p.lng)}" cy="${sy(p.lat)}" r="${i===0?19:15}" fill="${c}" stroke="#fff" stroke-width="3"/><text x="${sx(p.lng)}" y="${sy(p.lat)+4.5}" text-anchor="middle" font-size="${i===0?11:13}" font-weight="800" fill="#fff" font-family="sans-serif">${t}</text>`;});
+  el.innerHTML=svg+"</svg>";
+}
+</script>
+{% endblock %}
+''',
+    "trip/toilet.html": r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}내 근처 화장실 · 출장 도구함{% endblock %}
+{% block theme %}t-toilet{% endblock %}
+{% block body %}
+{{ topbar('내 근처 화장실') }}
+<div class="cols"><div class="colA">
+<div class="card">
+  <div class="sec">조건 <span class="muted" style="font-weight:500;font-size:12px">· 필요한 것만 고르세요</span></div>
+  <div class="toggle" style="margin-top:6px">
+    <input type="checkbox" id="always"><label for="always">상시 개방</label>
+    <input type="checkbox" id="bell"><label for="bell">비상벨 있음</label>
+    <input type="checkbox" id="acc"><label for="acc">장애인 화장실</label>
+  </div>
+  <button class="btn main" id="find" type="button">지금 위치에서 찾기</button>
+  <div id="msg"></div>
+</div>
+</div><div class="colB">
+<div id="list"></div>
+<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요. 개방 안 하는 곳은 빼요. 자료: 안전로드 공중화장실 데이터{% if demo %} (지금은 예시 3곳){% endif %}.</p>
+</div></div>
+{% endblock %}
+{% block script %}
+<script>
+const $=s=>document.querySelector(s);
+const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const km=m=>m<1000?`${m}m`:`${(m/1000).toFixed(1)}km`;
+const DEMO={{ 'true' if demo else 'false' }};
+function search(lat,lng){
+  const q=new URLSearchParams({lat,lng,always:$("#always").checked?1:0,bell:$("#bell").checked?1:0,acc:$("#acc").checked?1:0});
+  fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
+    done();
+    if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
+    $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
+      <div class="trow"><div class="d"><b>${km(t.distance)}</b><span>걸어서 ${t.walk_min}분</span></div>
+        <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(t.address)}</div>
+          <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
+          ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
+        <a class="btn sm" href="https://map.kakao.com/link/to/${encodeURIComponent(t.name||"공중화장실")},${t.lat},${t.lng}" target="_blank" rel="noopener">길안내</a></div>`).join("")}</div>`;
+  }).catch(()=>{done();$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';});
+}
+function done(){const b=$("#find");b.disabled=false;b.textContent="지금 위치에서 찾기";}
+$("#find").onclick=()=>{
+  $("#msg").innerHTML="";const b=$("#find");b.disabled=true;b.innerHTML='<span class="spin"></span> 위치 확인 중';
+  if(!navigator.geolocation){ if(DEMO) return search(35.1395,126.7935); done(); $("#msg").innerHTML='<div class="err" style="margin:12px 0 0">위치를 쓸 수 없는 기기예요.</div>'; return;}
+  navigator.geolocation.getCurrentPosition(p=>search(p.coords.latitude,p.coords.longitude),
+    ()=>{ if(DEMO) return search(35.1395,126.7935); done(); $("#msg").innerHTML='<div class="err" style="margin:12px 0 0">위치를 가져오지 못했어요. 위치 권한을 켜주세요.</div>'; },
+    {enableHighAccuracy:true,timeout:10000,maximumAge:0});
+};
+</script>
+{% endblock %}
+''',
+}
+
+app.jinja_loader = _TripChoiceLoader([app.jinja_loader, _TripDictLoader(TRIP_TEMPLATES)])
+app.register_blueprint(trip_bp)
+# ===============  출장 도구함 모듈 끝  ============================================
+
 
 if __name__ == "__main__":
 
