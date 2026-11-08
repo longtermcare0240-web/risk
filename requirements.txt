@@ -4,3 +4,4 @@ openpyxl
 gunicorn
 requests
 flask-compress
+openai>=1.40
