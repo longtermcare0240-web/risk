@@ -14003,62 +14003,94 @@ def trip_building(loc):
     }
 
 
+TRIP_STRUCT_PLAIN = [("철근콘크리트", "콘크리트"), ("철골철근", "철골·콘크리트"), ("철골", "철골"), ("조적", "벽돌·블록"),
+                ("벽돌", "벽돌"), ("블록", "블록"), ("목", "나무"), ("흙", "흙"), ("경량", "가벼운 철골·패널")]
+
+
+def _trip_plain_struct(s):
+    for k, v in TRIP_STRUCT_PLAIN:
+        if k in s:
+            return v
+    return ""
+
+
+def trip_house_rows(bld, floor, mountain, unknown="대장에 안 적힘"):
+    """건축물대장 값을 있는 그대로 보여줄 표. [(항목, 값)]"""
+    if not bld:
+        return []
+    rows = []
+    rows.append(("주용도", bld.get("purpose") or unknown))
+    s = bld.get("structure") or ""
+    rows.append(("구조", (f"{s} ({_trip_plain_struct(s)})" if _trip_plain_struct(s) else s) if s else unknown))
+    rows.append(("지붕", bld.get("roof") or unknown))
+    if bld.get("year"):
+        rows.append(("준공", f"{bld['year']}년 · {date.today().year - bld['year']}년 차"))
+    else:
+        rows.append(("준공", unknown))
+    grnd, ugrnd = bld.get("grnd") or 0, bld.get("ugrnd") or 0
+    rows.append(("층수", (f"지상 {grnd}층" if grnd else unknown) + (f" · 지하 {ugrnd}층" if ugrnd else "")))
+    elev = bld.get("elevators")
+    rows.append(("승강기", unknown if elev is None else (f"있음 · {elev}대" if elev else "없음")))
+    hh, dongs = bld.get("households") or 0, bld.get("dongs") or 0
+    if hh or dongs > 1:
+        rows.append(("규모", " · ".join(x for x in (f"{hh}세대" if hh else "", f"{dongs}개 동" if dongs > 1 else "") if x)))
+    if floor is not None:
+        rows.append(("거주층", f"지하 {-floor}층" if floor < 0 else f"{floor}층" + (" (꼭대기)" if grnd >= 2 and floor == grnd else "")))
+    if mountain:
+        rows.append(("땅", "산 지번"))
+    return rows
+
+
 def trip_interpret(bld, floor, mountain, missing=False):
-    """반환: facts=[(사실, 그래서)], checks=[가서 볼 것]"""
+    """반환: notes=[(아이콘, 조심할 점, 짧은 설명)], checks=[가서 볼 것]"""
     facts, checks = [], []
     if missing:
-        facts.append(("건축물대장에 없는 집",
-                      "무허가·미등기일 수 있어요. 주거지원 사업에서 빠져 있었는지 확인하세요."))
+        facts.append(("alert", "대장에 없는 집", "무허가·미등기일 수 있어요"))
         checks += ["언제 지은 집인지, 증축한 곳이 있는지", "지붕 재질(슬레이트인지)"]
     if bld:
         age = (date.today().year - bld["year"]) if bld.get("year") else None
-        if age is not None:
-            if age >= 30:
-                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
-                              "단열·배관이 낡았을 가능성이 커요. 겨울 난방과 욕실을 먼저 보세요."))
-                checks.append("겨울에 난방을 실제로 켜시는지")
-            elif age >= 20:
-                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
-                              "욕실·배관 같은 설비가 교체 시기예요. 욕실 바닥과 손잡이를 먼저 보세요."))
-                checks.append("욕실 손잡이, 미끄럼 방지 매트")
-            else:
-                facts.append((f"{bld['year']}년 준공, {age}년 된 집",
-                              "비교적 새 집이에요. 집 구조보다 가사·외출 같은 생활 쪽을 보세요."))
+        if age is not None and age >= 30:
+            facts.append(("clock", f"지은 지 {age}년", "단열·배관이 낡았을 수 있어요"))
+            checks.append("겨울에 난방을 실제로 켜시는지")
+        elif age is not None and age >= 20:
+            facts.append(("clock", f"지은 지 {age}년", "욕실·배관 교체 시기예요"))
+            checks.append("욕실 손잡이, 미끄럼 방지 매트")
         s = bld.get("structure") or ""
         if any(w in s for w in TRIP_WOOD):
-            facts.append((s, "나무·흙으로 지은 집이라 화재와 겨울 추위에 약해요."))
+            facts.append(("fire", "나무·흙집", "불에 약하고 겨울에 추워요"))
             checks.append("전열기구·화기 사용과 화재경보기")
         elif any(w in s for w in TRIP_MASONRY):
-            facts.append((s, "벽돌·블록 집은 단열이 약한 경우가 많아요."))
+            facts.append(("brick", "벽돌·블록집", "춥고 곰팡이가 생기기 쉬워요"))
         if "슬레이트" in (bld.get("roof") or ""):
-            facts.append(("슬레이트 지붕", "석면이 들어 있을 수 있어요. 지붕 개량 지원 대상인지 확인하세요."))
+            facts.append(("roof", "슬레이트 지붕", "석면 가능성, 개량 지원 확인"))
         p = bld.get("purpose") or ""
-        if p and not any(w in p for w in ("주택", "아파트", "공동")):
-            facts.append((f"{p} 건물에 거주", "주거용이 아닌 건물이에요. 쪽방·고시원형 주거일 수 있어요."))
+        if "근린생활" in p:
+            facts.append(("store", "상가용 건물", "상가 위 살림집·고시원일 수 있어요"))
+        elif "숙박" in p:
+            facts.append(("store", "숙박시설", "여관·모텔 장기투숙일 수 있어요"))
+        elif p and not any(w in p for w in ("주택", "아파트", "공동", "업무")):
+            facts.append(("store", "주거용 아닌 건물", f"{p}에 살고 계세요"))
 
         grnd, elev = bld.get("grnd") or 0, bld.get("elevators")
         if floor is not None and floor < 0:
-            facts.append((f"지하 {-floor}층 거주", "습기·곰팡이·침수 위험이 있어요. 환기와 배수를 보세요."))
+            facts.append(("drop", "지하층", "습기·침수 위험이 있어요"))
             checks.append("비 오는 날 물이 새거나 차는지")
         elif floor is not None and floor >= 2 and elev == 0:
-            facts.append((f"승강기 없는 {floor}층", f"매일 계단 약 {(floor - 1) * 18}칸을 오르내려야 해요."))
+            facts.append(("stairs", f"승강기 없이 {floor}층", f"계단 약 {(floor - 1) * 18}칸을 매일 올라요"))
             checks.append("계단을 혼자 오르내리실 수 있는지")
         elif floor is not None and floor >= 6 and elev == 1:
-            facts.append((f"{floor}층 · 승강기 1대", "점검·고장 날엔 외출이 끊길 수 있어요."))
+            facts.append(("lift", "승강기 1대뿐", "고장 나면 외출이 끊겨요"))
             checks.append("엘리베이터가 멈추면 어떻게 하시는지")
         elif elev is None and floor is not None and floor >= 2:
-            facts.append((f"{floor}층 거주 · 승강기 정보 없음",
-                          "건축물대장에 승강기 수가 비어 있어요. 승강기가 있는지 현장에서 확인하세요."))
+            facts.append(("lift", "승강기 정보 없음", "현장에서 꼭 확인하세요"))
             checks.append("엘리베이터가 있는지, 멈추면 어떻게 하시는지")
         elif floor is None and grnd >= 3 and elev == 0:
-            facts.append((f"승강기 없는 {grnd}층 건물", "거주층을 넣으면 계단 부담을 계산해요."))
-        elif grnd >= 6 and elev:
-            facts.append((f"지상 {grnd}층 · 승강기 {elev}대", "층 이동은 승강기에 의존해요."))
+            facts.append(("stairs", f"승강기 없는 {grnd}층", "거주층을 넣으면 계단을 계산해요"))
         if floor is not None and grnd >= 2 and floor == grnd:
-            facts.append(("꼭대기 층", "여름엔 덥고 겨울엔 추워요. 냉난방 여부를 보세요."))
+            facts.append(("sun", "꼭대기 층", "여름엔 덥고 겨울엔 추워요"))
             checks.append("여름에 에어컨·선풍기를 쓰시는지")
     if mountain:
-        facts.append(("산 지번", "산을 깎은 땅이라 언덕길일 수 있어요. 외출·장보기가 힘든지 보세요."))
+        facts.append(("hill", "산 지번", "집 앞이 언덕길일 수 있어요"))
         checks.append("집 밖 오르막을 혼자 다니실 수 있는지")
     for d in ("지금 몇 분이 같이 사시는지", "장보기·청소는 누가 하시는지"):
         if len(checks) < 3:
@@ -14663,41 +14695,6 @@ def trip_api_route():
 
 
 # ---------- 2. 집 미리보기 ----------
-def _trip_rule_summary(facts, checks):
-    out = [f for f, _ in facts[:3]]
-    out += [c for c in checks[:3] if not any(c[:6] in m for _, m in facts)][:2]
-    return out[:4]
-
-
-@trip_bp.post("/api/house/summary", endpoint="house_summary")
-def trip_house_summary():
-    d = request.get_json(silent=True) or {}
-    facts = [(str(f)[:80], str(m)[:160]) for f, m in (d.get("facts") or [])][:12]
-    checks = [str(c)[:160] for c in (d.get("checks") or [])][:10]
-    name = str(d.get("name") or "")[:60]
-    if not facts and not checks:
-        return jsonify(ok=False)
-    if trip_demo() or not os.environ.get("OPENAI_API_KEY"):
-        return jsonify(ok=True, ai=False, lines=_trip_rule_summary(facts, checks))
-    text = "\n".join([f"집: {name}", "건물 정보:"] + [f"- {f}: {m}" for f, m in facts]
-                     + ["현장 확인 사항:"] + [f"- {c}" for c in checks])
-    prompt = ("당신은 장기요양 방문 직원을 돕는 도우미입니다. 아래 건축물대장 해석과 확인 사항만 근거로, "
-              "방문 전에 꼭 알아야 할 핵심을 3~4줄로 요약하세요. 각 줄은 40자 안팎의 한국어 문장, "
-              "이동(계단·승강기)·건물 노후·안전 순으로. 주어진 내용에 없는 사실은 절대 만들지 말고, "
-              "치안은 언급하지 마세요. 줄마다 '- '로 시작하고 다른 말은 쓰지 마세요.\n\n" + text)
-    try:
-        client = OpenAI()
-        res = client.responses.create(model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
-                                      input=[{"role": "user", "content": prompt}], temperature=0.2)
-        lines = [l.strip().lstrip("-•· ").strip() for l in (res.output_text or "").splitlines()]
-        lines = [l for l in lines if l][:4]
-        if not lines:
-            raise ValueError("empty")
-        return jsonify(ok=True, ai=True, lines=lines)
-    except Exception:
-        return jsonify(ok=True, ai=False, lines=_trip_rule_summary(facts, checks))
-
-
 @trip_bp.get("/house", endpoint="house_page")
 def trip_house_page():
     return render_template("trip/house.html")
@@ -14713,9 +14710,11 @@ def _trip_floor(raw):
 
 
 def _trip_house_card(loc, bld, floor, missing=False, extra=None, source=None):
-    facts, checks = trip_interpret(bld, floor, loc.get("plat_gb_cd") == "1", missing)
-    facts = facts[:1] + (extra or []) + facts[1:]
-    return render_template("trip/house_card.html", loc=loc, bld=bld, floor=floor, facts=facts,
+    mountain = loc.get("plat_gb_cd") == "1"
+    facts, checks = trip_interpret(bld, floor, mountain, missing)
+    facts = (extra or []) + facts
+    rows = trip_house_rows(bld, floor, mountain, unknown="실제 조회하면 표시" if trip_demo() else "대장에 안 적힘")
+    return render_template("trip/house_card.html", loc=loc, bld=bld, floor=floor, facts=facts, rows=rows,
                            checks=checks, source=source, missing=missing)
 
 
@@ -15111,6 +15110,23 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .trow .dl{font-size:12.5px;color:var(--sub);margin-top:3px}
 .trow .dl b{color:var(--toilet);font-weight:800}
 
+/* 집 미리보기: 건축물대장 값 표 */
+.spec{display:grid;grid-template-columns:72px 1fr;gap:0;margin:6px 0 0;font-size:14.5px}
+.spec dt,.spec dd{margin:0;padding:9px 0;border-top:1px solid #f0eee7}
+.spec dt:first-of-type,.spec dt:first-of-type+dd{border-top:none}
+.spec dt{color:var(--muted);font-weight:600;font-size:13.5px}
+.spec dd{font-weight:600}
+.spec dd.muted{color:var(--muted);font-weight:500}
+.fact.warnf .f::before{content:"!";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:50%;background:var(--house-bg);color:var(--house);font-size:12px;font-weight:800;vertical-align:1px}
+
+/* 조심할 점: 메인화면처럼 2x2 카드 */
+.warns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+.wt{background:#fffaf5;border:1px solid #f6e3d2;border-radius:16px;padding:13px 13px 12px}
+.wt .wi{width:36px;height:36px;border-radius:11px;background:var(--house-bg);color:var(--house);display:flex;align-items:center;justify-content:center}
+.wt .wi svg{width:21px;height:21px}
+.wt .t{font-size:15px;font-weight:700;margin:10px 0 2px;line-height:1.3}
+.wt .d{font-size:12.5px;color:var(--sub);line-height:1.45;word-break:keep-all}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -15206,6 +15222,11 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .t-house form.card,.t-house .wrap>.card{max-width:640px;margin-left:auto;margin-right:auto}
   .note{max-width:720px}
   .minirv{height:260px!important}
+  .wt .t{font-size:17px}
+  .wt .d{font-size:14px}
+  .wt .wi{width:42px;height:42px}
+  .spec{grid-template-columns:96px 1fr;font-size:17px}
+  .spec dt{font-size:15.5px}
   .sr-rv{width:120px;height:88px}
   .sr-rv-pano{width:480px;height:352px}
 }
@@ -15257,6 +15278,23 @@ function attachSuggest(inp,onPick,onClear){
 {%- endmacro %}
 {% macro topbar(title) -%}
 <div class="bar"><a class="back" href="{{ url_for('trip.home') }}" aria-label="홈으로">{{ icon('back') }}</a><h1>{{ title }}</h1>{% if demo %}<span class="tag">예시 모드</span>{% endif %}</div>
+{%- endmacro %}
+
+{% macro wicon(name) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+{%- if name == 'clock' -%}<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
+{%- elif name == 'fire' -%}<path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-3.8 2.5-5 .3 1.6 1 2.5 2 3 0-3 .2-5.5.5-8z"/>
+{%- elif name == 'brick' -%}<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 9.7h18M3 14.3h18M9 5v4.7M15 9.7v4.6M9 14.3V19"/>
+{%- elif name == 'roof' -%}<path d="M2.5 12 12 4.5 21.5 12"/><path d="M5 10.5V20h14v-9.5"/><path d="M8 14h8"/>
+{%- elif name == 'store' -%}<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 11.5V20h13v-8.5"/><path d="M10 20v-4.5h4V20"/>
+{%- elif name == 'drop' -%}<path d="M12 3.5s6 6.4 6 10.5a6 6 0 0 1-12 0c0-4.1 6-10.5 6-10.5z"/>
+{%- elif name == 'stairs' -%}<path d="M3 20h5v-5h5v-5h5V5h3"/>
+{%- elif name == 'lift' -%}<rect x="5" y="3" width="14" height="18" rx="2"/><path d="m9.5 9 2.5-2.5L14.5 9M9.5 15l2.5 2.5 2.5-2.5"/>
+{%- elif name == 'sun' -%}<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>
+{%- elif name == 'hill' -%}<path d="M2 19 9 8l4 6 2.5-3.5L22 19z"/>
+{%- else -%}<path d="M12 4 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/>
+{%- endif -%}
+</svg>
 {%- endmacro %}
 ''',
     "trip/_pill_cn.html": r'''{% raw %}
@@ -16296,7 +16334,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/house_card.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar with context %}
+{% from "trip/_m.html" import topbar, wicon with context %}
 {% block title %}{{ (bld and bld.name) or loc.label }} · 집 미리보기{% endblock %}
 {% block theme %}t-house{% endblock %}
 {% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
@@ -16309,25 +16347,25 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <span class="tg">{{ (bld and bld.name) or loc.label }}</span>
 </div>
 
-<div class="card ai" id="aiCard">
-  <div class="sec"><i>AI</i> 한눈에 보기 <span class="muted" id="aiSrc" style="font-weight:500;font-size:12px;margin-left:auto"></span></div>
-  <div id="aiBody"><div class="sk"></div><div class="sk" style="width:80%"></div><div class="sk" style="width:60%"></div></div>
-</div>
-
 <div class="card">
   <p class="hname">{{ (bld and bld.name) or loc.label }}</p>
   <p class="haddr">{{ loc.road_address or loc.jibun_address }}{% if floor is not none %} · {{ '지하 %d'|format(-floor) if floor < 0 else floor }}층 거주{% endif %}</p>
 
   <div class="sec">이 집은</div>
-  {% for f, m in facts %}
-  <div class="fact"><div class="f">{{ f }}</div><div class="m">{{ m }}</div></div>
-  {% else %}
+  {% if rows %}
+  <dl class="spec">{% for k, v in rows %}<dt>{{ k }}</dt><dd{% if v in ('대장에 안 적힘', '실제 조회하면 표시') %} class="muted"{% endif %}>{{ v }}</dd>{% endfor %}
+  {% if floor is none %}<dt>거주층</dt><dd class="muted">넣으면 계단·꼭대기 층을 알려줘요</dd>{% endif %}</dl>
+  {% elif not facts %}
   <div class="fact"><div class="m">건물 정보를 불러오지 못했어요. 현장에서 확인해 주세요.</div></div>
-  {% endfor %}
-  {% if bld and floor is none %}
-  <div class="fact"><div class="f muted">거주층</div><div class="m muted">거주층을 넣으면 계단·꼭대기 층 여부를 알려줘요.</div></div>
-  {% elif demo and bld and bld.elevators is none %}
-  <div class="fact"><div class="f muted">승강기 수</div><div class="m muted">실제 조회하면 표시돼요.</div></div>
+  {% endif %}
+
+  {% if facts %}
+  <div class="sec" style="margin-top:18px">이런 점을 조심하세요</div>
+  <div class="warns">{% for ic, f, m in facts %}
+    <div class="wt"><span class="wi">{{ wicon(ic) }}</span><div class="t">{{ f }}</div><div class="d">{{ m }}</div></div>
+  {% endfor %}</div>
+  {% elif rows %}
+  <p class="hint" style="margin:14px 0 0">대장 정보로는 특별히 조심할 점이 보이지 않아요.</p>
   {% endif %}
 </div>
 
@@ -16354,20 +16392,6 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 <a class="btn" style="width:100%;margin-top:10px" href="{{ url_for('trip.house_page') }}">다른 집</a>
 {% endblock %}
 {% block script %}
-<script>
-(function(){
-  var body=document.getElementById("aiBody"),src=document.getElementById("aiSrc");
-  fetch("{{ url_for('trip.house_summary') }}",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name:{{ ((bld and bld.name) or loc.label)|tojson }},facts:{{ facts|tojson }},checks:{{ checks|tojson }}})})
-  .then(function(r){return r.json();}).then(function(d){
-    if(!d.ok||!d.lines||!d.lines.length){document.getElementById("aiCard").remove();return;}
-    var ul=document.createElement("ul");
-    d.lines.forEach(function(t){var li=document.createElement("li");li.textContent=t;ul.appendChild(li);});
-    body.innerHTML="";body.appendChild(ul);
-    src.textContent=d.ai?"아래 내용을 AI가 요약":"아래 내용 요약";
-  }).catch(function(){document.getElementById("aiCard").remove();});
-})();
-</script>
 {% if kakao_js_key %}
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>
 <script>
@@ -16376,6 +16400,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   function bearing(a,b){var r=Math.PI/180,y=Math.sin((b.getLng()-a.getLng())*r)*Math.cos(b.getLat()*r),
     x=Math.cos(a.getLat()*r)*Math.sin(b.getLat()*r)-Math.sin(a.getLat()*r)*Math.cos(b.getLat()*r)*Math.cos((b.getLng()-a.getLng())*r);
     return (Math.atan2(y,x)/r+360)%360;}
+  if(!window.kakao||!kakao.maps){msg.innerHTML="로드뷰를 불러오지 못했어요";return;}
   kakao.maps.load(function(){
     var t=new kakao.maps.LatLng(LAT,LNG),el=document.getElementById("roadview"),
         rv=new kakao.maps.Roadview(el),cl=new kakao.maps.RoadviewClient();
