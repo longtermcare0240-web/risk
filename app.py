@@ -15412,6 +15412,12 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .macts .ma:active{transform:scale(.96)}
 .macts .ma[style*="none"]{display:none!important}
 
+/* 도착: 두 칸 세그먼트 */
+.seg{display:flex;background:#f0eee7;border-radius:12px;padding:3px;gap:3px}
+.seg input{display:none}
+.seg label{flex:1;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--sub);cursor:pointer;transition:background .15s,color .15s}
+.seg input:checked+label{background:#fff;color:var(--route);font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -16881,7 +16887,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <div id="stops"></div>
   <button class="btn ghost" type="button" id="addStop">+ 방문지 추가</button>
   <label class="l">도착</label>
-  <div class="toggle"><input type="checkbox" id="back" checked><label for="back">출발지로 돌아오기</label></div>
+  <div class="seg"><input type="radio" name="endmode" id="back" checked><label for="back">출발지로 돌아오기</label><input type="radio" name="endmode" id="other"><label for="other">다른 곳에서 끝내기</label></div>
   <div id="endBox" style="display:none;margin-top:8px"><span class="ac" style="display:block"><input type="text" id="end" placeholder="도착지 주소" autocomplete="off"></span></div>
   <button class="btn main" id="go" type="button">최적 동선 찾기</button>
   <div id="msg"></div>
@@ -16969,7 +16975,8 @@ function addStop(v=""){const d=document.createElement("div");d.className="stop";
   $("#stops").appendChild(d);renumber();}
 addStop();addStop();addStop();checkPins();
 $("#addStop").onclick=()=>{addStop();checkPins();};
-$("#back").onchange=e=>$("#endBox").style.display=e.target.checked?"none":"";
+const endSync=()=>{$("#endBox").style.display=$("#back").checked?"none":"";};
+$("#back").onchange=endSync;$("#other").onchange=endSync;
 $("#gpsBtn").onclick=()=>{
   if(!navigator.geolocation){alert("위치를 쓸 수 없는 기기예요.");return;}
   $("#gpsBtn").textContent="찾는 중…";
@@ -16994,7 +17001,7 @@ function restoreLast(){
   b.stops.forEach((v,i)=>{addStop(v);const row=[...document.querySelectorAll("#stops .stop")].pop(),inp=row.querySelector("input");
     if(b.picks&&b.picks.stops&&b.picks.stops[i]){inp.dataset.pick=JSON.stringify(b.picks.stops[i]);inp.classList.add("picked");}
     if(b.pins&&b.pins[i])setPin(row,b.pins[i]);});
-  $("#back").checked=b.return_to_start;$("#endBox").style.display=b.return_to_start?"none":"";$("#end").value=b.end||"";
+  $("#back").checked=b.return_to_start;$("#other").checked=!b.return_to_start;$("#endBox").style.display=b.return_to_start?"none":"";$("#end").value=b.end||"";
   checkPins();lastBody=b;bestRes=d.r;show(d.r);
   if(history.state&&history.state.tripFocus!=null)setTimeout(()=>focusPt(history.state.tripFocus,true),300);   // 집 미리보기에서 돌아오면 보던 곳 그대로
 }
