@@ -13949,9 +13949,10 @@ def _trip_route_fixed(pts, leg_fn):
     }
 
 
-def trip_optimize(start, stops, end, leg_fn, keep_order=False):
+def trip_optimize(start, stops, end, leg_fn, keep_order=False, pins=None):
     """start/end: 지점 dict, stops: 경유지 목록. leg_fn(a, b, geometry) → {distance, duration, path}
-    keep_order=True 이면 순서를 바꾸지 않고 넣은 순서대로 계산"""
+    keep_order=True 이면 순서를 바꾸지 않고 넣은 순서대로 계산
+    pins: 방문지별 고정 순서 [None | 1부터 시작하는 번째 | "last"] — 고정한 집은 그 번째에만 둠"""
     pts = [start] + stops + [end]
     if keep_order:
         return _trip_route_fixed(pts, leg_fn)
@@ -13970,7 +13971,17 @@ def trip_optimize(start, stops, end, leg_fn, keep_order=False):
         seq = [s_idx] + list(order) + [e_idx]
         return sum(mat[(seq[k], seq[k + 1])]["duration"] for k in range(len(seq) - 1))
 
-    orders = list(permutations(range(1, n_s + 1)))
+    # 고정: {번째(0부터): 방문지 번호(1부터)}
+    fixed = {}
+    for i, p in enumerate(pins or [], start=1):
+        if p == "last":
+            fixed[n_s - 1] = i
+        elif isinstance(p, int) and 1 <= p <= n_s:
+            fixed[p - 1] = i
+    orders = [o for o in permutations(range(1, n_s + 1))
+              if all(o[pos] == i for pos, i in fixed.items())]
+    if not orders:
+        raise ValueError("고정한 순서끼리 겹쳐요")
     scored = sorted((total(o), o) for o in orders)
     best_t, best = scored[0]
     worst_t = scored[-1][0]
@@ -14748,9 +14759,25 @@ def trip_api_route():
     found = [dict(f) if f else f for f in found]
     for (name, q, _, _), f in zip(queries, found):
         f["input"], f["role"] = q, name
+    # 순서 고정: 방문지와 같은 순서로 [None | 번째 | "last"]
+    pins, used = [], set()
+    for p in (d.get("pins") or [])[:len(stops_q)]:
+        v = "last" if p == "last" else (int(p) if str(p).isdigit() and 1 <= int(p) <= len(stops_q) else None)
+        if v == len(stops_q):
+            v = "last"
+        if v is not None and v in used:
+            return jsonify(ok=False, message="같은 번째에 두 곳을 고정했어요. 하나를 풀어주세요.")
+        if v is not None:
+            used.add(v)
+        pins.append(v)
+    for f, p in zip(found[1:-1], pins + [None] * len(stops_q)):
+        if p:
+            f["pin"] = "마지막" if p == "last" else f"{p}번째"
     leg = trip_estimate_leg if trip_demo() else trip_directions
     try:
-        res = trip_optimize(found[0], found[1:-1], found[-1], leg, keep_order=bool(d.get("keep_order")))
+        res = trip_optimize(found[0], found[1:-1], found[-1], leg, keep_order=bool(d.get("keep_order")), pins=pins)
+    except ValueError:
+        return jsonify(ok=False, message="고정한 순서끼리 겹쳐요. 고정을 다시 확인해 주세요.")
     except Exception:
         return jsonify(ok=False, message="길찾기에 실패했어요. 차로 갈 수 있는 주소인지 확인해 주세요.")
     res.update(ok=True, demo=trip_demo(), return_to_start=back)
@@ -15288,6 +15315,44 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .gpsat{min-width:0}
 .gpsat .at{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+/* 순서 고정: 칸 안 칩 + 자물쇠, 누르면 반투명 플로팅 바 */
+.stop{position:relative}
+.pinac input{padding-right:42px}
+.stop.pinned .pinac input{padding-left:76px}
+.pchip{position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:2;display:none;height:24px;padding:0 9px;border-radius:999px;background:var(--route);color:#fff;font-size:12px;font-weight:700;align-items:center;pointer-events:none;white-space:nowrap}
+.stop.pinned .pchip{display:inline-flex}
+.lockb{position:absolute;right:6px;top:50%;transform:translateY(-50%);z-index:2;width:34px;height:34px;border:0;border-radius:10px;background:none;color:#b3b5b0;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.lockb i{display:flex}.lockb svg{width:19px;height:19px}
+.lockb .on{display:none}
+.stop.pinned .lockb{color:var(--route)}
+.stop.pinned .lockb .on{display:flex}.stop.pinned .lockb .off{display:none}
+.lockb:disabled{opacity:.35;cursor:default}
+.stop.open{z-index:20}
+.stop .x{width:30px}
+.pinbar{position:absolute;left:36px;right:30px;top:calc(100% + 4px);z-index:30;display:flex;justify-content:space-around;gap:4px;padding:12px 8px 10px;
+  background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,.18)}
+.pinbar button{display:flex;flex-direction:column;align-items:center;gap:5px;border:0;background:none;padding:0;cursor:pointer;font-family:inherit;min-width:0;flex:1;animation:pbIn .18s ease both}
+.pinbar button:nth-child(2){animation-delay:.03s}.pinbar button:nth-child(3){animation-delay:.06s}.pinbar button:nth-child(4){animation-delay:.09s}
+.pinbar button:nth-child(5){animation-delay:.12s}.pinbar button:nth-child(6){animation-delay:.15s}.pinbar button:nth-child(7){animation-delay:.18s}
+@keyframes pbIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pinbar b{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#2563eb);box-shadow:0 4px 12px rgba(37,99,235,.35);color:#fff;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;transition:transform .15s}
+.pinbar button:active b{transform:scale(.92)}
+.pinbar b.on{outline:3px solid #bfd3fb;outline-offset:2px}
+.pinbar span{font-size:11.5px;font-weight:700;color:#1e293b;white-space:nowrap;max-width:56px;overflow:hidden;text-overflow:ellipsis}
+.pinbar button:disabled{cursor:default}
+.pinbar button:disabled b{background:#e5e7eb;box-shadow:none;color:#9ca3af}
+.pinbar button:disabled span{color:#a3a6a1;font-weight:500}
+.pinbar.many{left:0;right:0;padding:10px 4px 8px}
+.pinbar.many b{width:34px;height:34px;font-size:13.5px}
+.pinbar.many span{font-size:10.5px;max-width:44px}
+.pinbar .free b{background:linear-gradient(135deg,#94a3b8,#64748b);box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.ptoast{display:none;margin-top:10px;padding:9px 12px;border-radius:10px;background:#1b1d1c;color:#fff;font-size:13px}
+.ptoast.on{display:block}
+.pint{display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:2px 8px;border-radius:999px;background:var(--route);color:#fff;font-size:11.5px;font-weight:700;vertical-align:2px}
+.pint svg{width:12px;height:12px}
+.tl .cum{font-size:12px;color:var(--muted);margin-top:2px}
+.mini .mh #miniHouse{font-size:12.5px;color:#e0782f;font-weight:700;text-decoration:none;flex:none}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -15443,6 +15508,7 @@ function attachSuggest(inp,onPick,onClear){
     if(q.length<3||q==="현재 위치"){close();return;}
     try{
       const data=await (await fetch("{{ url_for('trip.api_suggest') }}?q="+encodeURIComponent(q))).json();
+      if(document.activeElement!==inp)return;   // 다른 곳을 눌렀으면 늦게 온 결과는 띄우지 않음
       const docs=(data.documents||[]).slice(0,5);
       if(inp.value.trim()!==q)return;
       if(!docs.length){box.innerHTML='<div class="none">검색 결과가 없습니다.</div>';box.classList.add("on");return;}
@@ -16540,6 +16606,13 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
       document.getElementById("label").value=pl.place_name||"";q.classList.add("picked");},
     function(){document.getElementById("addr").value="";document.getElementById("label").value="";q.classList.remove("picked");});
 })();
+(function(){const u=new URLSearchParams(location.search);
+  if(u.get("go")!=="1"||!u.get("q"))return;
+  const f=document.querySelector("form.card");if(!f)return;
+  f.querySelector("input[name=q]").value=u.get("q");
+  const a=f.querySelector("input[name=addr]");if(a)a.value=u.get("addr")||"";
+  const l=f.querySelector("input[name=label]");if(l)l.value=u.get("q");
+  history.replaceState(null,"",location.pathname);f.submit();})();
 </script>
 {% endblock %}
 ''',
@@ -16747,6 +16820,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <div id="endBox" style="display:none;margin-top:8px"><span class="ac" style="display:block"><input type="text" id="end" placeholder="도착지 주소" autocomplete="off"></span></div>
   <button class="btn main" id="go" type="button">최적 동선 찾기</button>
   <div id="msg"></div>
+  <div class="ptoast" id="pinToast"></div>
   {% if demo %}<p class="hint">예시 모드: 지사, 라인2차, 미소래, 라인1차를 넣어보세요.<br>시간은 직선거리로 추정한 값이에요.</p>{% endif %}
 </div>
 </div><div class="colB">
@@ -16761,6 +16835,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% include "trip/_ac.html" %}
 <script>
 const MAX={{ max_stops }}; let gps=null,lastBody=null,bestRes=null;
+const PINI='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/></svg>';
 const $=s=>document.querySelector(s);
 const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const dur=s=>{const m=Math.round(s/60);return m>=60?`${Math.floor(m/60)}시간 ${m%60}분`:`${m}분`};
@@ -16784,13 +16859,51 @@ function renumber(){
   const rows=[...document.querySelectorAll("#stops .stop")];
   rows.forEach((r,i)=>r.querySelector(".n").textContent=i+1);
   $("#addStop").style.display=rows.length>=MAX?"none":"";}
+/* ---- 순서 고정: 채운 방문지 기준으로 '몇 번째'에 꼭 넣기 ---- */
+const filledRows=()=>[...document.querySelectorAll("#stops .stop")].filter(r=>r.querySelector("input").value.trim());
+const pinLabel=v=>v==="last"?"마지막":v+"번째";
+function setPin(row,v){
+  const chip=row.querySelector(".pchip");
+  if(v){row.dataset.pin=v;row.classList.add("pinned");chip.textContent=pinLabel(v);}
+  else{delete row.dataset.pin;row.classList.remove("pinned");chip.textContent="";}
+}
+function checkPins(){
+  const rows=[...document.querySelectorAll("#stops .stop")],F=filledRows().length;let freed=false;
+  const hasLast=rows.some(r=>r.dataset.pin==="last"&&r.querySelector("input").value.trim());
+  rows.forEach(r=>{
+    const filled=!!r.querySelector("input").value.trim(),v=r.dataset.pin;
+    r.querySelector(".lockb").disabled=!filled||F<2;
+    if(!v)return;
+    if(!filled||F<2||(v!=="last"&&(+v>F||(+v===F&&hasLast)))){setPin(r,null);freed=true;}
+  });
+  if(freed)toast("방문지 수가 바뀌어 순서 고정이 풀렸어요.");
+}
+function toast(t){const el=$("#pinToast");el.textContent=t;el.classList.add("on");clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove("on"),2200);}
+function closePin(){document.querySelectorAll(".pinbar").forEach(x=>x.remove());document.querySelectorAll(".stop.open").forEach(x=>x.classList.remove("open"));}
+/* 케어내비 + 메뉴처럼 반투명 바가 칸 아래에 떠오름 (화면은 밀리지 않음) */
+function openPin(row){
+  closePin();document.querySelectorAll(".acl.on").forEach(x=>x.classList.remove("on"));
+  const F=filledRows().length;if(F<2)return;
+  const opts=[...Array(F-1).keys()].map(k=>String(k+1)).concat(["last"]);
+  const taken={};filledRows().forEach(r=>{if(r!==row&&r.dataset.pin)taken[r.dataset.pin]=r.querySelector("input").value.trim();});
+  const bar=document.createElement("div");bar.className="pinbar"+(opts.length+(row.dataset.pin?1:0)>5?" many":"");
+  bar.innerHTML=opts.map(v=>{const t=taken[v],cur=row.dataset.pin===v;
+      return `<button type="button" data-v="${v}" ${t?"disabled":""}><b class="${cur?"on":""}">${v==="last"?"끝":v}</b><span>${t?esc(t.slice(0,5)):pinLabel(v)}</span></button>`;}).join("")
+    +(row.dataset.pin?'<button type="button" data-v="" class="free"><b>✕</b><span>풀기</span></button>':"");
+  bar.onclick=e=>{e.stopPropagation();const b=e.target.closest("button[data-v]");if(!b||b.disabled)return;setPin(row,b.dataset.v||null);closePin();};
+  row.classList.add("open");row.appendChild(bar);
+}
+document.addEventListener("click",e=>{if(!e.target.closest(".pinbar"))closePin();});
 function addStop(v=""){const d=document.createElement("div");d.className="stop";
-  d.innerHTML=`<span class="n"></span><span class="ac"><input type="text" placeholder="방문할 집 주소나 단지명" value="${esc(v)}" autocomplete="off"></span><button class="x" type="button" aria-label="삭제">×</button>`;
+  d.innerHTML=`<span class="n"></span><span class="ac pinac"><span class="pchip"></span><input type="text" placeholder="방문할 집 주소나 단지명" value="${esc(v)}" autocomplete="off"><button class="lockb" type="button" aria-label="순서 고정" title="순서 고정"><i class="off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.6-1.8"/></svg></i><i class="on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9V6z"/></svg></i></button></span><button class="x" type="button" aria-label="삭제">×</button>`;
   routePick(d.querySelector("input"));
-  d.querySelector(".x").onclick=()=>{if(document.querySelectorAll("#stops .stop").length>1){d.remove();renumber();}};
+  d.querySelector(".lockb").onclick=e=>{e.stopPropagation();if(d.querySelector(".pinbar"))closePin();else openPin(d);};
+  d.querySelector("input").addEventListener("input",()=>setTimeout(checkPins,0));
+  d.querySelector("input").addEventListener("change",checkPins);
+  d.querySelector(".x").onclick=()=>{if(document.querySelectorAll("#stops .stop").length>1){d.remove();renumber();checkPins();}};
   $("#stops").appendChild(d);renumber();}
-addStop();addStop();addStop();
-$("#addStop").onclick=()=>addStop();
+addStop();addStop();addStop();checkPins();
+$("#addStop").onclick=()=>{addStop();checkPins();};
 $("#back").onchange=e=>$("#endBox").style.display=e.target.checked?"none":"";
 $("#gpsBtn").onclick=()=>{
   if(!navigator.geolocation){alert("위치를 쓸 수 없는 기기예요.");return;}
@@ -16804,16 +16917,32 @@ $("#gpsBtn").onclick=()=>{
     ()=>{$("#gpsBtn").textContent="현재 위치";alert("위치를 가져오지 못했어요.");},{enableHighAccuracy:true,timeout:10000});};
 $("#start").oninput=()=>{if(gps&&$("#start").value!=="현재 위치"){gps=null;$("#gpsBtn").textContent="현재 위치";$("#gpsAt").style.display="none";}};
 
+function saveLast(r,body){try{sessionStorage.setItem("trip_route_last",JSON.stringify({r,body,pins:[...document.querySelectorAll("#stops .stop")].map(x=>x.dataset.pin||"")}))}catch(e){}}
+function restoreLast(){
+  let d=null;try{d=JSON.parse(sessionStorage.getItem("trip_route_last")||"null")}catch(e){}
+  const nav=(performance.getEntriesByType&&performance.getEntriesByType("navigation")[0])||{};
+  if(!d||nav.type!=="back_forward")return;
+  const b=d.body;$("#start").value=b.start||"";
+  if(b.picks&&b.picks.start){$("#start").dataset.pick=JSON.stringify(b.picks.start);$("#start").classList.add("picked");}
+  if(b.gps){gps=b.gps;$("#gpsBtn").textContent="현재 위치 ✓";}
+  document.querySelectorAll("#stops .stop").forEach(x=>x.remove());
+  b.stops.forEach((v,i)=>{addStop(v);const row=[...document.querySelectorAll("#stops .stop")].pop(),inp=row.querySelector("input");
+    if(b.picks&&b.picks.stops&&b.picks.stops[i]){inp.dataset.pick=JSON.stringify(b.picks.stops[i]);inp.classList.add("picked");}
+    if(b.pins&&b.pins[i])setPin(row,b.pins[i]);});
+  $("#back").checked=b.return_to_start;$("#endBox").style.display=b.return_to_start?"none":"";$("#end").value=b.end||"";
+  checkPins();lastBody=b;bestRes=d.r;show(d.r);
+}
 $("#go").onclick=async()=>{
   const stopInputs=[...document.querySelectorAll("#stops input")].filter(i=>i.value.trim());
   const stops=stopInputs.map(i=>i.value.trim());
   const picks={start:pickOf($("#start")),end:pickOf($("#end")),stops:stopInputs.map(pickOf)};
-  const body={start:$("#start").value.trim(),stops,end:$("#end").value.trim(),return_to_start:$("#back").checked,gps,picks};
+  const pins=stopInputs.map(i=>i.closest(".stop").dataset.pin||null);
+  const body={start:$("#start").value.trim(),stops,end:$("#end").value.trim(),return_to_start:$("#back").checked,gps,picks,pins};
   lastBody=body;
   $("#msg").innerHTML="";const b=$("#go");b.disabled=true;b.innerHTML='<span class="spin"></span> 순서 비교하는 중';
   try{const r=await (await fetch("/trip/api/route",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
     if(!r.ok){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message)}</div>`;return;}
-    bestRes=r;show(r);}
+    bestRes=r;show(r);saveLast(r,body);}
   catch(e){$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';}
   finally{b.disabled=false;b.textContent="최적 동선 찾기";}
 };
@@ -16842,20 +16971,21 @@ function show(r){
   else if(r.saved_vs_input>=60)saved=`입력한 순서보다 ${dur(r.saved_vs_input)} 빨라요`;
   else if(r.saved_vs_worst>=60)saved=`가장 느린 순서보다 ${dur(r.saved_vs_worst)} 빨라요`;
   else saved="입력한 순서가 이미 가장 빨라요";
-  let tl="";
+  let tl="",cum=0;
   o.forEach((p,i)=>{
+    if(i>0)cum+=r.legs[i-1].duration;
     const se=i===0||i===last, label=i===0?"출발":i===last?"도착":i;
     const nm=se?(i===last&&r.return_to_start?"출발지로 복귀":p.label||p.input):(p.label||p.input);
     const go=se?"":`<a class="btn sm go" href="https://map.kakao.com/link/to/${encodeURIComponent(p.label||p.input)},${p.lat},${p.lng}" target="_blank" rel="noopener">길안내</a>`;
     const leg=i<last?`<div class="leg">↓ ${dur(r.legs[i].duration)} · ${km(r.legs[i].distance)}</div>`:"";
-    tl+=`<li><span class="dot ${se?"se":""}" role="button" tabindex="0" title="지도에서 보기" onclick="focusPt(${i})">${label}</span><div class="body"><div class="nm">${esc(nm)}</div><div class="ad">${esc(p.road_address||p.input||"")}</div>${leg}</div>${go}</li>`;
+    tl+=`<li><span class="dot ${se?"se":""}" role="button" tabindex="0" title="지도에서 보기" onclick="focusPt(${i})">${label}</span><div class="body"><div class="nm">${esc(nm)}${p.pin?`<span class="pint">${PINI}${esc(p.pin)}</span>`:""}</div><div class="ad">${esc(p.road_address||p.input||"")}</div>${i>0?`<div class="cum">출발 후 이동 약 ${dur(cum)}</div>`:""}${leg}</div>${go}</li>`;
   });
   $("#result").innerHTML=`
     <div class="hero${r.fixed?" mine":""}"><b>${r.fixed?"내가 바꾼 순서":"최적 동선"}${r.demo?" (예시 추정)":""}</b><div class="big">${dur(r.total_duration)}</div>
       <div class="sm">${km(r.total_distance)} · ${r.fixed?"":r.orders_checked+"가지 순서 비교 · "}${saved}</div>
       ${r.fixed?'<button type="button" class="btn sm back2" onclick="show(bestRes)">최적 순서로 되돌리기</button>':""}</div>
     <div class="card" style="padding:10px"><div class="map" id="map"></div>
-      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b><a id="miniBig" target="_blank" rel="noopener">로드뷰 크게</a><button type="button" class="allv" onclick="unfocus()">✕ 전체 보기</button></div>
+      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b><a id="miniBig" target="_blank" rel="noopener">로드뷰 크게</a><a id="miniHouse">집 미리보기</a><button type="button" class="allv" onclick="unfocus()">✕ 전체 보기</button></div>
         <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
       <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
     <div class="card"><ul class="tl">${tl}</ul></div>
@@ -16887,6 +17017,8 @@ function focusPt(i){
     const mk=MARK[i];if(mk)mk.bindPopup(`<b>${esc(nm)}</b><br><small>${esc(p.road_address||p.input||"")}</small>`).openPopup();}
   const box=$("#mini");box.style.display="";$("#miniT").textContent=(i===0?"출발 · ":i===last?"도착 · ":i+"번 · ")+nm;
   $("#miniBig").href=`https://map.kakao.com/link/roadview/${p.lat},${p.lng}`;
+  $("#miniHouse").href=`{{ url_for('trip.house_page') }}?go=1&q=${encodeURIComponent(p.label||p.input||"")}&addr=${encodeURIComponent(p.road_address||p.input||"")}`;
+  $("#miniHouse").style.display=(i===0||i===last)?"none":"";
   const msg=$("#miniMsg");msg.style.display="";
   if(!window.kakao||!kakao.maps){msg.textContent="카카오 JavaScript 키를 넣으면 로드뷰가 보여요";return;}
   msg.textContent="로드뷰 불러오는 중";
@@ -16931,6 +17063,7 @@ function drawMap(r){
     svg+=`<circle cx="${sx(p.lng)}" cy="${sy(p.lat)}" r="${i===0?19:15}" fill="${c}" stroke="#fff" stroke-width="3"/><text x="${sx(p.lng)}" y="${sy(p.lat)+4.5}" text-anchor="middle" font-size="${i===0?11:13}" font-weight="800" fill="#fff" font-family="sans-serif">${t}</text>`;});
   el.innerHTML=svg+"</svg>";
 }
+restoreLast();
 </script>
 {% endblock %}
 ''',
