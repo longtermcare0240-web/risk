@@ -15198,10 +15198,12 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .sr-rv-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:10px;line-height:1.3;color:#94a3b8;z-index:2}
 .sr-rv-cover{position:absolute;inset:0;z-index:3}
 .trow .dl{font-size:12.5px;color:var(--sub);margin-top:3px}
-.trow .dl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.trow .dl{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap;font-size:12.5px}
 .trow .dl b{color:var(--toilet);font-weight:800}
-.trow .tm{display:inline-flex;align-items:center;gap:3px;font-weight:600;color:var(--sub)}
-.trow .tm svg{width:16px;height:16px;color:var(--muted)}
+.trow .tm{display:inline-flex;align-items:center;gap:2px;font-weight:600;color:var(--sub)}
+.trow .tm svg{width:14px;height:14px;color:var(--muted);flex:none}
+.trow .btn.sm{padding:0 9px;flex:none;font-size:12.5px}
+.trow{gap:10px}
 
 /* 집 미리보기: 건축물대장 값 표 */
 .spec{display:grid;grid-template-columns:72px 1fr;gap:0;margin:6px 0 0;font-size:14.5px}
