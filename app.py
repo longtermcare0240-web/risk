@@ -13872,8 +13872,10 @@ def trip_where(lat, lng):
     full = ((d.get("road_address") or {}).get("address_name")
             or (d.get("address") or {}).get("address_name") or "")
     # 시·도는 빼서 짧게: '전남광주통합특별시 광산구 소촌로 1' → '광산구 소촌로 1'
-    parts = full.split(" ", 1)
-    return parts[1] if len(parts) == 2 and parts[0].endswith(("시", "도")) else full
+    t = full.split(" ", 2)
+    if len(t) >= 2 and t[1].endswith(("시", "군", "구")) and (t[0].endswith(("시", "도")) or len(t[0]) == 2):
+        return full.split(" ", 1)[1]
+    return full
 
 
 def trip_addr_suggest(query, limit=5):
@@ -14684,6 +14686,20 @@ def trip_crime_layers():
         out.append({"key": key, "name": name, "url": url,
                     "style": os.environ.get(f"SAFEMAP_STYLE_{key}", style)})
     return out
+
+
+TRIP_SIDO_SHORT = ("서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원",
+              "충북", "충남", "전북", "전남", "경북", "경남", "제주")
+
+
+@trip_bp.app_template_filter("short_addr")
+def trip_short_addr(s):
+    """화면용 주소: 맨 앞 시·도는 빼고 시·군·구부터. '전남광주통합특별시 신안군 …' → '신안군 …'"""
+    s = (s or "").strip()
+    t = s.split(" ", 2)
+    if len(t) >= 2 and t[1].endswith(("시", "군", "구")) and (t[0].endswith(("시", "도")) or t[0] in TRIP_SIDO_SHORT):
+        return s.split(" ", 1)[1]
+    return s
 
 
 @trip_bp.app_template_filter("trip_km")
@@ -15531,14 +15547,14 @@ function attachSuggest(inp,onPick,onClear){
   const box=document.createElement("div");box.className="acl";inp.parentElement.appendChild(box);
   const close=()=>{box.classList.remove("on");box.innerHTML="";};
   inp.addEventListener("input",()=>{if(onClear)onClear();});
-  function pick(pl){inp.value=pl.place_name||pl.road_address_name||pl.address_name||"";close();recentAdd(pl);if(onPick)onPick(pl);}
+  function pick(pl){inp.value=shortAddr(pl.place_name||pl.road_address_name||pl.address_name||"");close();recentAdd(pl);if(onPick)onPick(pl);}
   function showRecent(){
     if(inp.value.trim())return;
     const list=recentGet();if(!list.length){close();return;}
     box.innerHTML='<div class="rh"><span>최근 검색</span><button type="button" class="rc">지우기</button></div>'+list.map((pl,i)=>{
       const road=pl.road_address_name||"",jibun=pl.address_name||"";
       const title=pl.place_name||road||jibun,sub=(road&&road!==title)?road:((jibun&&jibun!==title)?jibun:"");
-      return `<button type="button" data-r="${i}">${_acEsc(title)}${sub?`<small>${_acEsc(sub)}</small>`:""}</button>`;}).join("");
+      return `<button type="button" data-r="${i}">${_acEsc(shortAddr(title))}${sub?`<small>${_acEsc(shortAddr(sub))}</small>`:""}</button>`;}).join("");
     box.querySelector(".rc").onmousedown=e=>{e.preventDefault();recentClear();close();};
     box.querySelectorAll("button[data-r]").forEach(b=>b.onmousedown=e=>{e.preventDefault();pick(list[+b.dataset.r]);});
     box.classList.add("on");
@@ -15558,8 +15574,8 @@ function attachSuggest(inp,onPick,onClear){
       box.innerHTML=docs.map((pl,i)=>{
         const road=pl.road_address_name||"",jibun=pl.address_name||"";
         const title=pl.place_name||road||jibun;
-        const r2=(road&&road!==title)?`<small>${_acEsc(road)}</small>`:"",j2=(jibun&&jibun!==title)?`<small class="j">${_acEsc(jibun)}</small>`:"";
-        return `<button type="button" data-i="${i}">${_acEsc(title)}${r2}${j2}</button>`;
+        const r2=(road&&road!==title)?`<small>${_acEsc(shortAddr(road))}</small>`:"",j2=(jibun&&jibun!==title)?`<small class="j">${_acEsc(shortAddr(jibun))}</small>`:"";
+        return `<button type="button" data-i="${i}">${_acEsc(shortAddr(title))}${r2}${j2}</button>`;
       }).join("");
       box.querySelectorAll("button").forEach(b=>b.onmousedown=e=>{e.preventDefault();pick(docs[+b.dataset.i]);});
       box.classList.add("on");
@@ -16566,6 +16582,12 @@ function attachSuggest(inp,onPick,onClear){
 <img class="ci" src="/ci" alt="국민건강보험공단" onerror="this.remove()">
 {% block body %}{% endblock %}
 </div>
+<script>
+/* 화면용 주소: 맨 앞 시·도는 빼고 시·군·구부터 (검색·계산에는 원래 주소 그대로 씀) */
+function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
+  const SH=["서울","부산","대구","인천","광주","대전","울산","세종","경기","강원","충북","충남","전북","전남","경북","경남","제주"];
+  if(t.length>=2&&/[시군구]$/.test(t[1])&&(/[시도]$/.test(t[0])||SH.includes(t[0])))return t.slice(1).join(" ");return s;}
+</script>
 {% block script %}{% endblock %}
 </body>
 </html>
@@ -16614,7 +16636,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   {% for c in cands %}
   <form method="post" action="{{ url_for('trip.house_search') }}">
     <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="floor" value="{{ floor }}"><input type="hidden" name="pick" value="{{ loop.index0 }}">
-    <button class="cand" type="submit">{{ c.label }}<small>{{ c.road_address or c.jibun_address }}</small></button>
+    <button class="cand" type="submit">{{ c.label|short_addr }}<small>{{ (c.road_address or c.jibun_address)|short_addr }}</small></button>
   </form>
   {% endfor %}
 </div>
@@ -16661,7 +16683,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 ''',
     "trip/house_card.html": r'''{% extends "trip/base.html" %}
 {% from "trip/_m.html" import src, topbar, wicon with context %}
-{% block title %}{{ (bld and bld.name) or loc.label }} · 집 미리보기{% endblock %}
+{% block title %}{{ ((bld and bld.name) or loc.label)|short_addr }} · 집 미리보기{% endblock %}
 {% block theme %}t-house{% endblock %}
 {% block head %}<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">{% endblock %}
 {% block body %}
@@ -16670,12 +16692,12 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 <div class="rv">
   <div id="roadview"></div>
   <div id="rvMsg">{% if kakao_js_key %}건물 사진 불러오는 중{% else %}건물 정면 로드뷰<br><small class="muted">카카오 JavaScript 키를 넣으면 보여요</small>{% endif %}</div>
-  <span class="tg">{{ (bld and bld.name) or loc.label }}</span>
+  <span class="tg">{{ ((bld and bld.name) or loc.label)|short_addr }}</span>
 </div>
 
 <div class="card">
-  <p class="hname">{{ (bld and bld.name) or loc.label }}</p>
-  <p class="haddr">{{ loc.road_address or loc.jibun_address }}</p>
+  <p class="hname">{{ ((bld and bld.name) or loc.label)|short_addr }}</p>
+  <p class="haddr">{{ (loc.road_address or loc.jibun_address)|short_addr }}</p>
 
   <div class="sec">이 집은</div>
   {% if rows %}
@@ -17022,10 +17044,10 @@ function show(r){
   o.forEach((p,i)=>{
     if(i>0)cum+=r.legs[i-1].duration;
     const se=i===0||i===last, label=i===0?"출발":i===last?"도착":i;
-    const nm=se?(i===last&&r.return_to_start?"출발지로 복귀":p.label||p.input):(p.label||p.input);
+    const nm=shortAddr(se?(i===last&&r.return_to_start?"출발지로 복귀":p.label||p.input):(p.label||p.input));
     const go=se?"":`<a class="btn sm go" href="https://map.kakao.com/link/to/${encodeURIComponent(p.label||p.input)},${p.lat},${p.lng}" target="_blank" rel="noopener">길안내</a>`;
     const leg=i<last?`<div class="leg">↓ ${dur(r.legs[i].duration)} · ${km(r.legs[i].distance)}</div>`:"";
-    tl+=`<li><span class="dot ${se?"se":""}" role="button" tabindex="0" title="지도에서 보기" onclick="focusPt(${i})">${label}</span><div class="body"><div class="nm">${esc(nm)}${p.pin?`<span class="pint">${PINI}${esc(p.pin)}</span>`:""}</div><div class="ad">${esc(p.road_address||p.input||"")}</div>${i>0?`<div class="cum">출발 후 이동 약 ${dur(cum)}</div>`:""}${leg}</div>${go}</li>`;
+    tl+=`<li><span class="dot ${se?"se":""}" role="button" tabindex="0" title="지도에서 보기" onclick="focusPt(${i})">${label}</span><div class="body"><div class="nm">${esc(nm)}${p.pin?`<span class="pint">${PINI}${esc(p.pin)}</span>`:""}</div><div class="ad">${esc(shortAddr(p.road_address||p.input||""))}</div>${i>0?`<div class="cum">출발 후 이동 약 ${dur(cum)}</div>`:""}${leg}</div>${go}</li>`;
   });
   $("#result").innerHTML=`
     <div class="hero${r.fixed?" mine":""}"><b>${r.fixed?"내가 바꾼 순서":"최적 동선"}${r.demo?" (예시 추정)":""}</b><div class="big">${dur(r.total_duration)}</div>
@@ -17072,10 +17094,10 @@ function focusPt(i,noHist){
     else history.pushState({tripFocus:i},"");
   }
   FOCUS=i;
-  const p=o[i],nm=i===0?(p.label||p.input||"출발"):(p.label||p.input);
+  const p=o[i],nm=shortAddr(i===0?(p.label||p.input||"출발"):(p.label||p.input));
   document.querySelectorAll("#result .tl li").forEach((li,k)=>li.classList.toggle("on",k===i||(i===0&&k===last&&r.return_to_start)));
   if(MAP){MAP.setView([p.lat,p.lng],17,{animate:true});
-    const mk=MARK[i];if(mk)mk.bindPopup(`<b>${esc(nm)}</b><br><small>${esc(p.road_address||p.input||"")}</small>`).openPopup();}
+    const mk=MARK[i];if(mk)mk.bindPopup(`<b>${esc(nm)}</b><br><small>${esc(shortAddr(p.road_address||p.input||""))}</small>`).openPopup();}
   const box=$("#mini");box.style.display="";$("#miniT").textContent=(i===0?"출발 · ":i===last?"도착 · ":i+"번 · ")+nm;
   $("#miniBig").href=`https://map.kakao.com/link/roadview/${p.lat},${p.lng}`;
   $("#miniHouse").href=`{{ url_for('trip.house_page') }}?go=1&q=${encodeURIComponent(p.label||p.input||"")}&addr=${encodeURIComponent(p.road_address||p.input||"")}`;
@@ -17182,7 +17204,7 @@ function search(lat,lng){
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
       <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}" data-i="${r.items.indexOf(t)}" role="button" title="로드뷰 크게 보기"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
-        <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(t.address)}</div>
+        <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(shortAddr(t.address))}</div>
           <div class="dl"><b>${km(t.distance)}</b>
             <span class="tm" title="차로">${CAR}${t.car_real?"":"약 "}${t.car_min}분</span>
             <span class="tm" title="걸어서">${WALK}${t.walk_min}분</span></div>
@@ -17248,7 +17270,7 @@ function bearingTo(p,lat,lng){const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(l
   const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
   return ((Math.atan2(y,x)*180/Math.PI)+360)%360;}
 function openBig(t){
-  $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=t.address||"";
+  $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=shortAddr(t.address||"");
   $("#bigNav").onclick=()=>{closeBig();openNav(t);};
   $("#big").classList.add("on");
   const msg=$("#bigMsg");msg.style.display="";msg.textContent="로드뷰 불러오는 중";
