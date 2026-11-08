@@ -15132,6 +15132,17 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .wt .t{font-size:15px;font-weight:700;margin:10px 0 2px;line-height:1.3}
 .wt .d{font-size:12.5px;color:var(--sub);line-height:1.45;word-break:keep-all}
 
+/* 집 미리보기 첫 화면 */
+.intro{margin:6px 4px 16px}
+.intro h2{font-size:23px;line-height:1.35;margin:0;font-weight:800;letter-spacing:-0.02em}
+.intro p{margin:6px 0 0;font-size:14px;color:var(--sub)}
+.gives{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gv{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 13px}
+.gv .wi{width:36px;height:36px;border-radius:11px;background:var(--house-bg);color:var(--house);display:flex;align-items:center;justify-content:center}
+.gv .wi svg{width:20px;height:20px}
+.gv .t{font-size:15px;font-weight:700;margin:10px 0 2px}
+.gv .d{font-size:12.5px;color:var(--sub);line-height:1.45}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -15228,6 +15239,11 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .note{max-width:none}
   .mbr{display:none}
   .minirv{height:260px!important}
+  .intro p{font-size:16px}
+  .intro,.t-house .gives,.t-house .wrap>.sec,.t-house .wrap>.hint{max-width:640px;margin-left:auto!important;margin-right:auto!important}
+  .intro h2{font-size:30px}
+  .gv .t{font-size:17px}
+  .gv .d{font-size:14px}
   .wt .t{font-size:17px}
   .wt .d{font-size:14px}
   .wt .wi{width:42px;height:42px}
@@ -16297,7 +16313,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% endblock %}
 ''',
     "trip/house.html": r'''{% extends "trip/base.html" %}
-{% from "trip/_m.html" import topbar with context %}
+{% from "trip/_m.html" import topbar, wicon with context %}
 {% block title %}집 미리보기 · 출장 도구함{% endblock %}
 {% block theme %}t-house{% endblock %}
 {% block body %}
@@ -16315,12 +16331,23 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   {% endfor %}
 </div>
 {% else %}
+<div class="intro">
+  <h2>가기 전에,<br>어떤 집인지 먼저 봐요</h2>
+  <p>주소 하나로 건물 사진·구조·주변 치안까지 확인해요.</p>
+</div>
 <form class="card" method="post" action="{{ url_for('trip.house_search') }}" autocomplete="off">
   <label class="l" for="q">주소 또는 단지명</label>
   <span class="ac" style="display:block"><input type="text" id="q" name="q" value="{{ q or '' }}" placeholder="예: 광주전라제주지역본부"></span>
   <input type="hidden" name="addr" id="addr"><input type="hidden" name="label" id="label">
   <button class="btn main" type="submit">집 미리보기</button>
 </form>
+<div class="sec" style="margin:22px 4px 10px">이런 걸 알려줘요</div>
+<div class="gives">
+  <div class="gv"><span class="wi">{{ wicon('roof') }}</span><div class="t">건물 사진</div><div class="d">집 앞 로드뷰로 외관을 미리 봐요</div></div>
+  <div class="gv"><span class="wi">{{ wicon('brick') }}</span><div class="t">이 집은</div><div class="d">용도⁠·⁠구조⁠·⁠준공⁠·⁠층수⁠·⁠승강기</div></div>
+  <div class="gv"><span class="wi">{{ wicon('alert') }}</span><div class="t">조심할 점</div><div class="d">계단⁠·⁠노후⁠·⁠지하층 같은 위험</div></div>
+  <div class="gv"><span class="wi">{{ wicon('hill') }}</span><div class="t">주변 치안</div><div class="d">집 반경 300m 범죄주의구간</div></div>
+</div>
 {% if demo %}<p class="hint">예시 모드: 라인2차, 미소래를 넣어보세요. 공개 자료로 확인한 값만 들어 있어요.</p>{% endif %}
 {% endif %}
 {% endblock %}
