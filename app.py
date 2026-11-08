@@ -13863,6 +13863,16 @@ def trip_addr_search(query, limit=5):
     return out
 
 
+def trip_where(lat, lng):
+    """좌표 → 주소 (내 위치 표시용). 도로명이 있으면 도로명, 없으면 지번"""
+    docs = _trip_kakao_local("/geo/coord2address.json", {"x": lng, "y": lat})
+    if not docs:
+        return ""
+    d = docs[0]
+    return ((d.get("road_address") or {}).get("address_name")
+            or (d.get("address") or {}).get("address_name") or "")
+
+
 def trip_addr_suggest(query, limit=5):
     """자동완성: 실제 있는 주소(도로명·지번)를 먼저, 그다음 건물·장소 이름. 안전로드 /search_place와 같은 모양으로 돌려줌"""
     out, seen = [], set()
@@ -14646,6 +14656,21 @@ def trip_home():
     return render_template("trip/home.html")
 
 
+@trip_bp.get("/api/where", endpoint="api_where")
+def trip_api_where():
+    """좌표 → 주소 (현재 위치가 어디인지 보여주기용, 저장 안 함)"""
+    try:
+        lat, lng = float(request.args["lat"]), float(request.args["lng"])
+    except (KeyError, ValueError):
+        return jsonify(address="")
+    if trip_demo():
+        return jsonify(address="광주 광산구 (예시 위치)")
+    try:
+        return jsonify(address=trip_where(lat, lng))
+    except Exception:
+        return jsonify(address="")
+
+
 @trip_bp.get("/api/suggest", endpoint="api_suggest")
 def trip_api_suggest():
     """주소 자동완성 (동선·집 미리보기 공용). 주소로 쳐도 실제 주소가 뜨도록 주소 검색 → 장소 검색 순"""
@@ -14677,7 +14702,13 @@ def _trip_resolve(q, gps=None, pick=None):
     if pick:
         return pick
     if gps:
-        return {"label": "현재 위치", "road_address": "", "lat": gps[0], "lng": gps[1]}
+        addr = ""
+        if not trip_demo():
+            try:
+                addr = trip_where(gps[0], gps[1])
+            except Exception:
+                addr = ""
+        return {"label": "현재 위치", "road_address": addr, "lat": gps[0], "lng": gps[1]}
     if trip_demo():
         return trip_demo_place(q)
     c = trip_addr_search(q, limit=1)
@@ -14799,7 +14830,13 @@ def trip_api_toilets():
         return jsonify(ok=False, message="화장실 데이터(공중화장실.xlsx)가 없어요. 관리자에게 알려주세요.")
     a = request.args
     found = trip_nearest_toilets(lat, lng, rows, a.get("always") == "1", a.get("bell") == "1", a.get("acc") == "1")
-    return jsonify(ok=True, items=found, demo=trip_demo(),
+    here = "광주 광산구 (예시 위치)" if trip_demo() else ""
+    if not trip_demo():
+        try:
+            here = trip_where(lat, lng)
+        except Exception:
+            here = ""
+    return jsonify(ok=True, items=found, demo=trip_demo(), here=here,
                    message="" if found else "주변 5km 안에 조건에 맞는 화장실이 없어요.")
 
 
@@ -15186,6 +15223,24 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .g1 .wi svg{width:17px;height:17px}
 .g1 b{flex:none;width:68px;font-weight:700}
 .g1 span:last-child{flex:1;min-width:0;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 화장실: 내 위치 + 길안내 선택 */
+.here{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:11px 14px;margin-bottom:12px}
+.here .pin{flex:none;width:10px;height:10px;border-radius:50%;background:var(--toilet);box-shadow:0 0 0 5px var(--toilet-bg)}
+.here small{display:block;font-size:11.5px;color:var(--muted);font-weight:600}
+.here b{font-size:14.5px;font-weight:700}
+.nav{display:none;position:fixed;inset:0;z-index:50;background:rgba(15,20,18,.45);align-items:flex-end;justify-content:center}
+.nav.on{display:flex}
+.nav .sheet{width:100%;max-width:480px;background:var(--card);border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.nav .sh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.nav .sh b{flex:1;font-size:16px}
+.nav .sh button{width:32px;height:32px;border:none;border-radius:50%;background:#f0eee7;font-size:18px;cursor:pointer}
+.navb{display:flex;align-items:center;gap:12px;height:52px;padding:0 14px;margin-top:8px;border:1px solid var(--line);border-radius:14px;color:var(--ink);font-weight:700;text-decoration:none}
+.navb span{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+@media (min-width:960px){.nav{align-items:center}.nav .sheet{border-radius:22px}}
+
+.gpsat{display:flex;align-items:center;gap:8px;margin:8px 2px 0;font-size:13.5px;color:var(--sub);font-weight:600}
+.gpsat .pin{flex:none;width:8px;height:8px;border-radius:50%;background:var(--route);box-shadow:0 0 0 4px var(--route-bg)}
 
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
@@ -16601,6 +16656,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <label class="l">출발지</label>
   <div class="row"><span class="ac"><input type="text" id="start" placeholder="예: 광주전라제주지역본부" autocomplete="off"></span>
     <button class="btn sm" type="button" id="gpsBtn">현재 위치</button></div>
+  <p class="gpsat" id="gpsAt" style="display:none"></p>
   <label class="l">방문지 <span class="muted" style="font-weight:500">· 순서 상관없이 넣으세요 (최대 {{ max_stops }}곳)</span></label>
   <div id="stops"></div>
   <button class="btn ghost" type="button" id="addStop">+ 방문지 추가</button>
@@ -16609,7 +16665,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <div id="endBox" style="display:none;margin-top:8px"><span class="ac" style="display:block"><input type="text" id="end" placeholder="도착지 주소" autocomplete="off"></span></div>
   <button class="btn main" id="go" type="button">최적 동선 찾기</button>
   <div id="msg"></div>
-  {% if demo %}<p class="hint">예시 모드: 지사, 라인2차, 미소래, 라인1차를 넣어보세요. 시간은 직선거리로 추정한 값이에요.</p>{% endif %}
+  {% if demo %}<p class="hint">예시 모드: 지사, 라인2차, 미소래, 라인1차를 넣어보세요.<br>시간은 직선거리로 추정한 값이에요.</p>{% endif %}
 </div>
 </div><div class="colB">
 <div id="result" style="display:none"></div>
@@ -16656,9 +16712,14 @@ $("#back").onchange=e=>$("#endBox").style.display=e.target.checked?"none":"";
 $("#gpsBtn").onclick=()=>{
   if(!navigator.geolocation){alert("위치를 쓸 수 없는 기기예요.");return;}
   $("#gpsBtn").textContent="찾는 중…";
-  navigator.geolocation.getCurrentPosition(p=>{gps=[p.coords.latitude,p.coords.longitude];$("#start").value="현재 위치";$("#gpsBtn").textContent="현재 위치 ✓";},
+  navigator.geolocation.getCurrentPosition(p=>{gps=[p.coords.latitude,p.coords.longitude];$("#start").value="현재 위치";$("#gpsBtn").textContent="현재 위치 ✓";
+    // 지금 어디인지 주소로 보여줌
+    const at=$("#gpsAt");at.style.display="";at.textContent="위치 확인 중…";
+    fetch("{{ url_for('trip.api_where') }}?lat="+gps[0]+"&lng="+gps[1]).then(r=>r.json()).then(d=>{
+      if(!gps)return;at.innerHTML=d.address?`<span class="pin"></span>${esc(d.address)}`:"주소를 찾지 못했어요. 지도에서 위치를 확인하세요.";
+    }).catch(()=>{at.style.display="none";});},
     ()=>{$("#gpsBtn").textContent="현재 위치";alert("위치를 가져오지 못했어요.");},{enableHighAccuracy:true,timeout:10000});};
-$("#start").oninput=()=>{if(gps&&$("#start").value!=="현재 위치"){gps=null;$("#gpsBtn").textContent="현재 위치";}};
+$("#start").oninput=()=>{if(gps&&$("#start").value!=="현재 위치"){gps=null;$("#gpsBtn").textContent="현재 위치";$("#gpsAt").style.display="none";}};
 
 $("#go").onclick=async()=>{
   const stopInputs=[...document.querySelectorAll("#stops input")].filter(i=>i.value.trim());
@@ -16713,9 +16774,9 @@ function show(r){
     <div class="card" style="padding:10px"><div class="map" id="map"></div>
       <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b><a id="miniBig" target="_blank" rel="noopener">로드뷰 크게</a><button type="button" class="allv" onclick="unfocus()">✕ 전체 보기</button></div>
         <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
-      <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요. 같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
+      <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르면 원래대로 돌아가요.</p></div>
     <div class="card"><ul class="tl">${tl}</ul></div>
-    <p class="hint">${r.demo?"예시 모드라 직선거리로 추정한 시간이에요. 실제 키를 넣으면 실시간 교통을 반영해요.":"카카오모빌리티 실시간 교통 기준이에요. 길안내는 카카오맵으로 열려요."}</p>`;
+    <p class="hint">${r.demo?"예시 모드라 직선거리로 추정한 시간이에요.<br>실제 키를 넣으면 실시간 교통을 반영해요.":"카카오모빌리티 실시간 교통 기준이에요.<br>길안내는 카카오맵으로 열려요."}</p>`;
   $("#result").style.display="";if($("#ph"))$("#ph").remove();
   drawMap(r);
   if(!r.fixed)$("#result").scrollIntoView({behavior:"smooth"});
@@ -16798,18 +16859,27 @@ function drawMap(r){
 {{ topbar('내 근처 화장실') }}
 <div class="cols"><div class="colA">
 <div class="card">
-  <div class="sec">조건 <span class="muted" style="font-weight:500;font-size:12px">· 필요한 것만 고르세요</span></div>
-  <div class="toggle" style="margin-top:6px">
+  <div class="sec">조건</div>
+  <div class="toggle" style="margin-top:6px" id="conds">
+    <input type="checkbox" id="all" checked><label for="all">전체</label>
     <input type="checkbox" id="always"><label for="always">상시 개방</label>
-    <input type="checkbox" id="bell"><label for="bell">비상벨 있음</label>
-    <input type="checkbox" id="acc"><label for="acc">장애인 화장실</label>
+    <input type="checkbox" id="bell"><label for="bell">비상벨</label>
+    <input type="checkbox" id="acc"><label for="acc">장애인용</label>
   </div>
   <button class="btn main" id="find" type="button">지금 위치에서 찾기</button>
   <div id="msg"></div>
 </div>
 </div><div class="colB">
+<div id="here" class="here" style="display:none"></div>
 <div id="list"></div>
-<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요. 개방 안 하는 곳은 빼요. 자료: 안전로드 공중화장실 데이터{% if demo %} (지금은 예시 3곳){% endif %}.</p>
+<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.<br>자료: 안전로드 공중화장실 데이터{% if demo %} (지금은 예시 3곳){% endif %}.</p>
+</div></div>
+<div class="nav" id="nav"><div class="sheet">
+  <div class="sh"><b id="navT"></b><button type="button" id="navX" aria-label="닫기">×</button></div>
+  <p class="hint" style="margin:0 0 10px">쓰는 지도 앱을 고르세요.<br>앱이 없으면 웹으로 열려요.</p>
+  <a id="navKakao" class="navb" target="_blank" rel="noopener"><span style="background:#fee500;color:#191600">K</span>카카오맵</a>
+  <a id="navNaver" class="navb" target="_blank" rel="noopener"><span style="background:#03c75a;color:#fff">N</span>네이버지도</a>
+  <a id="navGoogle" class="navb" target="_blank" rel="noopener"><span style="background:#4285f4;color:#fff">G</span>구글지도</a>
 </div></div>
 {% endblock %}
 {% block script %}
@@ -16823,6 +16893,7 @@ function search(lat,lng){
   const q=new URLSearchParams({lat,lng,always:$("#always").checked?1:0,bell:$("#bell").checked?1:0,acc:$("#acc").checked?1:0});
   fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
     done();
+    if(r.here){$("#here").innerHTML=`<span class="pin"></span><div><small>내 위치</small><b>${esc(r.here)}</b></div>`;$("#here").style.display="";}
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
       <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
@@ -16830,7 +16901,9 @@ function search(lat,lng){
           <div class="dl"><b>${km(t.distance)}</b> · 걸어서 ${t.walk_min}분</div>
           <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
           ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
-        <a class="btn sm" href="https://map.kakao.com/link/to/${encodeURIComponent(t.name||"공중화장실")},${t.lat},${t.lng}" target="_blank" rel="noopener">길안내</a></div>`).join("")}</div>`;
+        <button class="btn sm" type="button" data-i="${r.items.indexOf(t)}">길안내</button></div>`).join("")}</div>`;
+    ITEMS=r.items;
+    $("#list").querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>openNav(ITEMS[+b.dataset.i]));
     watchRv();
   }).catch(()=>{done();$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';});
 }
@@ -16865,6 +16938,22 @@ function watchRv(){
   }),{rootMargin:"160px 0px"});
   boxes.forEach(b=>rvObs.observe(b));
 }
+/* 조건: 아무것도 안 고르면 '전체'. 하나라도 고르면 '전체'는 꺼짐 */
+let ITEMS=[];
+const CONDS=["always","bell","acc"];
+$("#all").onchange=()=>{if($("#all").checked)CONDS.forEach(id=>$("#"+id).checked=false);else if(!CONDS.some(id=>$("#"+id).checked))$("#all").checked=true;};
+CONDS.forEach(id=>$("#"+id).addEventListener("change",()=>{$("#all").checked=!CONDS.some(c=>$("#"+c).checked);}));
+
+/* 길안내: 카카오맵·네이버지도·구글지도 중 고르기 (앱이 없으면 웹으로 열림) */
+function openNav(t){
+  const nm=t.name||"공중화장실",q=encodeURIComponent(nm),addr=encodeURIComponent(t.address||nm);
+  $("#navT").textContent=nm;
+  $("#navKakao").href=`https://map.kakao.com/link/to/${q},${t.lat},${t.lng}`;
+  $("#navNaver").href=`https://map.naver.com/p/search/${addr}`;
+  $("#navGoogle").href=`https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lng}&travelmode=walking`;
+  $("#nav").classList.add("on");
+}
+document.addEventListener("click",e=>{if(e.target.id==="nav"||e.target.id==="navX")$("#nav").classList.remove("on");});
 function done(){const b=$("#find");b.disabled=false;b.textContent="지금 위치에서 찾기";}
 $("#find").onclick=()=>{
   $("#msg").innerHTML="";const b=$("#find");b.disabled=true;b.innerHTML='<span class="spin"></span> 위치 확인 중';
