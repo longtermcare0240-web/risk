@@ -13863,6 +13863,29 @@ def trip_addr_search(query, limit=5):
     return out
 
 
+def trip_addr_suggest(query, limit=5):
+    """자동완성: 실제 있는 주소(도로명·지번)를 먼저, 그다음 건물·장소 이름. 안전로드 /search_place와 같은 모양으로 돌려줌"""
+    out, seen = [], set()
+    for d in _trip_kakao_local("/search/address.json", {"query": query, "size": limit}):
+        road, addr = d.get("road_address") or {}, d.get("address") or {}
+        item = {"place_name": road.get("building_name") or road.get("address_name") or d.get("address_name", ""),
+                "road_address_name": road.get("address_name", ""),
+                "address_name": addr.get("address_name") or d.get("address_name", ""),
+                "x": d.get("x"), "y": d.get("y")}
+        key = item["road_address_name"] or item["address_name"]
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    if len(out) < limit:
+        for p in _trip_kakao_local("/search/keyword.json", {"query": query, "size": limit}):
+            key = p.get("road_address_name") or p.get("address_name", "")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({k: p.get(k, "") for k in ("place_name", "road_address_name", "address_name", "x", "y")})
+    return out[:limit]
+
+
 def trip_directions(a, b, geometry=False):
     """a → b 자동차 경로. 실시간 교통 반영 추천 경로. 반환: 거리(m), 시간(초), 경로 좌표."""
     params = {"origin": f"{a['lng']},{a['lat']}", "destination": f"{b['lng']},{b['lat']}",
@@ -14623,6 +14646,18 @@ def trip_home():
     return render_template("trip/home.html")
 
 
+@trip_bp.get("/api/suggest", endpoint="api_suggest")
+def trip_api_suggest():
+    """주소 자동완성 (동선·집 미리보기 공용). 주소로 쳐도 실제 주소가 뜨도록 주소 검색 → 장소 검색 순"""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2 or trip_demo() or trip_has_pii(q):
+        return jsonify(documents=[])
+    try:
+        return jsonify(documents=trip_addr_suggest(q))
+    except Exception:
+        return jsonify(documents=[])
+
+
 # ---------- 1. 최적 동선 ----------
 @trip_bp.get("/route", endpoint="route_page")
 def trip_route_page():
@@ -15258,7 +15293,7 @@ TRIP_TEMPLATES = {
     "trip/_ac.html": r'''<script>
 // 주소 자동완성 (동선·집 미리보기 공용)
 var _acEsc=(t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])));
-// 주소 자동완성: 안전로드 경로찾기와 같은 방식 (/search_place, 3글자부터, 0.4초 뒤, 5개까지)
+// 주소 자동완성: 안전로드 경로찾기와 같은 화면·속도 (3글자부터, 0.4초 뒤, 5개까지). 실제 주소가 먼저 뜨도록 출장 도구함 전용 검색 사용
 function debounce(fn,ms){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),ms);};}
 function attachSuggest(inp,onPick,onClear){
   const box=document.createElement("div");box.className="acl";inp.parentElement.appendChild(box);
@@ -15268,7 +15303,7 @@ function attachSuggest(inp,onPick,onClear){
     const q=inp.value.trim();
     if(q.length<3||q==="현재 위치"){close();return;}
     try{
-      const data=await (await fetch("/search_place?q="+encodeURIComponent(q))).json();
+      const data=await (await fetch("{{ url_for('trip.api_suggest') }}?q="+encodeURIComponent(q))).json();
       const docs=(data.documents||[]).slice(0,5);
       if(inp.value.trim()!==q)return;
       if(!docs.length){box.innerHTML='<div class="none">검색 결과가 없습니다.</div>';box.classList.add("on");return;}
