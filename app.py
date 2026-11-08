@@ -15155,6 +15155,9 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .acl button:active,.acl button:hover{background:#f6f4ef}
 .acl small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .acl small.j{color:#b4b6b1;font-size:11.5px}
+.acl .rh{display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px;font-size:12px;font-weight:700;color:var(--muted)}
+.acl .rh .rc{width:auto;padding:2px 4px;border:0;background:none;font-size:12px;color:var(--muted);text-decoration:underline;cursor:pointer}
+.acl .rh+button{border-top:0}
 .acl .none{padding:12px 14px;color:var(--muted);font-size:13px}
 
 .ctabs{display:flex;gap:6px;overflow-x:auto;margin:2px 0 10px;scrollbar-width:none}
@@ -15407,11 +15410,34 @@ TRIP_TEMPLATES = {
 // 주소 자동완성 (동선·집 미리보기 공용)
 var _acEsc=(t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])));
 // 주소 자동완성: 안전로드 경로찾기와 같은 화면·속도 (3글자부터, 0.4초 뒤, 5개까지). 실제 주소가 먼저 뜨도록 출장 도구함 전용 검색 사용
+// 최근 검색: 서버에 보내지 않고 이 기기 브라우저에만 5개까지 (동선·집 미리보기 공용)
+const _RK="trip_recent_v1";
+function recentGet(){try{return JSON.parse(localStorage.getItem(_RK)||"[]").slice(0,5)}catch(e){return []}}
+function recentAdd(pl){try{const key=pl.road_address_name||pl.address_name||pl.place_name;
+  const list=recentGet().filter(x=>(x.road_address_name||x.address_name||x.place_name)!==key);
+  list.unshift({place_name:pl.place_name||"",road_address_name:pl.road_address_name||"",address_name:pl.address_name||"",x:pl.x,y:pl.y});
+  localStorage.setItem(_RK,JSON.stringify(list.slice(0,5)));}catch(e){}}
+function recentClear(){try{localStorage.removeItem(_RK)}catch(e){}}
 function debounce(fn,ms){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),ms);};}
 function attachSuggest(inp,onPick,onClear){
   const box=document.createElement("div");box.className="acl";inp.parentElement.appendChild(box);
   const close=()=>{box.classList.remove("on");box.innerHTML="";};
   inp.addEventListener("input",()=>{if(onClear)onClear();});
+  function pick(pl){inp.value=pl.place_name||pl.road_address_name||pl.address_name||"";close();recentAdd(pl);if(onPick)onPick(pl);}
+  function showRecent(){
+    if(inp.value.trim())return;
+    const list=recentGet();if(!list.length){close();return;}
+    box.innerHTML='<div class="rh"><span>최근 검색</span><button type="button" class="rc">지우기</button></div>'+list.map((pl,i)=>{
+      const road=pl.road_address_name||"",jibun=pl.address_name||"";
+      const title=pl.place_name||road||jibun,sub=(road&&road!==title)?road:((jibun&&jibun!==title)?jibun:"");
+      return `<button type="button" data-r="${i}">${_acEsc(title)}${sub?`<small>${_acEsc(sub)}</small>`:""}</button>`;}).join("");
+    box.querySelector(".rc").onmousedown=e=>{e.preventDefault();recentClear();close();};
+    box.querySelectorAll("button[data-r]").forEach(b=>b.onmousedown=e=>{e.preventDefault();pick(list[+b.dataset.r]);});
+    box.classList.add("on");
+  }
+  inp.addEventListener("focus",showRecent);
+  inp.addEventListener("click",showRecent);
+  inp.addEventListener("input",()=>{if(!inp.value.trim())showRecent();});
   inp.addEventListener("input",debounce(async function(){
     const q=inp.value.trim();
     if(q.length<3||q==="현재 위치"){close();return;}
@@ -15422,10 +15448,11 @@ function attachSuggest(inp,onPick,onClear){
       if(!docs.length){box.innerHTML='<div class="none">검색 결과가 없습니다.</div>';box.classList.add("on");return;}
       box.innerHTML=docs.map((pl,i)=>{
         const road=pl.road_address_name||"",jibun=pl.address_name||"";
-        return `<button type="button" data-i="${i}">${_acEsc(pl.place_name||"")}${road?`<small>${_acEsc(road)}</small><small class="j">${_acEsc(jibun)}</small>`:`<small>${_acEsc(jibun)}</small>`}</button>`;
+        const title=pl.place_name||road||jibun;
+        const r2=(road&&road!==title)?`<small>${_acEsc(road)}</small>`:"",j2=(jibun&&jibun!==title)?`<small class="j">${_acEsc(jibun)}</small>`:"";
+        return `<button type="button" data-i="${i}">${_acEsc(title)}${r2}${j2}</button>`;
       }).join("");
-      box.querySelectorAll("button").forEach(b=>b.onmousedown=e=>{e.preventDefault();const pl=docs[+b.dataset.i];
-        inp.value=pl.place_name||"";close();if(onPick)onPick(pl);});
+      box.querySelectorAll("button").forEach(b=>b.onmousedown=e=>{e.preventDefault();pick(docs[+b.dataset.i]);});
       box.classList.add("on");
     }catch(err){close();}
   },400));
@@ -16455,7 +16482,7 @@ function attachSuggest(inp,onPick,onClear){
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
 </div>
-<p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
+<p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 서버에 저장하지 않아요.<br class="mbr"> 최근 검색 주소만 이 기기에 5개까지 남아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
 {% block script %}
 <script>
@@ -16951,8 +16978,8 @@ const $=s=>document.querySelector(s);
 const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const km=m=>m<1000?`${m}m`:`${(m/1000).toFixed(1)}km`;
 const DEMO={{ 'true' if demo else 'false' }};
-const CAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 16V11.5L7 6.5h10l2 5V16"/><path d="M3.5 16h17v2.5h-17z"/><circle cx="7.5" cy="18.5" r="1.6"/><circle cx="16.5" cy="18.5" r="1.6"/><path d="M5 11.5h14"/></svg>';
-const WALK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4.5" r="2"/><path d="M10.5 21l2-6-3-3 1-4.5 3.5 2.5 3 1"/><path d="M9.5 8.5 7 12"/><path d="M14.5 15l2 6"/></svg>';
+const CAR='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>';
+const WALK='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9 7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></svg>';
 function search(lat,lng){
   const q=new URLSearchParams({lat,lng,always:$("#always").checked?1:0,bell:$("#bell").checked?1:0,acc:$("#acc").checked?1:0});
   fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
