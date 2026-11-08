@@ -15225,7 +15225,8 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .ph p{margin:0}
   .ph{display:flex;align-items:center;justify-content:center;text-align:center;min-height:420px;border:2px dashed var(--line);border-radius:var(--r);color:var(--muted);font-size:15px;line-height:1.7}
   .t-house form.card,.t-house .wrap>.card{max-width:640px;margin-left:auto;margin-right:auto}
-  .note{max-width:720px}
+  .note{max-width:none}
+  .mbr{display:none}
   .minirv{height:260px!important}
   .wt .t{font-size:17px}
   .wt .d{font-size:14px}
@@ -16286,7 +16287,7 @@ function attachSuggest(inp,onPick,onClear){
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
 </div>
-<p class="note">이름·주민번호·전화번호는 받지 않고,<br>입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
+<p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
 {% block script %}
 <script>
