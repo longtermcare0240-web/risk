@@ -14778,34 +14778,114 @@ def trip_api_toilets():
 # ---------- 4. 복용약 찾기 ----------
 @trip_bp.get("/pill", endpoint="pill_page")
 def trip_pill_page():
-    return render_template("trip/pill.html", colors=TRIP_PILL_COLORS, shapes=TRIP_PILL_SHAPES, forms=TRIP_PILL_FORMS)
+    return render_template("trip/pill.html")
 
 
-@trip_bp.post("/api/pill/identify", endpoint="api_pill_identify")
-def trip_api_pill_identify():
-    if not trip_load_pills():
-        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없어요. 관리자에게 알려주세요.")
-    if not os.environ.get("OPENAI_API_KEY"):
-        return jsonify(ok=False, message="사진 판독(AI) 설정이 안 되어 있어요. 아래 '직접 입력'으로 찾아주세요.")
+_TRIP_PILL_LAST = {}
+
+
+def _trip_pill_throttle():
+    """연속 호출 방지 (토큰 비용 보호): 같은 접속 5초 이내 재요청 차단 (케어내비와 같음)"""
+    import time
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    now = time.time()
+    if now - _TRIP_PILL_LAST.get(ip, 0) < 5:
+        return True
+    _TRIP_PILL_LAST[ip] = now
+    if len(_TRIP_PILL_LAST) > 2000:
+        _TRIP_PILL_LAST.clear()
+    return False
+
+
+def _trip_pill_files(limit):
     images = []
     for key in ("front", "back"):
         f = request.files.get(key)
         if not f:
             continue
+        if not (f.mimetype or "").startswith("image/"):
+            return None, "이미지 파일만 올릴 수 있습니다."
         data = f.read()
-        if not (f.mimetype or "").startswith("image/") or len(data) > 8 * 1024 * 1024:
-            return jsonify(ok=False, message="8MB 이하 사진만 올릴 수 있어요.")
+        if len(data) > limit:
+            return None, "이미지 용량은 8MB 이하만 가능합니다."
         images.append((key, f.mimetype, data))
+    return images, ""
+
+
+def _trip_pill_locate_boxes(images):
+    """알약이 사진 어디에 있는지만 대략 찾음 (케어내비 코드 그대로, 저해상도)"""
+    import base64
+    import json
+    client = OpenAI()
+    content = [{"type": "input_text", "text": (
+        "각 사진에서 알약이 있는 영역을 찾아 JSON으로만 답해. 알약이 여러 개면 모두 포함하는 하나의 영역으로.\n"
+        "좌표는 사진 전체 너비·높이 대비 비율(0~1)로 [왼쪽, 위, 오른쪽, 아래]. 알약이 없으면 null.\n"
+        '형식: {"boxes":[[0.1,0.2,0.3,0.4]]}  (사진 순서대로)'
+    )}]
+    for mime, data in images:
+        b64 = base64.b64encode(data).decode("utf-8")
+        content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64}", "detail": "low"})
+    res = client.responses.create(model="gpt-4.1-mini", input=[{"role": "user", "content": content}], temperature=0)
+    text = res.output_text or ""
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    data = json.loads(m.group()) if m else {}
+    out = []
+    for b in (data.get("boxes") or [])[:len(images)]:
+        try:
+            x0, y0, x1, y1 = [min(1.0, max(0.0, float(v))) for v in b]
+            out.append([x0, y0, x1, y1] if x1 > x0 and y1 > y0 else None)
+        except Exception:
+            out.append(None)
+    while len(out) < len(images):
+        out.append(None)
+    return out
+
+
+@trip_bp.post("/api/pill/locate", endpoint="api_pill_locate")
+def trip_api_pill_locate():
+    """알약 위치 찾기 (실패해도 됨: 휴대폰은 원래 사진 그대로 보냄)"""
+    if not os.environ.get("OPENAI_API_KEY") or OpenAI is None:
+        return jsonify(ok=False)
+    images, err = _trip_pill_files(2 * 1024 * 1024)
+    if not images:
+        return jsonify(ok=False)
+    try:
+        boxes = _trip_pill_locate_boxes([(m, d) for _, m, d in images])
+    except Exception:
+        return jsonify(ok=False)
+    return jsonify(ok=True, boxes={k: b for (k, _, _), b in zip(images, boxes)})
+
+
+@trip_bp.post("/api/pill/identify", endpoint="api_pill_identify")
+def trip_api_pill_identify():
+    if not trip_load_pills():
+        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없습니다. 관리자에게 문의하세요.")
+    if not os.environ.get("OPENAI_API_KEY") or OpenAI is None:
+        return jsonify(ok=False, message="AI 설정이 되어 있지 않습니다. 관리자에게 문의하세요.")
+    if _trip_pill_throttle():
+        return jsonify(ok=False, message="요청이 너무 빠릅니다. 잠시 후 다시 시도해 주세요.")
+    images, err = _trip_pill_files(8 * 1024 * 1024)
+    if images is None:
+        return jsonify(ok=False, message=err)
     if not images:
         return jsonify(ok=False, message="알약 사진을 찍어주세요.")
     try:
         feat = _trip_pill_features_from_images(images)
     except Exception:
-        return jsonify(ok=False, message="사진 분석 중 오류가 났어요. 다시 시도해 주세요.")
+        return jsonify(ok=False, message="사진 분석 중 오류가 발생했습니다. 다시 시도해 주세요.")
     front, back = feat.get("front", []), feat.get("back", [])
     if not front and not back:
-        return jsonify(ok=True, groups=[], message="사진에서 알약을 찾지 못했어요. 밝은 곳에서 가까이 찍어주세요.")
-    return jsonify(ok=True, groups=_trip_pill_build_groups(front, back), message="")
+        return jsonify(ok=True, groups=[], message="사진에서 알약을 찾지 못했습니다. 알약이 잘 보이도록 밝은 곳에서 다시 찍어주세요.")
+    groups = _trip_pill_build_groups(front, back)
+    count = len(front) or len(back)
+    msg = ""
+    if count > TRIP_PILL_RECOMMEND:
+        msg = (f"알약이 {count}개로 많아 정확도가 떨어질 수 있습니다. "
+               f"{TRIP_PILL_RECOMMEND}알 이하로 나눠 찍으면 더 정확합니다.")
+    if front and back and len(front) != len(back):
+        msg = (msg + " " if msg else "") + (f"앞면에서 {len(front)}개, 뒷면에서 {len(back)}개를 찾아 앞면 기준 {len(front)}개로 정리했습니다. "
+                                            "알약끼리 떨어뜨리고 무늬 없는 바닥에서 찍으면 더 정확합니다.")
+    return jsonify(ok=True, groups=groups, message=msg)
 
 
 @trip_bp.post("/api/pill/search", endpoint="api_pill_search")
@@ -14813,14 +14893,14 @@ def trip_api_pill_search():
     d = request.get_json(silent=True) or {}
     imprints = [x.strip() for x in str(d.get("imprint", "")).split("/") if x.strip()]
     if not imprints:
-        return jsonify(ok=True, candidates=[], message="알약에 새겨진 글자(각인)를 넣어주세요.")
+        return jsonify(ok=True, candidates=[], message="각인(알약에 새겨진 글자)을 입력해 주세요.")
     if not trip_load_pills():
-        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없어요. 관리자에게 알려주세요.")
+        return jsonify(ok=False, message="알약 데이터(pills.csv)가 없습니다. 관리자에게 문의하세요.")
     color = d.get("color") if d.get("color") in TRIP_PILL_COLORS else ""
     shape = d.get("shape") if d.get("shape") in TRIP_PILL_SHAPES else ""
     form = d.get("form") if d.get("form") in TRIP_PILL_FORMS else ""
     c = trip_search_pills(imprints, color, shape, form=form)
-    return jsonify(ok=True, candidates=c, message="" if c else "일치하는 알약을 찾지 못했어요.")
+    return jsonify(ok=True, candidates=c, message="" if c else "일치하는 알약을 찾지 못했습니다.")
 
 
 @trip_bp.get("/static/app.css", endpoint="css")
@@ -14843,8 +14923,10 @@ html,body{margin:0;background:var(--bg);color:var(--ink);
   font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans CJK KR","Malgun Gothic",sans-serif;font-size:15px;line-height:1.55;letter-spacing:-0.01em}
 a{color:inherit}
 .wrap{max-width:480px;margin:0 auto;padding:18px 16px 40px;position:relative}
-.ci{position:absolute;top:16px;right:16px;height:44px;width:auto;z-index:5;pointer-events:none}
-.bar{padding-right:150px}
+.ci{position:absolute;top:16px;right:16px;height:42px;max-width:84px;object-fit:contain;width:auto;z-index:5;pointer-events:none}
+.bar{padding-right:96px}
+.bar h1{white-space:nowrap}
+.bar .tag{white-space:nowrap;flex:none}
 .hello{padding-right:150px}
 
 /* 상단 */
@@ -15021,6 +15103,14 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .mini .allv{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 10px;font:600 12.5px/1.2 inherit;font-family:inherit;color:var(--sub);cursor:pointer}
 .mini .allv:hover{color:var(--ink)}
 
+/* 화장실 작은 로드뷰: 안전로드 검색결과와 같은 크기 */
+.sr-rv{position:relative;flex-shrink:0;width:84px;height:62px;border-radius:10px;overflow:hidden;background:#eef1f5}
+.sr-rv-pano{position:absolute;left:0;top:0;width:336px;height:248px;transform:scale(.25);transform-origin:0 0}
+.sr-rv-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:10px;line-height:1.3;color:#94a3b8;z-index:2}
+.sr-rv-cover{position:absolute;inset:0;z-index:3}
+.trow .dl{font-size:12.5px;color:var(--sub);margin-top:3px}
+.trow .dl b{color:var(--toilet);font-weight:800}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -15099,7 +15189,7 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .card{padding:24px;border-radius:22px}
   .sec{margin-bottom:10px}
   .wrap{padding:28px 32px 60px}
-  .ci{top:22px;right:32px;height:64px}
+  .ci{top:22px;right:32px;height:64px;max-width:none}
   .bar{padding-right:260px}
   .tiles{grid-template-columns:repeat(4,1fr);gap:16px}
   .tile{min-height:220px;padding:22px}
@@ -15116,6 +15206,8 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .t-house form.card,.t-house .wrap>.card{max-width:640px;margin-left:auto;margin-right:auto}
   .note{max-width:720px}
   .minirv{height:260px!important}
+  .sr-rv{width:120px;height:88px}
+  .sr-rv-pano{width:480px;height:352px}
 }
 '''
 
@@ -15167,6 +15259,951 @@ function attachSuggest(inp,onPick,onClear){
 <div class="bar"><a class="back" href="{{ url_for('trip.home') }}" aria-label="홈으로">{{ icon('back') }}</a><h1>{{ title }}</h1>{% if demo %}<span class="tag">예시 모드</span>{% endif %}</div>
 {%- endmacro %}
 ''',
+    "trip/_pill_cn.html": r'''{% raw %}
+<style>
+#camRetry{ display:none; position:fixed; inset:0; z-index:100010; background:rgba(15,23,42,0.55); align-items:center; justify-content:center; padding:16px; box-sizing:border-box; }
+#camRetry .cr-box{ width:100%; max-width:320px; background:#fff; border-radius:16px; padding:22px 18px 16px; box-sizing:border-box; text-align:center; box-shadow:0 12px 32px rgba(0,0,0,0.2); }
+#camRetry .cr-t{ font-size:16px; font-weight:800; color:#111827; margin:0 0 8px; }
+#camRetry .cr-s{ font-size:14px; color:#4b5563; line-height:1.55; margin:0 0 16px; word-break:keep-all; }
+#camRetry .cr-btns{ display:flex; gap:8px; }
+#camRetry button{ flex:1; height:44px !important; margin:0 !important; border-radius:10px !important; font-size:15px !important; font-weight:700 !important; cursor:pointer; box-shadow:none !important; }
+#camRetryClose{ background:#f3f4f6 !important; color:#374151 !important; border:1px solid #e5e7eb !important; }
+#camRetryGo{ background:#2563eb !important; color:#fff !important; border:none !important; }
+</style>
+<div id="camRetry">
+  <div class="cr-box">
+    <p class="cr-t">📷 사진이 전달되지 않았어요</p>
+    <p class="cr-s">사진을 찍는 동안 휴대폰이 화면을 새로 열었습니다.<br>다시 촬영해 주세요.</p>
+    <div class="cr-btns">
+      <button type="button" id="camRetryClose">닫기</button>
+      <button type="button" id="camRetryGo">다시 촬영</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  if(window.camPending) return;
+  var KEY = "cam_pending", LIMIT = 5*60*1000;
+  function read(){
+    try{
+      var p = JSON.parse(localStorage.getItem(KEY) || "null");
+      if(p && Date.now() - p.t < LIMIT) return p;
+      localStorage.removeItem(KEY);
+    }catch(e){}
+    return null;
+  }
+  window.camPending = {
+    /* 카메라 열기 직전 호출 */
+    set: function(kind, extra){
+      try{ localStorage.setItem(KEY, JSON.stringify({ kind: kind, path: location.pathname, t: Date.now(), extra: extra || null })); }catch(e){}
+    },
+    clear: function(){ try{ localStorage.removeItem(KEY); }catch(e){} },
+    /* 새로 열린 화면에서 해당 종류의 표시가 있으면 꺼내고 지움 */
+    take: function(kind){
+      var p = read();
+      if(p && p.kind === kind && p.path === location.pathname){
+        try{ localStorage.removeItem(KEY); }catch(e){}
+        return p;
+      }
+      return null;
+    },
+    /* 촬영 실패 안내창: '다시 촬영'을 누르면 카메라 앱을 다시 엶
+       (휴대폰은 사용자가 버튼을 눌러야만 카메라를 열 수 있어 자동으로는 못 엶) */
+    notice: function(onRetry){
+      var box = document.getElementById("camRetry");
+      if(!box) return;
+      function show(){
+        /* 다른 안내창(개인정보 동의 등)이 떠 있으면 닫힌 뒤에 표시 */
+        var pm = document.getElementById("privacyModal");
+        if(pm && getComputedStyle(pm).display !== "none"){ setTimeout(show, 300); return; }
+        box.style.display = "flex";
+      }
+      document.getElementById("camRetryGo").onclick = function(){ box.style.display = "none"; if(onRetry) onRetry(); };
+      document.getElementById("camRetryClose").onclick = function(){ box.style.display = "none"; };
+      show();
+    }
+  };
+  /* 카메라 앱에서 정상적으로 돌아오면 표시를 지움 */
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible"){ setTimeout(window.camPending.clear, 2000); }
+  });
+  /* 다른 화면으로 정상 이동하면 지움 (휴대폰이 강제로 새로 열 때는 발생하지 않음) */
+  var redirecting = false;
+  window.addEventListener("pagehide", function(){ if(!redirecting) window.camPending.clear(); });
+  /* 메인화면으로 새로 열렸으면 원래 화면으로 이동 */
+  var p = read();
+  if(p && location.pathname === "/home" && p.path !== "/home"){
+    redirecting = true;
+    location.replace(p.path);
+  }
+})();
+</script>
+
+<style>
+.pill-modal{ display:none; position:fixed; inset:0; z-index:100002; background:rgba(15,23,42,0.6); align-items:center; justify-content:center; padding:12px; font-family:inherit; }
+.pill-modal.show{ display:flex; }
+.pill-box{ width:100%; max-width:520px; max-height:92vh; max-height:92dvh; background:#fff; border-radius:16px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,0.25); text-align:left; color:#111827; }
+.pill-head{ display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; padding:14px 16px; border-bottom:1px solid #e5e7eb; }
+.pill-title{ font-size:16px; font-weight:800; }
+.pill-sub{ flex-basis:100%; margin-top:8px; font-size:12px; color:#6b7280; line-height:1.45; word-break:keep-all; }
+.pill-x{ flex:none; margin-left:auto; width:28px !important; height:28px !important; min-width:0 !important; padding:0 !important; margin-top:0 !important; border:none !important; border-radius:999px !important; background:#f3f4f6 !important; color:#374151 !important; font-size:17px !important; line-height:1 !important; box-shadow:none !important; cursor:pointer; }
+.pill-body{ flex:1; overflow:auto; padding:14px 16px; min-height:0; }
+/* 오른쪽 위 '직접 입력 / 사진으로' 전환 버튼 */
+.pill-head-btns{ flex:none; margin-left:auto; margin-top:-4px; display:flex; align-items:center; gap:5px; }
+.pill-head-btns .pill-x{ margin-left:0; }
+.pill-mode{ width:auto !important; height:28px !important; min-width:0 !important; margin:0 !important; padding:0 10px !important; border:1px solid #e2d4f6 !important; border-radius:999px !important; background:#f1eafb !important; color:#7440c2 !important; font-size:12px !important; font-weight:700 !important; white-space:nowrap; box-shadow:none !important; cursor:pointer; }
+.pill-feat.pill-manual{ display:none; margin-top:0; }
+.pill-manual .pill-go{ margin-top:10px !important; }
+.pill-shots{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.pill-shot{ position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; height:120px; padding:6px 8px 34px; box-sizing:border-box; border:1.5px dashed #c9b0ee; border-radius:12px; background:#faf7fe; color:#7440c2; font-size:13px; font-weight:700; cursor:pointer; overflow:hidden; text-align:center; }
+.pill-shot input{ display:none; }
+.pill-shot img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.pill-shot small{ font-size:11px; font-weight:500; color:#6b7280; margin-top:3px; padding:0 6px; word-break:keep-all; }
+.pill-shot.drag{ background:#f4eefc; border-color:#8b55d6; border-style:solid; }
+.pill-gal{ position:absolute; right:5px; bottom:5px; z-index:2; width:30px !important; height:30px !important; min-width:0 !important; margin:0 !important; padding:0 !important; border:1px solid #e2d4f6 !important; border-radius:8px !important; background:rgba(255,255,255,0.95) !important; color:#7440c2 !important; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(15,23,42,0.15) !important; cursor:pointer; }
+.pill-gal svg{ width:18px; height:18px; display:block; }
+.pill-tip{ display:flex; gap:4px; margin:10px 0 0; font-size:12px; color:#6b7280; line-height:1.5; word-break:keep-all; overflow-wrap:break-word; }
+.pill-tip span:first-child{ flex:none; }  /* ※ 뒤로 줄바꿈된 글이 윗줄 첫 글자에 맞춰짐 */
+.pill-go{ display:block; width:100% !important; height:44px !important; margin:12px 0 0 !important; padding:0 !important; border:none !important; border-radius:10px !important; background:#8b55d6 !important; color:#fff !important; font-size:15px !important; font-weight:800 !important; box-shadow:none !important; cursor:pointer; }
+.pill-go:disabled{ background:#c9b0ee !important; cursor:wait; }
+.pill-msg{ display:none; margin-top:12px; padding:10px 12px; border-radius:10px; background:#fff7ed; border:1px solid #fdba74; color:#9a3412; font-size:13px; line-height:1.55; word-break:keep-all; }
+.pill-feat{ display:none; margin-top:14px; padding:10px 12px; border-radius:12px; background:#f1eafb; border:1px solid #e2d4f6; }
+.pill-feat-title{ font-size:12.5px; font-weight:800; color:#4b2585; }
+.pill-feat-help{ margin:3px 0 8px; font-size:11.5px; color:#4b5563; line-height:1.45; word-break:keep-all; }
+.pill-feat-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+.pill-feat-row input{ grid-column:1 / -1; }
+/* 앞면·뒷면 글자 두 칸 */
+.pill-imp2{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px; }
+.pill-imp2 label{ display:flex; flex-direction:column; gap:3px; min-width:0; font-size:11.5px; font-weight:700; color:#4b2585; }
+.pill-imp2 input{ width:100%; height:38px; margin:0; padding:0 10px; border:1px solid #e2d4f6; border-radius:8px; font-size:14px; font-family:inherit; background:#fff; box-sizing:border-box; }
+.pill-imp2 input:focus{ outline:none; border-color:#8b55d6; box-shadow:0 0 0 3px rgba(139,85,214,0.12); }
+.pill-imp2 input.err, .pill-imp2 input.err:focus{ border-color:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,0.15); }
+/* 상단 찾기 방식 탭 */
+.pill-tabs{ flex-basis:100%; display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:12px; padding:4px; background:#f1f5f9; border-radius:12px; }
+.pill-tab{ display:flex !important; align-items:center; justify-content:center; gap:6px; width:auto !important; height:40px !important; margin:0 !important; padding:0 6px !important; border:none !important; border-radius:9px !important; background:transparent !important; color:#64748b !important; font-size:14px !important; font-weight:700 !important; font-family:inherit; box-shadow:none !important; cursor:pointer; white-space:nowrap; }
+.pill-tab svg{ width:18px; height:18px; flex:none; }
+.pill-tab.on{ background:#fff !important; color:#7440c2 !important; box-shadow:0 1px 4px rgba(15,23,42,0.12) !important; }
+/* 모양 선택: 모양 그림이 보이는 선택창 (원래 select는 숨겨 두고 값만 사용) */
+.ps-wrap{ position:relative; min-width:0; }
+.ps-btn{ width:100% !important; height:36px !important; margin:0 !important; padding:0 8px !important; display:flex !important; align-items:center; gap:5px; border:1px solid #e2d4f6 !important; border-radius:8px !important; background:#fff !important; color:#111827 !important; font-size:13px !important; font-weight:400 !important; font-family:inherit; box-shadow:none !important; cursor:pointer; text-align:left; }
+.ps-btn svg{ flex:none; width:22px; height:16px; }
+.ps-btn .ps-name{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ps-btn .ps-caret{ flex:none; color:#6b7280; font-size:10px; }
+.ps-pop{ display:none; position:fixed; z-index:100005; width:252px; max-width:calc(100vw - 24px); padding:6px; background:#fff; border:1px solid #e2d4f6; border-radius:12px; box-shadow:0 10px 26px rgba(15,23,42,0.18); grid-template-columns:repeat(4, 1fr); gap:4px; }
+.ps-pop.open{ display:grid; }
+.ps-opt{ display:flex !important; flex-direction:column; align-items:center; justify-content:center; gap:3px; width:auto !important; height:auto !important; margin:0 !important; padding:6px 2px !important; border:1px solid transparent !important; border-radius:8px !important; background:#fff !important; color:#374151 !important; font-size:11px !important; font-weight:600 !important; font-family:inherit; box-shadow:none !important; cursor:pointer; white-space:nowrap; }
+.ps-opt svg{ width:30px; height:22px; }
+.ps-opt:hover{ background:#f7f2fd !important; }
+.ps-opt.sel{ background:#f1eafb !important; border-color:#c9b0ee !important; color:#7440c2 !important; }
+.pill-feat-row input, .pill-feat-row select{ width:100%; height:36px; margin:0; padding:0 8px; border:1px solid #e2d4f6; border-radius:8px; font-size:13px; font-family:inherit; background:#fff; box-sizing:border-box; }
+.pill-re{ width:100% !important; height:34px !important; margin:8px 0 0 !important; padding:0 !important; border:1px solid #c9b0ee !important; border-radius:8px !important; background:#fff !important; color:#7440c2 !important; font-size:13px !important; font-weight:700 !important; box-shadow:none !important; cursor:pointer; }
+.pill-list{ margin-top:12px; display:flex; flex-direction:column; gap:10px; }
+.pill-group + .pill-group{ margin-top:18px; padding-top:14px; border-top:2px dashed #e5e7eb; }
+.pill-group-title{ font-size:15px; font-weight:800; color:#111827; }
+.pill-group .pill-feat{ display:block; }
+.pill-card{ display:flex; gap:12px; padding:10px; border:1px solid #e5e7eb; border-radius:12px; }
+.pill-card img{ flex:none; width:112px; height:62px; object-fit:contain; border-radius:6px; background:#f9fafb; cursor:zoom-in; }
+/* 식약처 사진 크게 보기 */
+.pill-zoom{ display:none; position:fixed; inset:0; z-index:100010; background:rgba(15,23,42,0.88); align-items:center; justify-content:center; flex-direction:column; padding:16px; box-sizing:border-box; cursor:zoom-out; }
+.pill-zoom.show{ display:flex; }
+.pill-zoom img{ max-width:100%; max-height:calc(100% - 60px); object-fit:contain; border-radius:10px; background:#fff; }
+.pill-zoom-cap{ margin-top:10px; max-width:100%; color:#fff; font-size:14px; font-weight:700; text-align:center; word-break:keep-all; overflow-wrap:anywhere; }
+.pill-zoom-x{ position:absolute; top:max(12px, env(safe-area-inset-top)); right:12px; width:40px !important; height:40px !important; min-width:0 !important; margin:0 !important; padding:0 !important; border:none !important; border-radius:999px !important; background:rgba(255,255,255,0.18) !important; color:#fff !important; font-size:22px !important; line-height:1 !important; box-shadow:none !important; cursor:pointer; }
+.pill-info{ flex:1; min-width:0; }
+.pill-name{ font-size:14px; font-weight:800; line-height:1.35; word-break:keep-all; overflow-wrap:anywhere; }
+.pill-meta{ margin-top:3px; font-size:12px; color:#6b7280; line-height:1.45; word-break:keep-all; overflow-wrap:anywhere; }
+.pill-conf{ display:inline-block; margin-right:4px; padding:1px 7px; border-radius:6px; font-size:11px; font-weight:800; vertical-align:1px; }
+.pill-conf.high{ background:#dcfce7; color:#15803d; }
+.pill-conf.mid{ background:#ece1fb; color:#7440c2; }
+.pill-conf.low{ background:#f3f4f6; color:#6b7280; }
+.pill-badge{ display:inline-block; margin-right:4px; padding:1px 7px; border-radius:6px; background:#ede9fe; color:#6d28d9; font-size:11px; font-weight:800; vertical-align:1px; }
+.pill-actions{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.pill-link{ font-size:12px; font-weight:700; color:#8b55d6; text-decoration:none; }
+.pill-kind{ display:inline-block; margin-right:4px; padding:0 6px; border-radius:5px; background:#fef3c7; color:#92400e; font-size:11px; font-weight:800; }
+.pill-card.picked{ border-color:#8b55d6; box-shadow:0 0 0 2px rgba(139,85,214,0.18); }
+.pill-pick{ width:auto !important; height:26px !important; margin:0 !important; padding:0 10px !important; border:1px solid #c9b0ee !important; border-radius:999px !important; background:#fff !important; color:#7440c2 !important; font-size:12px !important; font-weight:700 !important; box-shadow:none !important; cursor:pointer; }
+.pill-card.picked .pill-pick{ background:#8b55d6 !important; border-color:#8b55d6 !important; color:#fff !important; }
+.pill-pick-help{ margin:8px 0 2px; font-size:12px; color:#92400e; font-weight:700; word-break:keep-all; }
+.pill-care{ margin-top:18px; padding:14px; border-radius:14px; background:#fffbeb; border:1px solid #fcd34d; }
+.pill-care-t{ font-size:14px; font-weight:800; color:#111827; }
+.pill-care-kinds{ margin-top:6px; font-size:13px; color:#374151; line-height:1.6; word-break:keep-all; }
+.pill-care-sub{ margin-top:12px; font-size:13px; font-weight:800; color:#92400e; }
+.pill-care-sig{ margin:4px 0 0; padding-left:18px; font-size:13px; color:#374151; line-height:1.6; }
+.pill-care-go{ display:block; width:100% !important; height:42px !important; margin:12px 0 0 !important; padding:0 !important; border:none !important; border-radius:10px !important; background:#d97706 !important; color:#fff !important; font-size:14px !important; font-weight:800 !important; box-shadow:none !important; cursor:pointer; }
+.pill-care-meds{ display:block; width:100% !important; height:42px !important; margin:12px 0 0 !important; padding:0 !important; border:1.5px solid #d97706 !important; border-radius:10px !important; background:#fff !important; color:#b45309 !important; font-size:14px !important; font-weight:800 !important; box-shadow:none !important; cursor:pointer; }
+.pill-care-meds:disabled{ border-color:#fcd34d !important; color:#d6b25a !important; cursor:default; }
+.pill-care-go + .pill-care-meds{ margin-top:8px !important; }
+.pill-meds-flash{ background:#fef3c7 !important; border-color:#d97706 !important; box-shadow:0 0 0 3px rgba(217,119,6,0.25) !important; transition:background .3s, box-shadow .3s; }
+.pill-care-go:disabled{ background:#fcd34d !important; cursor:default; }
+.pill-care-note{ margin-top:8px; font-size:11px; color:#92400e; line-height:1.5; word-break:keep-all; }
+.pill-yes{ width:auto !important; height:26px !important; margin:0 !important; padding:0 10px !important; border:none !important; border-radius:999px !important; background:#7c3aed !important; color:#fff !important; font-size:12px !important; font-weight:700 !important; box-shadow:none !important; cursor:pointer; }
+.pill-loading{ display:none; position:fixed; inset:0; z-index:100003; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; }
+.pill-loading.show{ display:flex; }
+.pill-loading-box{ box-sizing:border-box; width:86%; max-width:320px; background:#fff; border-radius:20px; padding:34px 24px 26px; text-align:center; display:flex; flex-direction:column; align-items:center; }
+.pill-spinner{ width:42px; height:42px; border:5px solid #eee; border-top-color:#8b55d6; border-radius:50%; animation:pillSpin 1s linear infinite; }
+@keyframes pillSpin{ to{ transform:rotate(360deg); } }
+.pill-load-title{ margin:14px 0 0; font-size:15px; font-weight:700; line-height:1.35; color:#111827; }
+.pill-load-sub{ margin:8px 0 0; font-size:13px; line-height:1.5; color:#6b7280; word-break:keep-all; }
+.pill-steps{ display:flex; gap:6px; width:150px; margin:16px auto 0; }
+.pill-step{ flex:1; height:6px; border-radius:999px; background:#e5e7eb; transition:background .3s; }
+.pill-step.on{ background:#8b55d6; }
+.pill-load-ci{ width:132px; margin-top:28px; opacity:0.82; display:block; }
+.pill-foot{ flex:none; padding:8px 16px; border-top:1px solid #f1f5f9; font-size:11px; color:#9ca3af; line-height:1.5; word-break:keep-all; }
+@media (max-width:480px){
+  .pill-shot{ height:118px; }
+  .pill-feat-row{ gap:5px; }
+  .ps-btn{ padding:0 6px !important; gap:4px; font-size:12.5px !important; }
+  .ps-btn .ps-caret{ display:none; }
+  .pill-card img{ width:96px; height:54px; }
+}
+</style>
+
+<div id="pillZoom" class="pill-zoom" role="dialog" aria-label="알약 사진 크게 보기">
+  <button type="button" class="pill-zoom-x" aria-label="닫기">×</button>
+  <img alt="">
+  <div class="pill-zoom-cap"></div>
+</div>
+<div id="pillModal" class="pill-modal">
+  <div class="pill-box">
+    <div class="pill-head">
+      <div>
+        <div class="pill-title"><svg viewBox="0 0 24 24" style="width:1.15em;height:1.15em;vertical-align:-0.2em;margin-right:2px" aria-hidden="true"><g transform="rotate(-45 12 12)"><path d="M7 7h5v10H7a5 5 0 0 1 0-10z" fill="#3b82f6"/><path d="M12 7h5a5 5 0 0 1 0 10h-5z" fill="#fb923c"/><rect x="2" y="7" width="20" height="10" rx="5" fill="none" stroke="rgba(15,23,42,0.18)" stroke-width="1"/><path d="M4.8 10.6a2.4 2.4 0 0 1 2.2-1.6" stroke="#ffffff" stroke-width="1" stroke-linecap="round" fill="none" opacity=".8"/></g></svg> 알약 확인</div>
+      </div>
+      <div class="pill-head-btns">
+        <button type="button" class="pill-x" onclick="closePill()" aria-label="닫기">×</button>
+      </div>
+      <div class="pill-sub" id="pillSub">알약의 앞·뒷면을 찍으면 식약처 낱알식별 정보에서 비슷한 약을 찾아드립니다.</div>
+      <div class="pill-tabs" role="tablist">
+        <button type="button" class="pill-tab on" data-m="photo" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg> 사진으로 찾기</button>
+        <button type="button" class="pill-tab" data-m="text" role="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h4"/></svg> 알약정보로 찾기</button>
+      </div>
+    </div>
+    <div class="pill-body">
+      <!-- 직접 입력: 사진 없이 각인 글자로 바로 검색 -->
+      <div class="pill-feat pill-manual" id="pillManualPane">
+        <div class="pill-feat-title">알약 정보 입력</div>
+        <div class="pill-feat-help">알약에 새겨진 글자(각인)를 입력하세요. 한쪽 면에만 있으면 그 칸만 쓰면 됩니다. 색·모양·제형은 모르면 '전체'로 두세요.</div>
+        <div class="pill-imp2">
+          <label>앞면 글자<input type="text" id="pmImpF" placeholder="예: CT" autocomplete="off"></label>
+          <label>뒷면 글자<input type="text" id="pmImpB" placeholder="(없으면 비움)" autocomplete="off"></label>
+        </div>
+        <div class="pill-feat-row">
+          <select id="pmColor"></select>
+          <select id="pmShape"></select>
+          <select id="pmForm"></select>
+        </div>
+        <button type="button" class="pill-go" id="pmGo">검색</button>
+      </div>
+      <div id="pillPhotoPane">
+      <div class="pill-shots">
+        <div class="pill-shot" id="pillShotFront" data-side="front" role="button" tabindex="0">
+          <input type="file" accept="image/*" capture="environment" data-side="front">
+          <input type="file" accept="image/*" class="pill-gal-input" data-side="front">
+          <span class="ps-t">📷 앞면</span><small class="ps-s">알약 1~5알</small>
+          <button type="button" class="pill-gal" data-side="front" aria-label="갤러리에서 앞면 사진 선택"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg></button>
+        </div>
+        <div class="pill-shot" id="pillShotBack" data-side="back" role="button" tabindex="0">
+          <input type="file" accept="image/*" capture="environment" data-side="back">
+          <input type="file" accept="image/*" class="pill-gal-input" data-side="back">
+          <span class="ps-t">📷 뒷면</span><small class="ps-s">(선택) 놓은 자리 그대로 뒤집어서 촬영</small>
+          <button type="button" class="pill-gal" data-side="back" aria-label="갤러리에서 뒷면 사진 선택"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg></button>
+        </div>
+      </div>
+      <p class="pill-tip"><span>※</span><span id="pillTipText">한 알도, 여러 알(최대 5알)도 됩니다. 여러 알이면 서로 떨어뜨려 놓고 찍은 뒤, 뒷면은 놓인 자리 그대로 하나씩 뒤집어 찍어주세요. 사진은 저장되지 않습니다.</span></p>
+      <button type="button" class="pill-go" id="pillGo">검색</button>
+      </div>
+
+      <div class="pill-msg" id="pillMsg"></div>
+
+      <div class="pill-list" id="pillList"></div>
+    </div>
+    <div class="pill-foot">참고용 후보입니다. 정확한 확인은 약사·의사에게 문의하세요.<br>자료: 식품의약품안전처 의약품 낱알식별 정보</div>
+  </div>
+</div>
+
+<div id="pillLoading" class="pill-loading">
+  <div class="pill-loading-box">
+    <div class="pill-spinner"></div>
+    <p class="pill-load-title" id="pillLoadTitle"></p>
+    <p class="pill-load-sub" id="pillLoadSub"></p>
+    <div class="pill-steps"><div class="pill-step"></div><div class="pill-step"></div><div class="pill-step"></div><div class="pill-step"></div></div>
+    <img src="/ci" class="pill-load-ci" alt="" onerror="this.style.display='none'">
+  </div>
+</div>
+
+<script>
+(function(){
+  var COLORS = ["하양","노랑","주황","분홍","빨강","갈색","연두","초록","청록","파랑","남색","자주","보라","회색","검정","투명"];
+  var SHAPES = ["원형","타원형","장방형","반원형","삼각형","사각형","마름모형","오각형","육각형","팔각형","기타"];
+  var FORMS = ["정제","경질캡슐","연질캡슐"];
+  var modal = document.getElementById("pillModal");
+  if(!modal) return;
+  var files = { front:null, back:null };
+  var surveyMode = false;
+  var goBtn = document.getElementById("pillGo");
+  var msg = document.getElementById("pillMsg");
+  var list = document.getElementById("pillList");
+
+  /* ── 직접 입력 모드: 사진 없이 각인·색·모양으로 바로 검색 ── */
+  var manualPane = document.getElementById("pillManualPane");
+  var photoPane = document.getElementById("pillPhotoPane");
+  var tabs = modal.querySelectorAll(".pill-tab");
+  /* 각인을 비우고 검색하면 앞면 칸에 빨간 테두리 + 커서 이동, 글자를 입력하면 테두리 해제 */
+  function markImpEmpty(inp){
+    if(!inp) return;
+    inp.classList.add("err");
+    try{ inp.focus(); inp.scrollIntoView({ block:"center", behavior:"smooth" }); }catch(e){}
+  }
+  modal.addEventListener("input", function(e){
+    var t = e.target;
+    if(!t || !t.closest || !t.closest(".pill-imp2")) return;
+    Array.prototype.forEach.call(t.closest(".pill-imp2").querySelectorAll("input.err"), function(x){ x.classList.remove("err"); });
+  });
+  function joinImp(a, b){ return [a, b].map(function(x){ return String(x || "").trim(); }).filter(function(x){ return x; }).join(" / "); }
+  var subEl = document.getElementById("pillSub");
+  var photoSub = null;
+  function setManual(on){
+    if(photoSub === null) photoSub = subEl.textContent;   /* PC/모바일 문구 그대로 보관 */
+    manualPane.style.display = on ? "block" : "none";
+    photoPane.style.display = on ? "none" : "";
+    Array.prototype.forEach.call(tabs, function(t){ t.classList.toggle("on", (t.getAttribute("data-m") === "text") === on); });
+    subEl.textContent = on ? "알약의 글자(각인)·색·모양·제형을 입력하면 식약처 낱알식별 정보에서 찾아드립니다." : photoSub;
+    showMsg(""); list.innerHTML = "";
+  }
+  Array.prototype.forEach.call(tabs, function(t){
+    t.addEventListener("click", function(){
+      var wantText = t.getAttribute("data-m") === "text";
+      if(wantText !== (manualPane.style.display === "block")) setManual(wantText);
+    });
+  });
+  function manualSearch(){
+    var imp = joinImp(document.getElementById("pmImpF").value, document.getElementById("pmImpB").value);
+    if(!imp.trim()){ showMsg("각인(알약에 새겨진 글자)을 입력해 주세요."); markImpEmpty(document.getElementById("pmImpF")); return; }
+    showMsg(""); list.innerHTML = "";
+    var btn = document.getElementById("pmGo");
+    btn.disabled = true; btn.textContent = "검색 중...";
+    fetch("/trip/api/pill/search", {
+      method:"POST", credentials:"same-origin",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ imprint: imp, color: document.getElementById("pmColor").value, shape: document.getElementById("pmShape").value, form: document.getElementById("pmForm").value })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(!d || !d.ok){ showMsg((d && d.message) || "오류가 발생했습니다."); return; }
+      renderCards(list, d.candidates);
+      showMsg(d.message || "");
+      scrollToResult();
+    }).catch(function(){ showMsg("연결 오류가 발생했습니다."); })
+      .finally(function(){ btn.disabled = false; btn.textContent = "검색"; });
+  }
+  document.getElementById("pmGo").addEventListener("click", manualSearch);
+  ["pmImpF", "pmImpB"].forEach(function(id){
+    document.getElementById(id).addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); manualSearch(); } });
+  });
+
+  function opts(arr, all, sel){
+    return '<option value="">' + all + '</option>' + arr.map(function(v){
+      return '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + '</option>';
+    }).join("");
+  }
+  /* 모양 그림 (알약 모양을 눈으로 고를 수 있게) */
+  var SHAPE_ICON = {
+    "": '<circle cx="12" cy="12" r="8" stroke-dasharray="3 2.5"/>',
+    "원형": '<circle cx="12" cy="12" r="8"/>',
+    "타원형": '<ellipse cx="12" cy="12" rx="10" ry="6.5"/>',
+    "장방형": '<rect x="2" y="7" width="20" height="10" rx="3"/>',
+    "반원형": '<path d="M3 16 A9 9 0 0 1 21 16 Z"/>',
+    "삼각형": '<polygon points="12,4 21,19 3,19"/>',
+    "사각형": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+    "마름모형": '<polygon points="12,3 21,12 12,21 3,12"/>',
+    "오각형": '<polygon points="12,3 21,10 17.5,20 6.5,20 3,10"/>',
+    "육각형": '<polygon points="7,4 17,4 22,12 17,20 7,20 2,12"/>',
+    "팔각형": '<polygon points="8.5,3 15.5,3 21,8.5 21,15.5 15.5,21 8.5,21 3,15.5 3,8.5"/>',
+    "기타": '<path d="M6 8 Q12 2 18 8 Q22 14 15 18 Q8 22 5 15 Z"/>'
+  };
+  function shapeSvg(v){
+    var on = !!v;
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="' + (on ? '#dbeafe' : 'none') + '" stroke="' + (on ? '#2563eb' : '#9ca3af') + '" stroke-width="1.6" stroke-linejoin="round">' + (SHAPE_ICON[v] || SHAPE_ICON["기타"]) + '</svg>';
+  }
+  /* 색 견본 */
+  var COLOR_HEX = {
+    "하양":"#ffffff", "노랑":"#facc15", "주황":"#fb923c", "분홍":"#f9a8d4", "빨강":"#ef4444", "갈색":"#92400e",
+    "연두":"#a3e635", "초록":"#16a34a", "청록":"#14b8a6", "파랑":"#3b82f6", "남색":"#1e3a8a", "자주":"#a21caf",
+    "보라":"#8b5cf6", "회색":"#9ca3af", "검정":"#111827"
+  };
+  function colorSvg(v){
+    if(!v) return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="#9ca3af" stroke-width="1.6" stroke-dasharray="3 2.5"/></svg>';
+    if(v === "투명") return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="rgba(219,234,254,0.45)" stroke="#93c5fd" stroke-width="1.6"/><path d="M8.5 9.5 A4.5 4.5 0 0 1 12 7.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="' + (COLOR_HEX[v] || "#e5e7eb") + '" stroke="rgba(15,23,42,0.25)" stroke-width="1.2"/></svg>';
+  }
+  /* 제형 그림: 정제(분할선 있는 알약) / 경질캡슐(두 색 캡슐) / 연질캡슐(말랑한 반투명 캡슐) */
+  function formSvg(v){
+    if(v === "정제") return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="#f8fafc" stroke="#64748b" stroke-width="1.6"/><line x1="12" y1="5" x2="12" y2="19" stroke="#94a3b8" stroke-width="1.4"/></svg>';
+    if(v === "경질캡슐") return '<svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-35 12 12)"><path d="M7 8h5v8H7a4 4 0 0 1 0-8z" fill="#3b82f6"/><path d="M12 8h5a4 4 0 0 1 0 8h-5z" fill="#f8fafc"/><rect x="3" y="8" width="18" height="8" rx="4" fill="none" stroke="#475569" stroke-width="1.2"/></g></svg>';
+    if(v === "연질캡슐") return '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.5" ry="6" fill="#fbbf24" fill-opacity="0.85" stroke="#d97706" stroke-width="1.2" transform="rotate(-25 12 12)"/><ellipse cx="9" cy="10" rx="3" ry="1.3" fill="#ffffff" fill-opacity="0.75" transform="rotate(-25 9 10)"/></svg>';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="#9ca3af" stroke-width="1.6" stroke-dasharray="3 2.5"/></svg>';
+  }
+  function enhanceShape(sel){ enhancePicker(sel, SHAPES, shapeSvg, "모양 전체"); }
+  function enhanceForm(sel){ enhancePicker(sel, FORMS, formSvg, "제형 전체"); }
+  function enhanceColor(sel){ enhancePicker(sel, COLORS, colorSvg, "색 전체"); }
+
+  /* select 를 그림 선택창으로 바꿈. select 는 숨긴 채 값만 보관하므로 기존 검색 코드는 그대로 동작 */
+  function enhancePicker(sel, LIST, iconFn, allLabel){
+    if(!sel || sel.getAttribute("data-ps")) return;
+    sel.setAttribute("data-ps", "1");
+    sel.style.display = "none";
+    var wrap = document.createElement("div");
+    wrap.className = "ps-wrap";
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "ps-btn";
+    var pop = document.createElement("div");
+    pop.className = "ps-pop";
+    wrap.appendChild(btn); wrap.appendChild(pop);
+    function label(v){ return v || allLabel; }
+    function update(){
+      btn.innerHTML = iconFn(sel.value) + '<span class="ps-name">' + label(sel.value) + '</span><span class="ps-caret">▼</span>';
+      Array.prototype.forEach.call(pop.children, function(o){ o.classList.toggle("sel", o.getAttribute("data-v") === sel.value); });
+    }
+    [""].concat(LIST).forEach(function(v){
+      var o = document.createElement("button");
+      o.type = "button"; o.className = "ps-opt"; o.setAttribute("data-v", v);
+      o.innerHTML = iconFn(v) + '<span>' + (v || "전체") + '</span>';
+      o.addEventListener("click", function(e){
+        e.stopPropagation();
+        sel.value = v;
+        sel.dispatchEvent(new Event("change", { bubbles:true }));
+        pop.classList.remove("open");
+        update();
+      });
+      pop.appendChild(o);
+    });
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var willOpen = !pop.classList.contains("open");
+      Array.prototype.forEach.call(modal.querySelectorAll(".ps-pop.open"), function(x){ x.classList.remove("open"); });
+      if(!willOpen) return;
+      pop.classList.add("open");
+      /* 팝업 안쪽 스크롤 영역에 잘리지 않도록 화면 기준으로 위치 계산 (아래 공간이 부족하면 위로) */
+      var r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+      var left = Math.max(12, Math.min(r.right - w, window.innerWidth - w - 12));
+      var top = (r.bottom + 4 + h <= window.innerHeight - 8) ? r.bottom + 4 : Math.max(8, r.top - 4 - h);
+      pop.style.left = left + "px"; pop.style.top = top + "px";
+    });
+    update();
+  }
+  /* 바깥을 누르거나 스크롤하면 모양 선택창 닫기 */
+  function closeShapePops(){
+    Array.prototype.forEach.call(modal.querySelectorAll(".ps-pop.open"), function(x){ x.classList.remove("open"); });
+  }
+  document.addEventListener("click", closeShapePops);
+  modal.querySelector(".pill-body").addEventListener("scroll", closeShapePops);
+  window.addEventListener("resize", closeShapePops);
+
+  document.getElementById("pmColor").innerHTML = opts(COLORS, "색 전체", "");
+  document.getElementById("pmShape").innerHTML = opts(SHAPES, "모양 전체", "");
+  enhanceColor(document.getElementById("pmColor"));
+  enhanceShape(document.getElementById("pmShape"));
+  document.getElementById("pmForm").innerHTML = opts(FORMS, "제형 전체", "");
+  enhanceForm(document.getElementById("pmForm"));
+
+  /* 큰 사진은 휴대폰에서 줄여서 전송 (각인 판독에 충분한 1600px) */
+  function shrink(file){
+    return new Promise(function(resolve){
+      if(!file || typeof createImageBitmap !== "function" || file.size < 1.5*1024*1024){ resolve(file); return; }
+      createImageBitmap(file).then(function(bmp){
+        var scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+        var c = document.createElement("canvas");
+        c.width = Math.round(bmp.width*scale); c.height = Math.round(bmp.height*scale);
+        c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+        if(bmp.close) bmp.close();
+        c.toBlob(function(b){ resolve(b && b.size ? b : file); }, "image/jpeg", 0.85);
+      }).catch(function(){ resolve(file); });
+    });
+  }
+
+  /* 알약 위치 찾기용 작은 사진 (768px) */
+  function small(file){
+    return new Promise(function(resolve){
+      if(!file || typeof createImageBitmap !== "function"){ resolve(null); return; }
+      createImageBitmap(file).then(function(bmp){
+        var scale = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+        var c = document.createElement("canvas");
+        c.width = Math.round(bmp.width*scale); c.height = Math.round(bmp.height*scale);
+        c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+        if(bmp.close) bmp.close();
+        c.toBlob(function(b){ resolve(b && b.size ? b : null); }, "image/jpeg", 0.8);
+      }).catch(function(){ resolve(null); });
+    });
+  }
+
+  /* 원본 해상도에서 알약 주변만 잘라냄 (사진 속 알약이 작을 때 각인이 크게 보이도록).
+     위치를 못 찾았거나 이미 알약이 크게 찍힌 사진이면 기존처럼 전체 사진 */
+  function cropToPill(file, box){
+    if(!file || !box || typeof createImageBitmap !== "function") return shrink(file);
+    return createImageBitmap(file).then(function(bmp){
+      var W = bmp.width, H = bmp.height;
+      var bw = (box[2] - box[0]) * W, bh = (box[3] - box[1]) * H;
+      var cx = (box[0] + box[2]) / 2 * W, cy = (box[1] + box[3]) / 2 * H;
+      /* 알약이 사진에 넓게 퍼져 있으면(여러 알 등) 잘라도 이득이 적고 가장자리가 잘릴 수 있어 전체 사진 */
+      if(bw > W * 0.4 || bh > H * 0.4){ if(bmp.close) bmp.close(); return shrink(file); }
+      /* 위치가 대략적이라 넉넉하게 (2.5배, 최소 짧은 변의 30%) */
+      var minSide = Math.min(W, H) * 0.3;
+      var w = Math.min(W, Math.max(bw * 2.5, minSide)), h = Math.min(H, Math.max(bh * 2.5, minSide));
+      if(w * h > W * H * 0.5){ if(bmp.close) bmp.close(); return shrink(file); }
+      var x = Math.min(Math.max(0, cx - w / 2), W - w), y = Math.min(Math.max(0, cy - h / 2), H - h);
+      var sc = Math.min(1, 1600 / Math.max(w, h));
+      var c = document.createElement("canvas");
+      c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+      c.getContext("2d").drawImage(bmp, x, y, w, h, 0, 0, c.width, c.height);
+      if(bmp.close) bmp.close();
+      return new Promise(function(resolve){
+        c.toBlob(function(b){ resolve(b && b.size ? b : file); }, "image/jpeg", 0.92);
+      });
+    }).catch(function(){ return shrink(file); });
+  }
+
+  /* 1) 작은 사진으로 알약 위치 찾기 → 2) 원본에서 그 부분만 잘라 판독용으로 보냄 (실패하면 전체 사진) */
+  function preparePhotos(){
+    return Promise.all([small(files.front), small(files.back)]).then(function(sm){
+      if(!sm[0] && !sm[1]) return null;
+      var fd = new FormData();
+      if(sm[0]) fd.append("front", sm[0], "front.jpg");
+      if(sm[1]) fd.append("back", sm[1], "back.jpg");
+      return fetch("/trip/api/pill/locate", { method:"POST", body:fd, credentials:"same-origin" })
+        .then(function(r){ return r.json(); }).catch(function(){ return null; });
+    }).catch(function(){ return null; }).then(function(loc){
+      var boxes = (loc && loc.ok && loc.boxes) || {};
+      return Promise.all([cropToPill(files.front, boxes.front), cropToPill(files.back, boxes.back)]);
+    });
+  }
+
+  /* 찍은 사진을 앞면/뒷면 칸에 넣고 미리보기 */
+  function setFile(side, f){
+    files[side] = f || null;
+    var box = modal.querySelector('.pill-shot[data-side="' + side + '"]');
+    if(!box) return;
+    var old = box.querySelector("img"); if(old) old.remove();
+    if(f){
+      var im = document.createElement("img");
+      im.src = URL.createObjectURL(f);
+      box.appendChild(im);
+    }
+  }
+
+  /* (예비) 휴대폰 카메라 앱 / 파일 선택 */
+  Array.prototype.forEach.call(modal.querySelectorAll(".pill-shot input"), function(inp){
+    inp.addEventListener("click", function(e){ e.stopPropagation(); });
+    inp.addEventListener("change", function(){
+      if(window.camPending) window.camPending.clear();
+      setFile(inp.getAttribute("data-side"), inp.files && inp.files[0]);
+    });
+  });
+
+  /* 휴대폰 기본 카메라 앱으로 촬영. 열기 직전 표시를 남겨 화면이 새로 열려도 팝업을 복원 */
+  function openPicker(side){
+    var inp = modal.querySelector('.pill-shot[data-side="' + side + '"] input');
+    if(!inp) return;
+    if(!IS_PC && window.camPending) window.camPending.set("pill", { mode: surveyMode ? "survey" : "home", side: side });
+    inp.click();
+  }
+
+  /* PC(터치 없는 기기): 카메라 대신 '사진 불러오기' (파일 선택 + 끌어다 놓기). 모바일은 그대로 */
+  /* PC/모바일 판단: 메인화면과 동일하게 User-Agent 기준 (Android·iPhone·iPad·iPod·케어내비 앱 = 모바일) */
+  var PILL_UA = navigator.userAgent || "";
+  var IS_PC = !(/Android|iPhone|iPad|iPod/i.test(PILL_UA) || PILL_UA.indexOf("CareNaviApp") !== -1);
+  if(IS_PC){
+    document.getElementById("pillSub").textContent = "알약의 앞·뒷면 사진을 불러오면 식약처 낱알식별 정보에서 비슷한 약을 찾아드립니다.";
+    document.getElementById("pillTipText").textContent = "알약 각인(글자)이 선명하게 보이는 사진을 불러와 주세요. 한 알도, 여러 알(최대 5알)도 됩니다. 사진은 저장되지 않습니다.";
+    var PC_LABEL = { front: ["🖼️ 앞면 사진 불러오기", "클릭 또는 끌어다 놓기"], back: ["🖼️ 뒷면 사진 불러오기", "선택 · 클릭 또는 끌어다 놓기"] };
+    Array.prototype.forEach.call(modal.querySelectorAll(".pill-shot"), function(box){
+      var side = box.getAttribute("data-side");
+      var inp = box.querySelector("input"); if(inp) inp.removeAttribute("capture");
+      var gal = box.querySelector(".pill-gal"); if(gal) gal.style.display = "none";
+      box.querySelector(".ps-t").textContent = PC_LABEL[side][0];
+      box.querySelector(".ps-s").textContent = PC_LABEL[side][1];
+      box.addEventListener("dragover", function(e){ e.preventDefault(); box.classList.add("drag"); });
+      box.addEventListener("dragleave", function(){ box.classList.remove("drag"); });
+      box.addEventListener("drop", function(e){
+        e.preventDefault(); box.classList.remove("drag");
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(f && (f.type || "").indexOf("image/") === 0) setFile(side, f);
+      });
+    });
+  }
+
+  Array.prototype.forEach.call(modal.querySelectorAll(".pill-shot"), function(box){
+    box.addEventListener("click", function(){ openPicker(box.getAttribute("data-side")); });
+    box.addEventListener("keydown", function(e){ if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openPicker(box.getAttribute("data-side")); } });
+  });
+
+  /* 모바일: 우측 하단 액자 버튼 → 갤러리에서 사진 선택 (칸 클릭=카메라와 분리) */
+  Array.prototype.forEach.call(modal.querySelectorAll(".pill-gal"), function(btn){
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var inp = modal.querySelector('.pill-gal-input[data-side="' + btn.getAttribute("data-side") + '"]');
+      if(inp) inp.click();
+    });
+    btn.addEventListener("keydown", function(e){ e.stopPropagation(); });
+  });
+
+  function showMsg(t){ msg.textContent = t || ""; msg.style.display = t ? "block" : "none"; }
+
+  /* 확인 중 로딩창 (사례검색과 같은 방식) */
+  var LOAD_MSGS = [
+    ["AI가 알약을 분석 중입니다", "사진 속 알약의 모양과 색을 확인하고 있습니다."],
+    ["각인을 읽고 있습니다", "알약에 새겨진 글자를 확인하고 있습니다."],
+    ["식약처 정보와 비교 중입니다", "등록된 알약 정보와 대조하고 있습니다."],
+    ["결과를 정리하고 있습니다", "비슷한 순서로 후보를 정리하고 있습니다."]
+  ];
+  var loadBox = document.getElementById("pillLoading");
+  var loadTimer = null;
+  function setLoad(i){
+    document.getElementById("pillLoadTitle").textContent = LOAD_MSGS[i][0];
+    document.getElementById("pillLoadSub").textContent = LOAD_MSGS[i][1];
+    Array.prototype.forEach.call(loadBox.querySelectorAll(".pill-step"), function(st, k){ st.classList.toggle("on", k <= i); });
+  }
+  function startLoading(){
+    var i = 0; setLoad(0); loadBox.classList.add("show");
+    clearInterval(loadTimer);
+    loadTimer = setInterval(function(){ if(i < LOAD_MSGS.length - 1){ i++; setLoad(i); } else { clearInterval(loadTimer); } }, 3500);
+  }
+  function stopLoading(){ clearInterval(loadTimer); loadBox.classList.remove("show"); }
+
+  function esc(s){ var d=document.createElement("div"); d.textContent = (s==null?"":s); return d.innerHTML; }
+
+  /* 후보 카드 목록 */
+  /* 후보 사진을 누르면 화면 가득 크게 보기. 아무 곳이나 누르거나 뒤로가기로 닫힘 */
+  var zoom = document.getElementById("pillZoom"), zoomPushed = false, zoomBackSkip = false;
+  function openZoom(src, cap){
+    zoom.querySelector("img").src = src;
+    zoom.querySelector(".pill-zoom-cap").textContent = cap || "";
+    zoom.classList.add("show");
+    try{ history.pushState({ pillZoom:1 }, ""); zoomPushed = true; }catch(e){ zoomPushed = false; }
+  }
+  function hideZoom(){ zoom.classList.remove("show"); zoom.querySelector("img").removeAttribute("src"); }
+  function closeZoom(){
+    if(!zoom.classList.contains("show")) return;
+    hideZoom();
+    if(zoomPushed){ zoomPushed = false; zoomBackSkip = true; try{ history.back(); }catch(e){ zoomBackSkip = false; } }
+  }
+  zoom.addEventListener("click", function(e){ e.stopPropagation(); closeZoom(); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape" && zoom.classList.contains("show")){ e.stopPropagation(); closeZoom(); } }, true);
+
+  function renderCards(box, cands){
+    box.innerHTML = "";
+    (cands || []).forEach(function(c){
+      var card = document.createElement("div");
+      card.className = "pill-card";
+      var prints = [c.print_front, c.print_back].filter(function(x){ return x; }).join(" / ");
+      card.innerHTML =
+        (c.image ? '<img src="' + esc(c.image) + '" alt="' + esc(c.name) + ' 사진 (눌러서 크게 보기)" loading="lazy">' : '') +
+        '<div class="pill-info">' +
+          '<div class="pill-name">' + (c.conf ? '<span class="pill-conf ' + esc(c.conf) + '">' + esc(c.conf_label) + '</span>' : '') + (c.dementia ? '<span class="pill-badge">치매약</span>' : '') + esc(c.name).replace(/\(/g, '<wbr>(') + '</div>' +
+          '<div class="pill-meta">' + (c.care && c.care.kind && !c.dementia ? '<span class="pill-kind">' + esc(c.care.kind) + '</span>' : '') + esc(c.company) + ' · ' + esc(c.etc_otc) + (c.cls ? ' · ' + esc(c.cls) : '') + '</div>' +
+          '<div class="pill-meta">각인 ' + esc(prints || "-") + ' · ' + esc(c.color) + ' · ' + esc(c.shape) + '</div>' +
+          '<div class="pill-actions">' +
+            '<a class="pill-link" href="' + esc(c.detail_url) + '" target="_blank" rel="noopener noreferrer">상세정보(효능·용법) ↗</a>' +
+          '</div>' +
+        '</div>';
+      var cimg = card.querySelector("img");
+      if(cimg) cimg.addEventListener("click", function(e){ e.stopPropagation(); openZoom(c.image, c.name); });
+      if(surveyMode && c.dementia){
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "pill-yes"; b.textContent = "치매약 복용 '예' 선택";
+        b.addEventListener("click", function(){
+          var r = document.querySelector('input[name="dementia"][value="y"]');
+          window.closePill();
+          if(r){ r.checked = true; r.dispatchEvent(new Event("change", {bubbles:true})); }
+        });
+        card.querySelector(".pill-actions").appendChild(b);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  /* ===== 돌봄 요약: 확인된 약 종류 → 검토해 볼 돌봄 → 사례검색으로 연결 =====
+     - 한 알이든 여러 알이든, 후보 수·확신도와 관계없이 알약마다 반드시 하나를 직접 고름
+       (실물과 같은 약인지 사람이 확인하는 단계) */
+  var careState = [], careBoxRef = null;
+  var SIGNAL_TEXT = {
+    "낙상 주의": "낙상 위험이 있음",
+    "어지럼 주의": "일어설 때 어지럼으로 넘어질 위험이 있음",
+    "야간 화장실 낙상 주의": "밤에 화장실을 자주 가 낙상 위험이 있음",
+    "식사·영양 관리": "식사와 영양 관리가 필요함",
+    "넘어짐 시 출혈 주의": "넘어지면 출혈 위험이 커 낙상 예방이 필요함",
+    "인지 지원": "치매로 인지 지원이 필요함"
+  };
+  /* 약 이름에서 괄호 속 성분명 빼기: 세틸란캡슐200mg(아세틸시스테인) → 세틸란캡슐200mg */
+  function shortName(n){ var t = String(n || "").replace(/\s*\([^)]*\)/g, "").trim(); return t || String(n || ""); }
+  function uniqList(a){ var o = []; a.forEach(function(x){ if(x && o.indexOf(x) === -1) o.push(x); }); return o; }
+  function careOf(st){
+    var c = st.cands;
+    if(!c.length) return { status:"none" };
+    if(st.sel !== null && c[st.sel]) return { status:"sel", care:c[st.sel].care };
+    return { status:"pick" };
+  }
+  function setupChoice(gi, glist, cands){
+    var st = careState[gi];
+    st.cands = cands; st.sel = null;
+    var old = glist.parentNode && glist.parentNode.querySelector(".pill-pick-help");
+    if(old) old.remove();
+    if(!cands.length) return;
+    var help = document.createElement("div");
+    help.className = "pill-pick-help";
+    help.textContent = "실물과 같은 약을 하나 골라 주세요.";
+    glist.parentNode.insertBefore(help, glist);
+    var cards = glist.querySelectorAll(".pill-card");
+    function paint(){
+      Array.prototype.forEach.call(cards, function(card, i){
+        card.classList.toggle("picked", st.sel === i);
+        var b = card.querySelector(".pill-pick");
+        if(b) b.textContent = (st.sel === i) ? "✓ 선택됨" : "이 약이 맞아요";
+      });
+    }
+    Array.prototype.forEach.call(cards, function(card, i){
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "pill-pick";
+      b.addEventListener("click", function(){
+        st.sel = (st.sel === i) ? null : i;
+        paint();
+        renderCare(careBoxRef);
+      });
+      card.querySelector(".pill-actions").appendChild(b);
+    });
+    paint();
+  }
+  function renderCare(box){
+    if(!box) return;
+    var kinds = [], names = [], sigMap = {}, pending = 0;
+    careState.forEach(function(st){
+      var r = careOf(st);
+      if(r.status === "pick"){ pending++; return; }
+      if(r.status === "none") return;
+      kinds.push(r.care.kind);
+      if(st.sel !== null && st.cands[st.sel]) names.push(st.cands[st.sel].name);
+      (r.care.signals || []).forEach(function(sg){
+        sigMap[sg] = sigMap[sg] || [];
+        if(sigMap[sg].indexOf(r.care.kind) === -1) sigMap[sg].push(r.care.kind);
+      });
+    });
+    var ukinds = uniqList(kinds), sigs = Object.keys(sigMap);
+    if(!ukinds.length && !pending){ box.style.display = "none"; return; }
+    box.style.display = "";
+    var h = '<div class="pill-care-t">💊 확인된 약 ' + kinds.length + '개</div>' +
+      '<div class="pill-care-kinds">' + (ukinds.length ? esc(ukinds.join(" · ")) : "-") +
+      (pending ? ' <span style="color:#92400e">(' + pending + '개는 아직 선택 안 됨)</span>' : '') + '</div>';
+    if(sigs.length){
+      h += '<div class="pill-care-sub">⚠️ 검토해 볼 돌봄</div><ul class="pill-care-sig">' +
+        sigs.map(function(sg){ return '<li>' + esc(sg) + ' (' + esc(sigMap[sg].join(", ")) + ')</li>'; }).join("") + '</ul>';
+    }
+    /* 조사서식(/survey)에서 연 경우: 사례검색을 새 창으로 열어 작성 중인 서식이 지워지지 않게 함 */
+    var onSurvey = !!(surveyMode && document.querySelector('[name="s_meds"]'));
+    /* 복용약 검색(홈)에서 연 경우만: 고른 약 이름(괄호 속 성분명 제외)을 자체조사 서식 '복용약' 칸으로 넘기는 버튼 */
+    var unames = uniqList(names.map(shortName));
+    h += '<button type="button" class="pill-care-go"' + (ukinds.length ? '' : ' disabled') + '>이 내용으로 돌봄 서비스 찾기</button>';
+    if(!surveyMode){
+      h += '<button type="button" class="pill-care-meds"' + (unames.length ? '' : ' disabled') + '>지자체 자체조사 서식 \'복용약\'에 넣기</button>';
+    }
+    h += '<div class="pill-care-note">약 종류로 본 참고 사항이며 의학적 판단이 아닙니다.' +
+      (onSurvey ? ' 사례검색은 작성 중인 조사서식이 지워지지 않도록 새 창으로 열립니다.' : '') + '</div>';
+    box.innerHTML = h;
+    var medsBtn = box.querySelector(".pill-care-meds");
+    if(medsBtn) medsBtn.addEventListener("click", function(){
+      /* 서버를 거치지 않고 주소 # 뒤에 담아 조사서식으로 이동 (# 뒤는 서버로 전송되지 않음) */
+      location.href = "/survey#pillmeds=" + encodeURIComponent(unames.join("\n"));
+    });
+    var go = box.querySelector(".pill-care-go");
+    if(go) go.addEventListener("click", function(){
+      var q = ukinds.join("·") + " 복용 중." + sigs.map(function(sg){ return " " + (SIGNAL_TEXT[sg] || sg) + "."; }).join("");
+      var url = "/desc?query=" + encodeURIComponent(q);
+      if(onSurvey){ window.open(url, "_blank", "noopener"); } else { location.href = url; }
+    });
+  }
+
+  /* 알약 1개 묶음: (여러 알이면 'N번 알약') → AI가 읽은 정보(수정 가능) → 안내 → 후보 */
+  function renderGroup(g, multi, onCands){
+    var f = g.features || {};
+    var impParts = String(f.imprint || "").split("/").map(function(x){ return x.trim(); }).filter(function(x){ return x; });
+    var el = document.createElement("div");
+    el.className = "pill-group";
+    el.innerHTML =
+      (multi ? '<div class="pill-group-title">' + g.no + '번 알약</div>' : '') +
+      '<div class="pill-feat"' + (multi ? ' style="margin-top:8px"' : '') + '>' +
+        '<div class="pill-feat-title">AI가 사진에서 읽은 정보</div>' +
+        (multi ? '<div style="height:6px"></div>' : '<div class="pill-feat-help">사진 속 알약과 글자가 다르면 직접 고친 뒤 아래 버튼을 눌러주세요.</div>') +
+        '<div class="pill-imp2">' +
+          '<label>앞면 글자<input type="text" class="g-impF" value="' + esc(impParts[0] || "") + '"></label>' +
+          '<label>뒷면 글자<input type="text" class="g-impB" placeholder="(없으면 비움)" value="' + esc(impParts.slice(1).join(" ")) + '"></label>' +
+        '</div>' +
+        '<div class="pill-feat-row">' +
+          '<select class="g-color">' + opts(COLORS, "색 전체", f.color) + '</select>' +
+          '<select class="g-shape">' + opts(SHAPES, "모양 전체", f.shape) + '</select>' +
+          '<select class="g-form">' + opts(FORMS, "제형 전체", f.form) + '</select>' +
+        '</div>' +
+        '<button type="button" class="pill-re">다시 검색</button>' +
+      '</div>' +
+      '<div class="pill-msg g-msg" style="display:none"></div>' +
+      '<div class="pill-list g-list"></div>';
+    enhanceColor(el.querySelector(".g-color"));
+    enhanceShape(el.querySelector(".g-shape"));
+    enhanceForm(el.querySelector(".g-form"));
+    var gmsg = el.querySelector(".g-msg"), glist = el.querySelector(".g-list");
+    function setGMsg(t){ gmsg.textContent = t || ""; gmsg.style.display = t ? "block" : "none"; }
+    setGMsg(g.message);
+    renderCards(glist, g.candidates);
+    if(onCands) onCands(glist, g.candidates || []);
+    el.querySelector(".pill-re").addEventListener("click", function(){
+      setGMsg(""); glist.innerHTML = "";
+      if(!joinImp(el.querySelector(".g-impF").value, el.querySelector(".g-impB").value)){
+        setGMsg("각인(알약에 새겨진 글자)을 입력해 주세요.");
+        markImpEmpty(el.querySelector(".g-impF"));
+        return;
+      }
+      fetch("/trip/api/pill/search", {
+        method:"POST", credentials:"same-origin",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ imprint: joinImp(el.querySelector(".g-impF").value, el.querySelector(".g-impB").value), color: el.querySelector(".g-color").value, shape: el.querySelector(".g-shape").value, form: el.querySelector(".g-form").value })
+      }).then(function(r){ return r.json(); }).then(function(d){
+        if(!d || !d.ok){ setGMsg((d && d.message) || "오류가 발생했습니다."); return; }
+        renderCards(glist, d.candidates);
+        if(onCands) onCands(glist, d.candidates || []);
+        setGMsg(d.message || "");
+      }).catch(function(){ setGMsg("연결 오류가 발생했습니다."); });
+    });
+    return el;
+  }
+
+  function handle(data){
+    if(!data || !data.ok){ showMsg((data && data.message) || "오류가 발생했습니다."); return; }
+    list.innerHTML = "";
+    var groups = data.groups || [];
+    if(groups.length > 1){
+      var note = document.createElement("div");
+      note.className = "pill-feat-help";
+      note.style.margin = "0 0 8px";
+      note.textContent = "사진 속 알약 " + groups.length + "개를 찾았습니다. 앞면과 뒷면은 놓인 자리로 짝을 맞췄습니다. 글자가 다르면 해당 알약의 정보를 고친 뒤 다시 검색해 주세요.";
+      list.appendChild(note);
+    }
+    careState = [];
+    var careBox = careBoxRef = document.createElement("div");
+    careBox.className = "pill-care";
+    groups.forEach(function(g, gi){
+      careState[gi] = { cands: [], sel: null };
+      list.appendChild(renderGroup(g, groups.length > 1, function(glist, cands){
+        setupChoice(gi, glist, cands);
+        renderCare(careBox);
+      }));
+    });
+    list.appendChild(careBox);
+    renderCare(careBox);
+    showMsg(data.message || "");
+    scrollToResult();
+  }
+
+  /* 모바일: 결과가 나오면 결과 위치로 자동 스크롤 (인식 정보 → 후보 목록 순) */
+  function scrollToResult(){
+    if(!window.matchMedia("(max-width:767px)").matches) return;
+    var body = modal.querySelector(".pill-body");
+    var target = (msg.style.display === "block") ? msg : list;
+    if(!body || !target) return;
+    setTimeout(function(){
+      var top = target.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
+      body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    }, 60);
+  }
+
+  goBtn.addEventListener("click", function(){
+    if(!files.front && !files.back){ showMsg("알약 사진을 먼저 찍어주세요."); return; }
+    goBtn.disabled = true; goBtn.textContent = "검색 중...";
+    showMsg(""); list.innerHTML = "";
+    startLoading();
+    preparePhotos().then(function(arr){
+      var fd = new FormData();
+      if(arr[0]) fd.append("front", arr[0], "front.jpg");
+      if(arr[1]) fd.append("back", arr[1], "back.jpg");
+      return fetch("/trip/api/pill/identify", { method:"POST", body:fd, credentials:"same-origin" });
+    }).then(function(r){ return r.json(); }).then(handle)
+      .catch(function(){ showMsg("연결 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."); })
+      .finally(function(){ stopLoading(); goBtn.disabled = false; goBtn.textContent = "검색"; });
+  });
+
+  /* survey=true 이면 치매약 후보에 '예 선택' 버튼 표시 (사전조사 화면) */
+  window.openPill = function(survey, restored){
+    surveyMode = !!survey;
+    if(!restored){
+      
+    }
+    files = { front:null, back:null };
+    Array.prototype.forEach.call(modal.querySelectorAll(".pill-shot"), function(b){
+      var im = b.querySelector("img"); if(im) im.remove();
+      Array.prototype.forEach.call(b.querySelectorAll("input"), function(inp){ inp.value = ""; });
+    });
+    setManual(false);
+    document.getElementById("pmImpF").value = "";
+    document.getElementById("pmImpB").value = "";
+    modal.classList.add("show");
+    document.body.style.overflow = "hidden";
+    /* 휴대폰 뒤로가기를 누르면 이전 화면(로그인)이 아니라 팝업만 닫히도록 기록 하나 추가 */
+    if(!historyPushed){
+      try{
+        /* 화면이 새로 열려 복원된 경우 이미 기록이 있으면 재사용 */
+        if(!(history.state && history.state.pillModal)) history.pushState({ pillModal: true }, "");
+        historyPushed = true;
+      }catch(e){}
+    }
+  };
+  var historyPushed = false;
+  function hidePill(){
+    if(window.camPending) window.camPending.clear();
+    modal.classList.remove("show");
+    document.body.style.overflow = "";
+  }
+  /* 조사서식(/survey) 진입 시: 복용약 검색에서 넘긴 약 이름을 '복용약' 칸에 덧붙임 */
+  (function receiveMeds(){
+    var m = /[#&]pillmeds=([^&]*)/.exec(location.hash || "");
+    if(!m) return;
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+    var input = document.querySelector('[name="s_meds"]');
+    if(!input) return;
+    /* '복용약' 칸은 자체조사 탭에 있으므로 그 탭으로 전환 */
+    if(typeof window.switchTab === "function"){ try{ window.switchTab("self"); }catch(e){} }
+    var add = [];
+    try{ add = decodeURIComponent(m[1]).split("\n"); }catch(e){ return; }
+    var cur = input.value.split(/\s*,\s*/).filter(function(x){ return x; });
+    add.forEach(function(n){ n = n.trim(); if(n && cur.indexOf(n) === -1) cur.push(n); });
+    input.value = cur.join(", ");
+    input.dispatchEvent(new Event("input", { bubbles:true }));
+    input.dispatchEvent(new Event("change", { bubbles:true }));
+    setTimeout(function(){
+      try{ input.scrollIntoView({ block:"center", behavior:"smooth" }); }catch(e){}
+      input.classList.add("pill-meds-flash");
+      setTimeout(function(){ input.classList.remove("pill-meds-flash"); }, 2500);
+    }, 400);
+  })();
+
+  window.closePill = function(){
+    hidePill();
+    /* X·바깥 클릭으로 닫으면 추가한 기록도 정리 */
+    if(historyPushed){ historyPushed = false; try{ history.back(); }catch(e){} }
+  };
+  /* 뒤로가기 → 팝업 닫기 (메인화면 유지) */
+  window.addEventListener("popstate", function(){
+    /* 사진 크게 보기가 열려 있으면 그것만 닫고 알약 팝업은 유지 */
+    if(zoomBackSkip){ zoomBackSkip = false; return; }   /* 사진을 눌러 닫으며 생긴 뒤로가기는 무시 */
+    if(zoomPushed){ zoomPushed = false; hideZoom(); return; }
+    if(historyPushed){ historyPushed = false; hidePill(); }
+  });
+  modal.addEventListener("click", function(e){ if(e.target === modal) window.closePill(); });
+
+  /* 카메라 앱을 쓰는 동안 휴대폰이 화면을 새로 열었으면 팝업을 다시 열고 '다시 촬영' 안내 */
+  var back = window.camPending && window.camPending.take("pill");
+  if(back){
+    window.openPill(back.extra && back.extra.mode === "survey", true);
+    window.camPending.notice(function(){ openPicker((back.extra && back.extra.side) || "front"); });
+  }
+})();
+</script>
+{% endraw %}''',
     "trip/base.html": r'''<!doctype html>
 <html lang="ko">
 <head>
@@ -15194,20 +16231,20 @@ function attachSuggest(inp,onPick,onClear){
   <h1>오늘 출장,<br>무엇부터 할까요?</h1>
 </div>
 <div class="tiles">
-  <a class="tile route" href="{{ url_for('trip.route_page') }}"><span class="no">01</span>
+  <a class="tile route" href="{{ url_for('trip.route_page') }}">
     <span class="ico">{{ icon('route') }}</span>
     <span><div class="t">최적 동선</div><div class="d">방문지를 넣으면 가장 빠른 순서로 짜드려요</div></span></a>
-  <a class="tile house" href="{{ url_for('trip.house_page') }}"><span class="no">02</span>
+  <a class="tile house" href="{{ url_for('trip.house_page') }}">
     <span class="ico">{{ icon('house') }}</span>
     <span><div class="t">집 미리보기</div><div class="d">주소 하나로 어떤 집인지 미리 알고 가요</div></span></a>
-  <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}"><span class="no">03</span>
+  <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}">
     <span class="ico">{{ icon('toilet') }}</span>
     <span><div class="t">내 근처 화장실</div><div class="d">지금 위치에서 가까운 공중화장실</div></span></a>
-  <a class="tile pill" href="{{ url_for('trip.pill_page') }}"><span class="no">04</span>
+  <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
 </div>
-<p class="note">이름·주민번호·전화번호는 받지 않고, 입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
+<p class="note">이름·주민번호·전화번호는 받지 않고,<br>입력한 주소·위치·사진은 저장하지 않아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
 {% block script %}
 <script>
@@ -15398,89 +16435,55 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 {% block theme %}t-pill{% endblock %}
 {% block body %}
 {{ topbar('복용약 찾기') }}
-<div class="cols"><div class="colA">
-<div class="card">
-  <div class="sec">알약 사진</div>
-  <p class="hint" style="margin:0 0 10px">앞면을 찍고, 그 자리에서 뒤집어 뒷면도 찍으면 더 정확해요. 여러 알도 한 번에 돼요(5알 이하 권장).</p>
-  <div class="shots">
-    <label class="shot" id="sFront"><input type="file" accept="image/*" capture="environment" data-k="front">
-      <span style="font-size:26px">+</span>앞면<small>필수</small></label>
-    <label class="shot" id="sBack"><input type="file" accept="image/*" capture="environment" data-k="back">
-      <span style="font-size:26px">+</span>뒷면<small>선택</small></label>
-  </div>
-  <button class="btn main" id="photoGo" type="button">사진으로 찾기</button>
-
-  <div class="or">또는 직접 입력</div>
-  <label class="l">각인 <span class="muted" style="font-weight:500">· 알약에 새겨진 글자, 앞/뒤는 / 로 구분</span></label>
-  <input type="text" id="imprint" placeholder="예: YH / 10" autocomplete="off">
-  <div class="grid2" style="margin-top:8px">
-    <select id="color"><option value="">색 (모름)</option>{% for c in colors %}<option>{{ c }}</option>{% endfor %}</select>
-    <select id="shape"><option value="">모양 (모름)</option>{% for s in shapes %}<option>{{ s }}</option>{% endfor %}</select>
-  </div>
-  <div class="toggle" style="margin-top:8px">
-    <input type="radio" name="form" id="f0" value="" checked><label for="f0">제형 전체</label>
-    {% for f in forms %}<input type="radio" name="form" id="f{{ loop.index }}" value="{{ f }}"><label for="f{{ loop.index }}">{{ f }}</label>{% endfor %}
-  </div>
-  <button class="btn" id="textGo" type="button" style="width:100%;margin-top:12px">직접 입력으로 찾기</button>
-  <div id="msg"></div>
-</div>
-</div><div class="colB">
-<div id="out"></div>
-<p class="hint">참고용 후보예요. 정확한 확인은 약사·의사에게 문의하세요. 사진은 저장하지 않아요.<br>자료: 식품의약품안전처 의약품 낱알식별 정보</p>
-</div></div>
 {% endblock %}
 {% block script %}
+{% include "trip/_pill_cn.html" %}
+<style>
+/* 케어내비 알약 확인과 내용·기능은 같고, 팝업 대신 출장 도구함 화면 안에 카드로 보여줌 */
+.t-pill .pill-modal{display:block!important;position:static;inset:auto;background:none;padding:0;z-index:auto;max-width:480px;margin:0 auto}
+.t-pill .pill-box{max-width:none;max-height:none;border:1px solid var(--line);border-radius:var(--r);box-shadow:none;overflow:visible;color:var(--ink)}
+.t-pill .pill-head{border-bottom:none;padding:16px 16px 4px}
+.t-pill .pill-head>div:first-child,.t-pill .pill-head-btns{display:none}
+.t-pill .pill-sub{margin-top:0;color:var(--sub)}
+.t-pill .pill-body{overflow:visible;padding:14px 16px 16px}
+.t-pill .pill-foot{border-top:1px solid var(--line);color:var(--muted)}
+.t-pill .pill-shot{border-radius:14px}
+.t-pill .pill-go,.t-pill .pill-tab{font-family:inherit}
+.t-pill .pill-go{height:52px!important;border-radius:14px!important}
+.t-pill .pill-card{border-color:var(--line);border-radius:14px}
+/* 출장 도구함에는 케어내비 사례검색·조사서식이 없어서 연결 버튼은 숨김 */
+.pill-care-go,.pill-care-meds{display:none!important}
+@media (min-width:960px){
+  .t-pill .pill-modal{max-width:760px}
+  .t-pill .pill-shot{height:180px}
+  .t-pill .pill-sub,.t-pill .pill-tip{font-size:15px}
+  .t-pill .pill-tab{height:48px!important;font-size:16px!important}
+  .t-pill .pill-shot{font-size:16px}
+  .t-pill .pill-shot small{font-size:13px}
+  .t-pill .pill-go{height:58px!important;font-size:18px!important}
+  .t-pill .pill-feat-title{font-size:15px}
+  .t-pill .pill-feat-help,.t-pill .pill-imp2 label{font-size:13.5px}
+  .t-pill .pill-imp2 input{height:46px;font-size:16px}
+  .t-pill .ps-btn{height:44px!important;font-size:15px!important}
+  .t-pill .pill-name{font-size:16px}
+  .t-pill .pill-meta{font-size:13.5px}
+  .t-pill .pill-foot{font-size:12.5px}
+}
+</style>
 <script>
-const $=s=>document.querySelector(s);
-const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const files={};
-// 큰 사진은 휴대폰에서 줄여서 보냄 (긴 변 1600px)
-function shrink(file){return new Promise(res=>{const img=new Image();img.onload=()=>{const s=Math.min(1,1600/Math.max(img.width,img.height));
-  const c=document.createElement("canvas");c.width=img.width*s;c.height=img.height*s;c.getContext("2d").drawImage(img,0,0,c.width,c.height);
-  c.toBlob(b=>res(b),"image/jpeg",.9);};img.src=URL.createObjectURL(file);});}
-document.querySelectorAll(".shot input").forEach(inp=>inp.onchange=async e=>{
-  const f=e.target.files[0];if(!f)return;files[inp.dataset.k]=await shrink(f);
-  const box=inp.parentElement;box.querySelectorAll("img").forEach(i=>i.remove());
-  const im=document.createElement("img");im.src=URL.createObjectURL(files[inp.dataset.k]);box.appendChild(im);});
-
-function cand(c){
-  const sig=(c.care&&c.care.signals||[]).map(s=>`<span class="chip sig">${esc(s)}</span>`).join("");
-  return `<div class="pc">${c.image?`<img src="${esc(c.image)}" alt="" loading="lazy">`:""}
-    <div style="min-width:0"><div class="nm">${esc(c.name)}<span class="conf ${c.conf}">${esc(c.conf_label)}</span></div>
-    <div class="co">${esc(c.company)} · ${esc(c.etc_otc||"")}</div>
-    <div class="chips" style="margin-top:6px"><span class="chip">${esc(c.care?c.care.kind:c.cls)}</span>${sig}</div>
-    <a href="${esc(c.detail_url)}" target="_blank" rel="noopener" style="font-size:12.5px;color:var(--pill);font-weight:600;display:inline-block;margin-top:6px">식약처 상세 보기 ›</a></div></div>`;
-}
-function group(g){
-  const f=g.features||{};
-  return `<div class="card"><div class="sec">알약 ${g.no}</div>
-    <div class="gh">읽은 각인 <b>${esc(f.imprint||"없음")}</b>${f.color?" · "+esc(f.color):""}${f.shape?" · "+esc(f.shape):""}</div>
-    ${g.candidates.length?g.candidates.map(cand).join(""):`<p class="hint" style="margin:0">${esc(g.message)}</p>`}</div>`;
-}
-function busy(b,on,label){b.disabled=on;b.innerHTML=on?'<span class="spin" style="border-color:rgba(139,85,214,.3);border-top-color:#8b55d6"></span> 찾는 중':label;}
-function err(m){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(m)}</div>`;}
-
-$("#photoGo").onclick=async()=>{
-  $("#msg").innerHTML="";if(!files.front&&!files.back)return err("앞면 사진을 찍어주세요.");
-  const fd=new FormData();for(const k in files)fd.append(k,files[k],k+".jpg");
-  const b=$("#photoGo");b.disabled=true;b.innerHTML='<span class="spin"></span> 사진 읽는 중';
-  try{const r=await (await fetch("/trip/api/pill/identify",{method:"POST",body:fd})).json();
-    if(!r.ok)return err(r.message);
-    $("#out").innerHTML=(r.message?`<div class="err" style="background:var(--warn-bg);color:var(--warn)">${esc(r.message)}</div>`:"")+(r.groups.length?r.groups.map(group).join(""):"");
-    $("#out").scrollIntoView({behavior:"smooth"});}
-  catch(e){err("연결에 실패했어요.");}
-  finally{b.disabled=false;b.textContent="사진으로 찾기";}
-};
-$("#textGo").onclick=async()=>{
-  $("#msg").innerHTML="";const b=$("#textGo");busy(b,true);
-  const body={imprint:$("#imprint").value,color:$("#color").value,shape:$("#shape").value,form:(document.querySelector('input[name=form]:checked')||{}).value||""};
-  try{const r=await (await fetch("/trip/api/pill/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
-    if(!r.ok)return err(r.message);
-    $("#out").innerHTML=`<div class="card"><div class="sec">찾은 약</div>${r.candidates.length?r.candidates.map(cand).join(""):`<p class="hint" style="margin:0">${esc(r.message)}</p>`}</div>`;
-    $("#out").scrollIntoView({behavior:"smooth"});}
-  catch(e){err("연결에 실패했어요.");}
-  finally{busy(b,false,"직접 입력으로 찾기");}
-};
+(function(){
+  // 팝업 대신 화면 안에 펼쳐 둠: 열 때 기록을 추가하지 않게 하고, 화면 스크롤도 막지 않음
+  var wrap=document.querySelector(".wrap"),modal=document.getElementById("pillModal");
+  if(!modal)return;
+  wrap.appendChild(modal);
+  try{ if(!(history.state&&history.state.pillModal)) history.replaceState({pillModal:true},""); }catch(e){}
+  if(!modal.classList.contains("show")) openPill(false);
+  document.body.style.overflow="";
+  window.closePill=function(){location.href="{{ url_for('trip.home') }}";};
+  // 혹시 닫히면 다시 펼침
+  new MutationObserver(function(){ if(!modal.classList.contains("show")){ modal.classList.add("show"); document.body.style.overflow=""; } })
+    .observe(modal,{attributes:true,attributeFilter:["class"]});
+})();
 </script>
 {% endblock %}
 ''',
@@ -15708,6 +16711,7 @@ function drawMap(r){
 </div></div>
 {% endblock %}
 {% block script %}
+{% if kakao_js_key %}<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>{% endif %}
 <script>
 const $=s=>document.querySelector(s);
 const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -15719,12 +16723,45 @@ function search(lat,lng){
     done();
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
-      <div class="trow"><div class="d"><b>${km(t.distance)}</b><span>걸어서 ${t.walk_min}분</span></div>
+      <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
         <div class="body"><div class="nm">${esc(t.name||"공중화장실")}</div><div class="ad">${esc(t.address)}</div>
+          <div class="dl"><b>${km(t.distance)}</b> · 걸어서 ${t.walk_min}분</div>
           <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
           ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
         <a class="btn sm" href="https://map.kakao.com/link/to/${encodeURIComponent(t.name||"공중화장실")},${t.lat},${t.lng}" target="_blank" rel="noopener">길안내</a></div>`).join("")}</div>`;
+    watchRv();
   }).catch(()=>{done();$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';});
+}
+/* 작은 로드뷰: 안전로드 검색결과와 같은 방식 (100m 안 로드뷰 → 화장실 쪽으로 카메라 회전, 화면 밖이면 내림) */
+let rvObs=null;
+function initRv(box){
+  const pano=box.querySelector(".sr-rv-pano"),msg=box.querySelector(".sr-rv-msg"),lat=+box.dataset.lat,lng=+box.dataset.lng;
+  if(!(window.kakao&&kakao.maps)){msg.textContent="로드뷰 없음";return;}
+  kakao.maps.load(()=>{
+    try{
+      const cl=new kakao.maps.RoadviewClient(),rv=new kakao.maps.Roadview(pano),pos=new kakao.maps.LatLng(lat,lng);
+      cl.getNearestPanoId(pos,100,id=>{
+        if(id===null){msg.textContent="로드뷰 없음";return;}
+        msg.style.display="none";rv.setPanoId(id,pos);
+        kakao.maps.event.addListener(rv,"init",()=>{try{const p=rv.getPosition();if(!p)return;
+          const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(lng-p.getLng())*R;
+          const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
+          rv.setViewpoint({pan:((Math.atan2(y,x)*180/Math.PI)+360)%360,tilt:0,zoom:0});}catch(e){}});
+      });
+    }catch(e){msg.textContent="로드뷰 없음";}
+  });
+}
+function watchRv(){
+  const boxes=document.querySelectorAll("#list .sr-rv");
+  if(rvObs)rvObs.disconnect();
+  if(!("IntersectionObserver" in window)){boxes.forEach(initRv);return;}
+  rvObs=new IntersectionObserver(ents=>ents.forEach(en=>{
+    const b=en.target;
+    if(en.isIntersecting&&b.dataset.loaded!=="1"){b.dataset.loaded="1";initRv(b);}
+    else if(!en.isIntersecting&&b.dataset.loaded==="1"){b.dataset.loaded="0";b.querySelector(".sr-rv-pano").innerHTML="";
+      const m=b.querySelector(".sr-rv-msg");m.style.display="";m.textContent="로드뷰";}
+  }),{rootMargin:"160px 0px"});
+  boxes.forEach(b=>rvObs.observe(b));
 }
 function done(){const b=$("#find");b.disabled=false;b.textContent="지금 위치에서 찾기";}
 $("#find").onclick=()=>{
