@@ -15447,7 +15447,7 @@ function attachSuggest(inp,onPick,onClear){
 .pill-steps{ display:flex; gap:6px; width:150px; margin:16px auto 0; }
 .pill-step{ flex:1; height:6px; border-radius:999px; background:#e5e7eb; transition:background .3s; }
 .pill-step.on{ background:#8b55d6; }
-.pill-load-ci{ width:132px; margin-top:28px; opacity:0.82; display:block; }
+.pill-load-ci{ width:auto; max-width:96px; max-height:36px; object-fit:contain; margin-top:24px; opacity:0.82; display:block; }
 .pill-foot{ flex:none; padding:8px 16px; border-top:1px solid #f1f5f9; font-size:11px; color:#9ca3af; line-height:1.5; word-break:keep-all; }
 @media (max-width:480px){
   .pill-shot{ height:118px; }
@@ -16102,13 +16102,12 @@ function attachSuggest(inp,onPick,onClear){
 
   /* 모바일: 결과가 나오면 결과 위치로 자동 스크롤 (인식 정보 → 후보 목록 순) */
   function scrollToResult(){
-    if(!window.matchMedia("(max-width:767px)").matches) return;
-    var body = modal.querySelector(".pill-body");
+    /* 출장 도구함은 팝업이 아니라 화면 안에 있으므로 화면 전체를 결과 위치로 스크롤 */
     var target = (msg.style.display === "block") ? msg : list;
-    if(!body || !target) return;
+    if(!target) return;
     setTimeout(function(){
-      var top = target.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
-      body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      var top = target.getBoundingClientRect().top + window.pageYOffset - 12;
+      window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
     }, 60);
   }
 
