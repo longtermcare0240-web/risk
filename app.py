@@ -15419,6 +15419,10 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .seg label{flex:1;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--sub);cursor:pointer;transition:background .15s,color .15s}
 .seg input:checked+label{background:#fff;color:var(--route);font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 
+.leaflet-tooltip.mlab{background:#fff;border:0;border-radius:8px;padding:2px 7px;font:700 11.5px/1.35 Pretendard,"Noto Sans CJK KR",sans-serif;color:#1b1d1c;box-shadow:0 1px 5px rgba(0,0,0,.22);white-space:nowrap}
+.leaflet-tooltip.mlab:before{display:none}
+.leaflet-tooltip.mlab.se{color:#fff;background:#1b1d1c}
+
 /* ---------- PC 화면: 넓게, 입력은 왼쪽·결과는 오른쪽 ---------- */
 .ph{display:none}
 @media (min-width:960px){
@@ -17129,6 +17133,13 @@ function focusPt(i,noHist){
   if(innerWidth<960)box.scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 
+function pinName(p){
+  let t=String(p.label||p.input||"").trim();
+  if(!t||t==="현재 위치")return t||"출발";
+  const w=shortAddr(t).split(" ");
+  if(/\d/.test(t)&&w.length>2)t=w.slice(-2).join(" ");   // 주소면 끝 두 단어 (예: 누동길 23)
+  return t.length>10?t.slice(0,10)+"…":t;
+}
 function drawMap(r){
   const el=$("#map"),o=r.order,last=o.length-1;
   RV=null;MARK=[];ALL=[];FOCUS=null;
@@ -17140,6 +17151,8 @@ function drawMap(r){
     o.forEach((p,i)=>{if(i===last&&r.return_to_start)return;
       const t=i===0?"출발":i===last?"도착":i;
       MARK[i]=L.marker([p.lat,p.lng],{icon:L.divIcon({className:"",html:`<div style="background:${i===0||i===last?"#1b1d1c":"#2f6fed"};color:#fff;border:3px solid #fff;border-radius:999px;min-width:30px;height:30px;padding:0 6px;display:flex;align-items:center;justify-content:center;font:800 12px Pretendard,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.25)">${t}</div>`,iconSize:[30,30],iconAnchor:[15,15]})}).addTo(m).on("click",()=>focusPt(i));
+      // 번호 위에 짧은 이름표 (장소명, 없으면 주소 끝 두 단어)
+      MARK[i].bindTooltip(esc(pinName(p)),{permanent:true,direction:"top",offset:[0,-16],className:"mlab"+(i===0||i===last?" se":"")});
       all.push([p.lat,p.lng]);});
     ALL=all;m.fitBounds(all,{padding:[28,28]});
     return;
