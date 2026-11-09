@@ -14673,7 +14673,6 @@ TRIP_CRIME_LAYERS = [  # (키, 이름, 기본 IF 번호, 스타일)
     ("BRGLR", "강도", "IF_0086", "A2SM_CrmnlHspot_Tot_Brglr"),
     ("VIOLN", "폭력", "IF_0083", "A2SM_CrmnlHspot_Tot_Violn"),
     ("THEFT", "절도", "IF_0084", "A2SM_CrmnlHspot_Tot_Theft"),
-    ("MURDER", "살인", "IF_0082", "A2SM_CrmnlHspot_Tot_Murder"),
 ]
 
 
@@ -15160,6 +15159,8 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .stop{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .stop .n{width:28px;height:28px;flex:none;border-radius:50%;background:var(--route-bg);color:var(--route);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
 .stop .x{width:38px;height:48px;flex:none;border:none;background:none;color:var(--muted);font-size:20px;cursor:pointer}
+.map .basemap{filter:grayscale(1) brightness(1.06) contrast(.85);opacity:.75}
+.map .crimelayer{filter:saturate(2.2) contrast(1.35) drop-shadow(0 0 1px rgba(150,0,20,.45))}
 .map{height:240px;border-radius:14px;overflow:hidden;background:#e9e7e0;border:1px solid var(--line)}
 .tl{list-style:none;margin:0;padding:0}
 .tl li{position:relative;display:flex;gap:12px;padding:0 0 14px 0}
@@ -16732,7 +16733,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   <div class="map" id="safeMap">{% if not safemap_key %}<div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--sub);font-size:13px;padding:16px">생활안전지도 키를 넣으면<br>집 주변 범죄주의구간이 색으로 겹쳐져요</div>{% endif %}</div>
   <div class="legend">낮음<span class="bar2"></span>높음 (10등급)</div>
   <p class="hint" id="safeNote">치안 정보 불러오는 중</p>
-  <p class="hint">5대 범죄(살인·강도·성폭력·절도·폭력) 발생 밀도예요.<br>전체는 합산, 나머지는 종류별이에요.<br>등급이 높다고 지금 위험하다는 뜻은 아니에요.<br>진한 길이 집 앞에 있으면 야간·단독 방문은 피하세요.</p>
+  <p class="hint">5대 범죄(살인·강도·성폭력·절도·폭력) 발생 밀도예요.<br>전체는 5대 범죄 합산, 나머지는 종류별이에요.<br>등급이 높다고 지금 위험하다는 뜻은 아니에요.<br>진한 길이 집 앞에 있으면 야간·단독 방문은 피하세요.</p>
 </div>
 
 <div class="card">
@@ -16780,7 +16781,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
   if(!window.L)return;
   var c=[{{ loc.lat }},{{ loc.lng }}];
   var m=L.map("safeMap",{zoomControl:false,attributionControl:false}).setView(c,16);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(m);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:"basemap"}).addTo(m);
   // 생활안전지도 범죄주의구간(전체) WMS. 공식 예제: openapi2/IF_0087_WMS, serviceKey, 파라미터는 소문자
   // 생활안전지도 범죄주의구간 WMS. 종류별로 IF 번호·스타일이 다름 (서버 설정 TRIP_CRIME_LAYERS)
   var LAYERS={{ crime_layers|tojson }},note=document.getElementById("safeNote"),cur=null;
@@ -16789,7 +16790,7 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
     if(cur)m.removeLayer(cur);
     note.style.color="";note.textContent=L0.name+" 불러오는 중";
     cur=L.tileLayer.wms(L0.url,{layers:"A2SM_CRMNLHSPOT_TOT",styles:L0.style,
-      format:"image/png",transparent:true,serviceKey:"{{ safemap_key }}",opacity:.85});
+      format:"image/png",transparent:true,serviceKey:"{{ safemap_key }}",opacity:1,className:"crimelayer"});
     cur.on("tileerror",function(){bad++;});
     cur.on("tileload",function(){ok++;});
     cur.on("load",function(){
