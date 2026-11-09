@@ -17136,8 +17136,10 @@ function focusPt(i,noHist){
 function pinName(p){
   let t=String(p.label||p.input||"").trim();
   if(!t||t==="현재 위치")return t||"출발";
-  const w=shortAddr(t).split(" ");
-  if(/\d/.test(t)&&w.length>2)t=w.slice(-2).join(" ");   // 주소면 끝 두 단어 (예: 누동길 23)
+  t=shortAddr(t);   // 맨 앞 시·도는 항상 뺌 (전북특별자치도 익산시 모현동 → 익산시 모현동)
+  const w=t.split(" ");
+  const isAddr=/\d/.test(t)||/(시|군|구|읍|면|동|리|로|길)$/.test(w[w.length-1]);
+  if(isAddr&&w.length>2)t=w.slice(-2).join(" ");   // 주소면 끝 두 단어 (예: 누동길 23)
   return t.length>10?t.slice(0,10)+"…":t;
 }
 function drawMap(r){
