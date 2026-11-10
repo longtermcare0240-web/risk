@@ -17292,26 +17292,33 @@ let BIG=null,BIGC=null;
 function bearingTo(p,lat,lng){const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(lng-p.getLng())*R;
   const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
   return ((Math.atan2(y,x)*180/Math.PI)+360)%360;}
-function openBig(t){
+function openBig(t,noHist){
   $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=shortAddr(t.address||"");
-  $("#bigNav").onclick=()=>{closeBig();openNav(t);};
+  $("#bigNav").onclick=()=>{closeBig(true);openNav(t);};
   $("#big").classList.add("on");
+  // 폰 뒤로가기를 누르면 창만 닫히게 기록을 하나 쌓음
+  if(!noHist)history.pushState({tripBig:1},"");
   const msg=$("#bigMsg");msg.style.display="";msg.textContent="로드뷰 불러오는 중";
   if(!(window.kakao&&kakao.maps)){msg.textContent="로드뷰를 불러오지 못했어요";return;}
   kakao.maps.load(()=>{
-    const pos=new kakao.maps.LatLng(t.lat,t.lng);
-    if(!BIG){BIG=new kakao.maps.Roadview($("#bigRv"));BIGC=new kakao.maps.RoadviewClient();
-      kakao.maps.event.addListener(BIG,"init",()=>{const p=BIG.getPosition();if(p&&BIG._t)BIG.setViewpoint({pan:bearingTo(p,BIG._t[0],BIG._t[1]),tilt:0,zoom:0});msg.style.display="none";});}
-    BIG._t=[t.lat,t.lng];
+    // 작은 로드뷰와 똑같이: 매번 새로 만들고, 사진이 다 열린 뒤(init) 화장실 쪽으로 카메라를 돌림
+    const box=$("#bigRv");box.innerHTML="";
+    const rv=new kakao.maps.Roadview(box),cl=new kakao.maps.RoadviewClient(),pos=new kakao.maps.LatLng(t.lat,t.lng);
+    const aim=()=>{try{const p=rv.getPosition();if(!p)return;
+      rv.setViewpoint({pan:bearingTo(p,t.lat,t.lng),tilt:0,zoom:0});msg.style.display="none";}catch(e){}};
+    kakao.maps.event.addListener(rv,"init",aim);
     (function tryR(rs){
       if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
-      BIGC.getNearestPanoId(pos,rs[0],id=>{if(id===null)return tryR(rs.slice(1));
-        BIG.setPanoId(id,pos);BIG.relayout&&BIG.relayout();
-        setTimeout(()=>{const p=BIG.getPosition();if(p){BIG.setViewpoint({pan:bearingTo(p,t.lat,t.lng),tilt:0,zoom:0});msg.style.display="none";}},700);});
+      cl.getNearestPanoId(pos,rs[0],id=>{if(id===null)return tryR(rs.slice(1));rv.setPanoId(id,pos);});
     })([100,200]);
   });
 }
-function closeBig(){$("#big").classList.remove("on");}
+function closeBig(viaCode){
+  if(!$("#big").classList.contains("on"))return;
+  if(history.state&&history.state.tripBig)history.back();   // popstate에서 닫힘
+  else $("#big").classList.remove("on");
+}
+window.addEventListener("popstate",()=>{$("#big").classList.remove("on");});
 document.addEventListener("click",e=>{if(e.target.id==="big"||e.target.id==="bigX")closeBig();});
 function done(){const b=$("#find");b.disabled=false;b.textContent="지금 위치에서 찾기";}
 $("#find").onclick=()=>{
