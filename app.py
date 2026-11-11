@@ -17571,7 +17571,7 @@ function bearingTo(p,lat,lng){const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(l
   const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
   return ((Math.atan2(y,x)*180/Math.PI)+360)%360;}
 function openBig(t,noHist){
-  $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=shortAddr(t.address||"");
+  $("#bigT").textContent=t.name||"공중화장실";$("#bigA").textContent=shortAddr(t.address||"")+(t.updated?` · ${t.updated.replace("-",".")} 자료`:"");
   $("#bigNav").onclick=()=>{closeBig(true);openNav(t);};
   $("#big").classList.add("on");
   // 폰 뒤로가기를 누르면 창만 닫히게 기록을 하나 쌓음
