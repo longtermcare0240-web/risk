@@ -16979,20 +16979,31 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&autoload=false"></script>
 <script>
 (function(){
-  var LAT={{ loc.lat }},LNG={{ loc.lng }},msg=document.getElementById("rvMsg");
+  var LAT={{ loc.lat }},LNG={{ loc.lng }},msg=document.getElementById("rvMsg"),
+      PIN_NAME={{ (((bld and bld.name) or loc.label)|short_addr)|tojson }};
   function bearing(a,b){var r=Math.PI/180,y=Math.sin((b.getLng()-a.getLng())*r)*Math.cos(b.getLat()*r),
     x=Math.cos(a.getLat()*r)*Math.sin(b.getLat()*r)-Math.sin(a.getLat()*r)*Math.cos(b.getLat()*r)*Math.cos((b.getLng()-a.getLng())*r);
     return (Math.atan2(y,x)/r+360)%360;}
   if(!window.kakao||!kakao.maps){msg.innerHTML="로드뷰를 불러오지 못했어요";return;}
   kakao.maps.load(function(){
     var t=new kakao.maps.LatLng(LAT,LNG),el=document.getElementById("roadview"),
-        rv=new kakao.maps.Roadview(el),cl=new kakao.maps.RoadviewClient();
+        rv=new kakao.maps.Roadview(el),cl=new kakao.maps.RoadviewClient(),
+        pe=document.createElement("div"),ov;
+    // 로드뷰 속 이 집 위치 팻말 (이름 · 거리 ▼)
+    pe.className="rvpin";ov=new kakao.maps.CustomOverlay({position:t,content:pe,xAnchor:.5,yAnchor:1});
     (function tryR(rs){
       if(!rs.length){msg.style.display="none";var m=new kakao.maps.Map(el,{center:t,level:3});new kakao.maps.Marker({position:t,map:m});return;}
       cl.getNearestPanoId(t,rs[0],function(id){
         if(id===null)return tryR(rs.slice(1));
         rv.setPanoId(id,t);
-        kakao.maps.event.addListener(rv,"init",function(){rv.setViewpoint({pan:bearing(rv.getPosition(),t),tilt:5,zoom:0});msg.style.display="none";});
+        kakao.maps.event.addListener(rv,"init",function(){
+          var q=rv.getPosition();if(!q)return;
+          var R=Math.PI/180,x=Math.pow(Math.sin((LAT-q.getLat())*R/2),2)+Math.cos(q.getLat()*R)*Math.cos(LAT*R)*Math.pow(Math.sin((LNG-q.getLng())*R/2),2),
+              d=Math.round(12742000*Math.asin(Math.sqrt(x))),nm=PIN_NAME.length>12?PIN_NAME.slice(0,12)+"…":PIN_NAME;
+          pe.innerHTML="<b></b><i></i>";pe.firstChild.textContent=nm+(d>=10?" · "+(d<1000?d+"m":(d/1000).toFixed(1)+"km"):"");
+          ov.setMap(rv);
+          var vp=null;try{vp=rv.getProjection().viewpointFromCoords(ov.getPosition(),ov.getAltitude());}catch(e){}
+          rv.setViewpoint(vp?{pan:vp.pan,tilt:vp.tilt,zoom:0}:{pan:bearing(q,t),tilt:5,zoom:0});msg.style.display="none";});
       });
     })([50,100,200]);
   });
@@ -17123,6 +17134,10 @@ document.getElementById("today").textContent=(d.getMonth()+1)+"월 "+d.getDate()
 </div><div class="colB">
 <div id="result" style="display:none"></div>
 <div class="ph" id="ph"><p>방문지를 넣고 <b>최적 동선 찾기</b>를 누르면<br>여기에 순서와 지도가 나와요</p></div>
+</div></div>
+<div class="big" id="big"><div class="bbox">
+  <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
+  <div class="bigrv"><div id="bigRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="bigMsg"></div></div>
 </div></div>
 {{ src([("경로·시간","카카오모빌리티 길찾기"),("주소 검색·로드뷰","카카오맵"),("지도","© OpenStreetMap")]) }}
 {% endblock %}
@@ -17287,7 +17302,7 @@ function show(r){
       <div class="sm">${km(r.total_distance)} · ${r.fixed?"":r.orders_checked+"가지 순서 비교 · "}${saved}</div>
       ${r.fixed?'<button type="button" class="btn sm back2" onclick="show(bestRes)">최적 순서로 되돌리기</button>':""}</div>
     <div class="card" style="padding:10px"><div class="map" id="map"></div>
-      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b></div><div class="macts"><a id="miniHouse" class="ma">집 미리보기</a><a id="miniBig" class="ma" target="_blank" rel="noopener">로드뷰 크게</a><button type="button" class="ma" onclick="closeFocus()">전체 경로</button></div>
+      <div id="mini" class="mini" style="display:none"><div class="mh"><b id="miniT"></b></div><div class="macts"><a id="miniHouse" class="ma">집 미리보기</a><a id="miniBig" class="ma" href="#">로드뷰 크게</a><button type="button" class="ma" onclick="closeFocus()">전체 경로</button></div>
         <div class="minirv"><div id="miniRv" style="position:absolute;inset:0"></div><div class="mrmsg" id="miniMsg"></div></div></div>
       <p class="hint" style="margin:8px 4px 0">번호를 누르면 그곳이 어딘지 지도와 로드뷰로 보여줘요.<br>같은 번호를 다시 누르거나 '전체 경로'를 누르면 원래대로 돌아가요.</p></div>
     <div class="card"><ul class="tl">${tl}</ul></div>
@@ -17297,7 +17312,36 @@ function show(r){
   if(!r.fixed)$("#result").scrollIntoView({behavior:"smooth"});
 }
 
-let MAP=null,MARK=[],RV=null,RVC=null,ALL=[],FOCUS=null;
+let MAP=null,MARK=[],RV=null,RVC=null,RVPIN=null,ALL=[],FOCUS=null;
+/* 로드뷰 속 방문지 팻말: 카메라를 팻말 정면으로 */
+function aimRv(rv,ov,g){try{const q=rv.getPosition();if(!q)return;ov.setMap(rv);
+  let vp=null;try{vp=rv.getProjection().viewpointFromCoords(ov.getPosition(),ov.getAltitude());}catch(e){}
+  rv.setViewpoint(vp?{pan:vp.pan,tilt:vp.tilt,zoom:0}:{pan:bearing({lat:q.getLat(),lng:q.getLng()},g),tilt:5,zoom:0});}catch(e){}}
+function distM(a1,o1,a2,o2){const R=Math.PI/180,x=Math.sin((a2-a1)*R/2)**2+Math.cos(a1*R)*Math.cos(a2*R)*Math.sin((o2-o1)*R/2)**2;return 12742000*Math.asin(Math.sqrt(x));}
+/* 큰 로드뷰 (앱 안): 화장실과 같은 방식. 매번 새로 만들고, 폰 뒤로가기로 닫힘 */
+function openBigRv(p,nm){
+  $("#bigT").textContent=nm;$("#bigA").textContent=shortAddr(p.road_address||p.input||"");
+  $("#big").classList.add("on");history.pushState({tripFocus:FOCUS,tripBig:1},"");
+  const msg=$("#bigMsg");msg.style.display="";msg.textContent="로드뷰 불러오는 중";
+  if(!(window.kakao&&kakao.maps)){msg.textContent="로드뷰를 불러오지 못했어요";return;}
+  kakao.maps.load(()=>{
+    const box=$("#bigRv");box.innerHTML="";
+    const rv=new kakao.maps.Roadview(box),cl=new kakao.maps.RoadviewClient(),pos=new kakao.maps.LatLng(p.lat,p.lng);
+    const pe=document.createElement("div");pe.className="rvpin";
+    const ov=new kakao.maps.CustomOverlay({position:pos,content:pe,xAnchor:.5,yAnchor:1});
+    kakao.maps.event.addListener(rv,"init",()=>{const q=rv.getPosition();if(!q)return;
+      const d=Math.round(distM(q.getLat(),q.getLng(),p.lat,p.lng)),lb=nm.length>12?nm.slice(0,12)+"…":nm;
+      pe.innerHTML=`<b>${esc(lb)}${d>=10?` · ${d<1000?d+"m":(d/1000).toFixed(1)+"km"}`:""}</b><i></i>`;
+      aimRv(rv,ov,{lat:p.lat,lng:p.lng});msg.style.display="none";});
+    (function tryR(rs){
+      if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
+      cl.getNearestPanoId(pos,rs[0],id=>{if(id===null)return tryR(rs.slice(1));rv.setPanoId(id,pos);});
+    })([50,100,200]);
+  });
+}
+function closeBigRv(){if(!$("#big").classList.contains("on"))return;
+  if(history.state&&history.state.tripBig)history.back();else $("#big").classList.remove("on");}
+document.addEventListener("click",e=>{if(e.target.id==="big"||e.target.id==="bigX")closeBigRv();});
 function unfocus(){
   // 번호 누르기 전 상태로: 전체 경로가 보이게, 로드뷰 닫기
   FOCUS=null;
@@ -17314,6 +17358,7 @@ function closeFocus(){
   else unfocus();
 }
 window.addEventListener("popstate",e=>{
+  if($("#big").classList.contains("on")){$("#big").classList.remove("on");if(!(e.state&&e.state.tripBig))return;}
   const f=e.state&&e.state.tripFocus;
   if(f==null){if(FOCUS!=null)unfocus();}
   else if(window._curRes&&FOCUS!==f)focusPt(f,true);
@@ -17332,7 +17377,7 @@ function focusPt(i,noHist){
   if(MAP){MAP.setView([p.lat,p.lng],17,{animate:true});
     const mk=MARK[i];if(mk)mk.bindPopup(`<b>${esc(nm)}</b><br><small>${esc(shortAddr(p.road_address||p.input||""))}</small>`).openPopup();}
   const box=$("#mini");box.style.display="";$("#miniT").textContent=(i===0?"출발 · ":i===last?"도착 · ":i+"번 · ")+nm;
-  $("#miniBig").href=`https://map.kakao.com/link/roadview/${p.lat},${p.lng}`;
+  $("#miniBig").onclick=e=>{e.preventDefault();openBigRv(p,nm);};
   $("#miniHouse").href=`{{ url_for('trip.house_page') }}?go=1&q=${encodeURIComponent(p.label||p.input||"")}&addr=${encodeURIComponent(p.road_address||p.input||"")}`;
   $("#miniHouse").style.display=(i===0||i===last)?"none":"";
   const msg=$("#miniMsg");msg.style.display="";
@@ -17341,14 +17386,15 @@ function focusPt(i,noHist){
   kakao.maps.load(()=>{
     const t=new kakao.maps.LatLng(p.lat,p.lng);
     if(!RV){RV=new kakao.maps.Roadview($("#miniRv"));RVC=new kakao.maps.RoadviewClient();
-      kakao.maps.event.addListener(RV,"init",()=>{const q=RV.getPosition(),g=RV._tgt;
-        RV.setViewpoint({pan:bearing({lat:q.getLat(),lng:q.getLng()},g),tilt:5,zoom:0});msg.style.display="none";});}
-    RV._tgt={lat:p.lat,lng:p.lng};
+      const pe=document.createElement("div");pe.className="rvpin sm";pe.innerHTML="<i></i>";
+      RVPIN=new kakao.maps.CustomOverlay({position:t,content:pe,xAnchor:.5,yAnchor:1});
+      kakao.maps.event.addListener(RV,"init",()=>{aimRv(RV,RVPIN,RV._tgt);msg.style.display="none";});}
+    RV._tgt={lat:p.lat,lng:p.lng};RVPIN.setPosition(t);
     (function tryR(rs){
       if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
       RVC.getNearestPanoId(t,rs[0],id=>{if(id===null)return tryR(rs.slice(1));
         RV.setPanoId(id,t);
-        setTimeout(()=>{const q=RV.getPosition();if(q){RV.setViewpoint({pan:bearing({lat:q.getLat(),lng:q.getLng()},RV._tgt),tilt:5,zoom:0});msg.style.display="none";}},700);});
+        setTimeout(()=>{const q=RV.getPosition();if(q){aimRv(RV,RVPIN,RV._tgt);msg.style.display="none";}},700);});
     })([50,100,200]);
   });
   if(innerWidth<960)box.scrollIntoView({behavior:"smooth",block:"nearest"});
