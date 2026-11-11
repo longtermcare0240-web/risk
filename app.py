@@ -14252,12 +14252,13 @@ def _trip_toilet_store():
     return url.rstrip("/") + "/storage/v1", {"apikey": key, "Authorization": f"Bearer {key}"}
 
 
+# v2: 화장실마다 수정일을 따로 보관 (v1은 전부 같은 날짜로 덮어써서 버림)
 def _trip_toilet_save_live(rows, date):
     base, h = _trip_toilet_store()
     if not base:
         return "저장소 없음"
     requests.post(f"{base}/bucket", headers=h, json={"id": "trip", "name": "trip", "public": False}, timeout=15)
-    r = requests.post(f"{base}/object/trip/toilets_live.csv", data=_trip_toilet_rows_to_csv(rows, date).encode("utf-8"),
+    r = requests.post(f"{base}/object/trip/toilets_live_v2.csv", data=_trip_toilet_rows_to_csv(rows, date).encode("utf-8"),
                       headers={**h, "x-upsert": "true", "Content-Type": "text/csv"}, timeout=60)
     return "저장소 보관" if r.ok else f"저장소 보관 실패 {r.status_code}"
 
@@ -14268,7 +14269,7 @@ def _trip_toilet_load_store():
     if not base:
         return None
     try:
-        r = requests.get(f"{base}/object/authenticated/trip/toilets_live.csv", headers=h, timeout=30)
+        r = requests.get(f"{base}/object/authenticated/trip/toilets_live_v2.csv", headers=h, timeout=30)
         if not r.ok:
             return None
         rows, date = _trip_toilet_rows_from_csv(r.content.decode("utf-8-sig"))
@@ -17464,7 +17465,7 @@ restoreLast();
 </div><div class="colB">
 <div id="here" class="here" style="display:none"></div>
 <div id="list"></div>
-<p class="hint">반경 5km 안에서 가까운 15곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}<span id="tdate">{% if toilet_date %}<br>화장실 자료 {{ toilet_date }} 기준 · 행정안전부{% endif %}</span></p>
+<p class="hint">반경 5km 안에서 가까운 15곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}<span id="tdate">{% if toilet_date %}<br>행정안전부 화장실 자료 · {{ toilet_date }} 갱신{% endif %}</span></p>
 </div></div>
 <div class="big" id="big"><div class="bbox">
   <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
@@ -17494,7 +17495,7 @@ function search(lat,lng){
   fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
     done();
     if(r.here){$("#here").innerHTML=`<span class="pin"></span><div><small>내 위치</small><b>${esc(r.here)}</b></div>`;$("#here").style.display="";}
-    if(r.date)$("#tdate").innerHTML="<br>화장실 자료 "+esc(r.date)+" 기준 · 행정안전부";
+    if(r.date)$("#tdate").innerHTML="<br>행정안전부 화장실 자료 · "+esc(r.date)+" 갱신";
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
       <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}" data-i="${r.items.indexOf(t)}" role="button" title="로드뷰 크게 보기"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
