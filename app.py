@@ -14180,7 +14180,7 @@ TRIP_TOILET_NEW_GEOCODE_MAX = 800
 
 # 행: (관리번호, 이름, 주소, 위도, 경도, 개방시간, 비상벨, 장애인화장실)
 _TRIP_TOILET_CACHE = {"key": None, "rows": [], "date": ""}
-_TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False}
+_TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False, "ok_at": 0.0}
 _TRIP_TOILET_LOCK = threading.Lock()
 
 
@@ -14367,7 +14367,10 @@ def _trip_toilet_refresh(old):
                 continue
             addr = t["road"] or t["jibun"]
             xy = by_id.get(t["id"]) or by_addr.get(addr)
-            if not xy and new < TRIP_TOILET_NEW_GEOCODE_MAX and any(ch.isdigit() for ch in addr):   # 번지 없는 주소는 위치가 부정확해 뺌
+            # 새로 생기거나 고쳐진 화장실만 좌표를 구함. PC에서 일부러 뺀 곳(위치 불확실)은 다시 넣지 않음.
+            # 번지 없는 주소는 위치가 부정확해 뺌
+            if (not xy and new < TRIP_TOILET_NEW_GEOCODE_MAX and t["date"] > _TRIP_TOILET_CACHE["date"]
+                    and any(ch.isdigit() for ch in addr)):
                 new += 1
                 xy = _trip_toilet_geocode(t["road"], t["jibun"], t["name"])
             if not xy:
@@ -14380,7 +14383,7 @@ def _trip_toilet_refresh(old):
             kept = _trip_toilet_save_live(rows, date)
         except Exception as e:
             kept = f"저장소 보관 실패 {e}"
-        _TRIP_TOILET_LIVE.update(rows=rows, date=date, note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
+        _TRIP_TOILET_LIVE.update(rows=rows, date=date, ok_at=time.time(), note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
     except Exception as e:
         _TRIP_TOILET_LIVE["note"] = f"갱신 실패: {e}"
     finally:
@@ -14395,7 +14398,7 @@ def trip_load_toilets():
                 _TRIP_TOILET_LIVE["store_tried"] = True
                 got = _trip_toilet_load_store()
                 if got and got[1] >= _TRIP_TOILET_CACHE["date"]:  # 새로 push한 파일이 더 최신이면 파일 우선
-                    _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2])
+                    _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
             born = os.path.getmtime(_TRIP_TOILET_CACHE["key"][0]) if _TRIP_TOILET_CACHE["key"] else 0
             due = time.time() - max(_TRIP_TOILET_LIVE["at"], born) > TRIP_TOILET_REFRESH_SEC
             if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
@@ -14405,6 +14408,10 @@ def trip_load_toilets():
 
 
 def trip_toilet_data_date():
+    """화면에 보일 기준일: 행안부에서 마지막으로 받아 확인한 날 (바뀐 게 없어도 그날로). 아직 못 받았으면 파일의 자료 날짜"""
+    if _TRIP_TOILET_LIVE["ok_at"]:
+        from datetime import datetime, timedelta, timezone
+        return datetime.fromtimestamp(_TRIP_TOILET_LIVE["ok_at"], timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
     return _TRIP_TOILET_LIVE["date"] or _TRIP_TOILET_CACHE["date"]
 
 
@@ -15742,6 +15749,13 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
   .sr-rv{width:120px;height:88px}
   .sr-rv-pano{width:480px;height:352px}
 }
+
+/* 큰 로드뷰 속 화장실 핀 */
+.rvpin{display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
+.rvpin b{background:#e11d48;color:#fff;font-size:14px;font-weight:800;padding:6px 11px;border-radius:999px;white-space:nowrap;border:2px solid #fff}
+.rvpin i{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #e11d48;margin-top:-1px;animation:rvbob 1.1s ease-in-out infinite}
+@keyframes rvbob{50%{transform:translateY(5px)}}
+.rvpin.sm i{border-left-width:7px;border-right-width:7px;border-top-width:11px;border-top-color:#e11d48;filter:drop-shadow(0 0 1.5px #fff)}
 '''
 
 TRIP_TEMPLATES = {
@@ -17456,10 +17470,13 @@ function initRv(box){
       cl.getNearestPanoId(pos,100,id=>{
         if(id===null){msg.textContent="로드뷰 없음";return;}
         msg.style.display="none";rv.setPanoId(id,pos);
+        // 작은 로드뷰에도 화장실 위치 화살표 (글자 없이 작게)
+        const pin=document.createElement("div");pin.className="rvpin sm";pin.innerHTML="<i></i>";
+        const ov=new kakao.maps.CustomOverlay({position:pos,content:pin,xAnchor:.5,yAnchor:1});
         kakao.maps.event.addListener(rv,"init",()=>{try{const p=rv.getPosition();if(!p)return;
-          const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(lng-p.getLng())*R;
-          const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
-          rv.setViewpoint({pan:((Math.atan2(y,x)*180/Math.PI)+360)%360,tilt:0,zoom:0});}catch(e){}});
+          ov.setMap(rv);
+          let vp=null;try{vp=rv.getProjection().viewpointFromCoords(ov.getPosition(),ov.getAltitude());}catch(e){}
+          rv.setViewpoint(vp?{pan:vp.pan,tilt:vp.tilt,zoom:0}:{pan:bearingTo(p,lat,lng),tilt:0,zoom:0});}catch(e){}});
       });
     }catch(e){msg.textContent="로드뷰 없음";}
   });
@@ -17494,6 +17511,7 @@ function openNav(t){
 document.addEventListener("click",e=>{if(e.target.id==="nav"||e.target.id==="navX")$("#nav").classList.remove("on");});
 /* 작은 로드뷰를 누르면 큰 로드뷰 (돌려 볼 수 있음) */
 let BIG=null,BIGC=null;
+function distM(a1,o1,a2,o2){const R=Math.PI/180,x=Math.sin((a2-a1)*R/2)**2+Math.cos(a1*R)*Math.cos(a2*R)*Math.sin((o2-o1)*R/2)**2;return 12742000*Math.asin(Math.sqrt(x));}
 function bearingTo(p,lat,lng){const R=Math.PI/180,f1=p.getLat()*R,f2=lat*R,dl=(lng-p.getLng())*R;
   const y=Math.sin(dl)*Math.cos(f2),x=Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl);
   return ((Math.atan2(y,x)*180/Math.PI)+360)%360;}
@@ -17509,8 +17527,16 @@ function openBig(t,noHist){
     // 작은 로드뷰와 똑같이: 매번 새로 만들고, 사진이 다 열린 뒤(init) 화장실 쪽으로 카메라를 돌림
     const box=$("#bigRv");box.innerHTML="";
     const rv=new kakao.maps.Roadview(box),cl=new kakao.maps.RoadviewClient(),pos=new kakao.maps.LatLng(t.lat,t.lng);
+    // 화장실 위치에 핀(이름표 + 사진 찍힌 곳에서 거리). 로드뷰를 돌리면 건물에 붙어서 같이 움직임
+    const pin=document.createElement("div");pin.className="rvpin";
+    const ov=new kakao.maps.CustomOverlay({position:pos,content:pin,xAnchor:.5,yAnchor:1});
     const aim=()=>{try{const p=rv.getPosition();if(!p)return;
-      rv.setViewpoint({pan:bearingTo(p,t.lat,t.lng),tilt:0,zoom:0});msg.style.display="none";}catch(e){}};
+      const d=Math.round(distM(p.getLat(),p.getLng(),t.lat,t.lng));
+      pin.innerHTML=`<b>화장실${d>=10?` · ${d<1000?d+"m":(d/1000).toFixed(1)+"km"}`:""}</b><i></i>`;
+      ov.setMap(rv);
+      let vp=null;try{vp=rv.getProjection().viewpointFromCoords(ov.getPosition(),ov.getAltitude());}catch(e){}
+      rv.setViewpoint(vp?{pan:vp.pan,tilt:vp.tilt,zoom:0}:{pan:bearingTo(p,t.lat,t.lng),tilt:0,zoom:0});
+      msg.style.display="none";}catch(e){}};
     kakao.maps.event.addListener(rv,"init",aim);
     (function tryR(rs){
       if(!rs.length){msg.textContent="이 근처엔 로드뷰 사진이 없어요";return;}
