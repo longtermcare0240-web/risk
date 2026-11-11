@@ -15755,8 +15755,10 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .rvpin b{background:#e11d48;color:#fff;font-size:14px;font-weight:800;padding:6px 11px;border-radius:999px;white-space:nowrap;border:2px solid #fff}
 .rvpin i{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #e11d48;margin-top:-1px;animation:rvbob 1.1s ease-in-out infinite}
 @keyframes rvbob{50%{transform:translateY(5px)}}
-.rvpin.sm i{border-left-width:13px;border-right-width:13px;border-top-width:20px;border-top-color:#e11d48;
-  filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+.rvpin.sm{filter:none}
+.rvpin.sm i{border-left-width:19px;border-right-width:19px;border-top-width:30px;border-top-color:#ff1f4b;
+  filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 2px 4px rgba(0,0,0,.7));
+  animation:rvbob .9s ease-in-out infinite}
 '''
 
 TRIP_TEMPLATES = {
@@ -17451,7 +17453,7 @@ function search(lat,lng){
           <div class="dl"><b>${km(t.distance)}</b>
             <span class="tm" title="차로">${CAR}${t.car_real?"":"약 "}${t.car_min}분</span>
             <span class="tm" title="걸어서">${WALK}${t.walk_min}분</span></div>
-          <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':`<span class="chip">${esc(t.open_label)}</span>`}
+          <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':(t.open?`<span class="chip">${esc(t.open_label)}</span>`:"")}
           ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
         <button class="btn sm" type="button" data-i="${r.items.indexOf(t)}">길안내</button></div>`).join("")}</div>`;
     ITEMS=r.items;
