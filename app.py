@@ -14178,7 +14178,7 @@ TRIP_TOILET_INFO_URL = "https://file.localdata.go.kr/file/public_restroom_info/i
 TRIP_TOILET_REFRESH_SEC = 7 * 86400
 TRIP_TOILET_NEW_GEOCODE_MAX = 800
 
-# 행: (관리번호, 이름, 주소, 위도, 경도, 개방시간, 비상벨, 장애인화장실)
+# 행: (관리번호, 이름, 주소, 위도, 경도, 개방시간, 비상벨, 장애인화장실, 그 화장실 자료 마지막 수정일)
 _TRIP_TOILET_CACHE = {"key": None, "rows": [], "date": ""}
 _TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False, "ok_at": 0.0}
 _TRIP_TOILET_LOCK = threading.Lock()
@@ -14224,7 +14224,8 @@ def _trip_toilet_rows_from_csv(text):
         except (KeyError, TypeError, ValueError):
             continue
         rows.append((_trip_s(r.get("관리번호")), _trip_s(r.get("화장실명")), _trip_s(r.get("주소")), lat, lng,
-                     _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y"))
+                     _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y",
+                     _trip_s(r.get("데이터기준일자"))[:10]))
         date = max(date, _trip_s(r.get("데이터기준일자")))
     return rows, date
 
@@ -14235,7 +14236,7 @@ def _trip_toilet_rows_to_csv(rows, date):
     w.writerow(TRIP_TOILET_CSV_HEAD)
     for t in rows:
         w.writerow([t[0], t[1], t[2], round(t[3], 6), round(t[4], 6), t[5], "Y" if t[6] else "N",
-                    "Y" if t[7] else "N", date])
+                    "Y" if t[7] else "N", t[8] if len(t) > 8 else date])   # 화장실마다 마지막 수정일
     return buf.getvalue()
 
 
@@ -14290,7 +14291,7 @@ def _trip_toilet_load_xlsx(path):
     df = df[df["위도"].notna() & df["경도"].notna()]
     name_col = next((c for c in ("화장실명", "시설명", "명칭") if c in df.columns), None)
     return [("", _trip_s(r.get(name_col)) if name_col else "", _trip_s(r.get("주소")), float(r["위도"]), float(r["경도"]),
-             _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y")
+             _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y", "")
             for r in df.to_dict("records")]
 
 
@@ -14375,7 +14376,7 @@ def _trip_toilet_refresh(old):
                 xy = _trip_toilet_geocode(t["road"], t["jibun"], t["name"])
             if not xy:
                 continue
-            rows.append((t["id"], t["name"], addr, xy[0], xy[1], t["open"], t["bell"], t["acc"]))
+            rows.append((t["id"], t["name"], addr, xy[0], xy[1], t["open"], t["bell"], t["acc"], t["date"]))
             date = max(date, t["date"])
         if len(rows) < len(old) * 0.8:
             raise ValueError(f"받은 건수가 너무 적음 ({len(rows)} / 기존 {len(old)})")
@@ -14428,8 +14429,8 @@ def trip_nearest_toilets(lat, lng, rows, only_always=False, need_bell=False, nee
     out = []
     for t in rows:
         if isinstance(t, dict):        # 예시 데이터
-            t = ("", t["name"], t["address"], t["lat"], t["lng"], t["open"], t["bell"], t["accessible"])
-        _, name, addr, tlat, tlng, op, bell, acc = t
+            t = ("", t["name"], t["address"], t["lat"], t["lng"], t["open"], t["bell"], t["accessible"], "")
+        _, name, addr, tlat, tlng, op, bell, acc, upd = t
         if abs(tlat - lat) > dlat or abs(tlng - lng) > dlng:
             continue
         if op == "미개방" or (only_always and op != "상시") or (need_bell and not bell) or (need_accessible and not acc):
@@ -14438,7 +14439,7 @@ def trip_nearest_toilets(lat, lng, rows, only_always=False, need_bell=False, nee
         if d <= TRIP_TOILET_RADIUS:
             out.append({"name": name, "address": addr, "lat": tlat, "lng": tlng, "open": op, "bell": bell,
                         "accessible": acc, "distance": int(d), "open_label": TRIP_OPEN_LABEL.get(op, op or "정보 없음"),
-                        "walk_min": max(1, round(d / 67))})
+                        "walk_min": max(1, round(d / 67)), "updated": upd[:7]})
     out.sort(key=lambda x: x["distance"])
     return out[:TRIP_TOILET_LIMIT]
 
@@ -15759,6 +15760,8 @@ input[type=text]:focus,select:focus{outline:none;border-color:var(--ink);backgro
 .rvpin.sm i{border-left-width:19px;border-right-width:19px;border-top-width:30px;border-top-color:#ff1f4b;
   filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 2px 4px rgba(0,0,0,.7));
   animation:rvbob .9s ease-in-out infinite}
+.chip.upd{background:transparent;border:1px solid var(--line);color:var(--muted);font-weight:500}
+.chip.upd.old{border-color:#f3c98b;color:#b45309;background:#fff7ed}
 '''
 
 TRIP_TEMPLATES = {
@@ -17500,7 +17503,7 @@ function search(lat,lng){
             <span class="tm" title="차로">${CAR}${t.car_real?"":"약 "}${t.car_min}분</span>
             <span class="tm" title="걸어서">${WALK}${t.walk_min}분</span></div>
           <div class="chips">${t.open==="상시"?'<span class="chip ok">상시 개방</span>':(t.open?`<span class="chip">${esc(t.open_label)}</span>`:"")}
-          ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}</div></div>
+          ${t.bell?'<span class="chip">비상벨</span>':""}${t.accessible?'<span class="chip">장애인</span>':""}${upd(t.updated)}</div></div>
         <button class="btn sm" type="button" data-i="${r.items.indexOf(t)}">길안내</button></div>`).join("")}</div>`;
     ITEMS=r.items;
     $("#list").querySelectorAll("button[data-i]").forEach(b=>b.onclick=()=>openNav(ITEMS[+b.dataset.i]));
@@ -17508,6 +17511,9 @@ function search(lat,lng){
     watchRv();
   }).catch(()=>{done();$("#msg").innerHTML='<div class="err" style="margin:12px 0 0">연결에 실패했어요.</div>';});
 }
+/* 화장실마다 자료 마지막 수정 연월. 2년 넘은 자료는 주황색으로 (현장 확인 필요) */
+function upd(u){if(!u)return"";const [y,m]=u.split("-").map(Number),now=new Date(),old=(now.getFullYear()-y)*12+(now.getMonth()+1-m)>=24;
+  return `<span class="chip upd${old?" old":""}" title="이 화장실 정보를 지자체가 마지막으로 고친 때">${y}.${String(m).padStart(2,"0")} 자료</span>`;}
 /* 작은 로드뷰: 안전로드 검색결과와 같은 방식 (100m 안 로드뷰 → 화장실 쪽으로 카메라 회전, 화면 밖이면 내림) */
 let rvObs=null;
 function initRv(box){
