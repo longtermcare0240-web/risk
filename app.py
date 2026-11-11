@@ -14170,7 +14170,7 @@ def trip_interpret(bld, floor, mountain, missing=False):
 
 # ---------- 출장 도구함: toilets ----------
 TRIP_TOILET_RADIUS = 5000
-TRIP_TOILET_LIMIT = 10
+TRIP_TOILET_LIMIT = 15
 TRIP_OPEN_LABEL = {"상시": "상시 개방", "정시": "정해진 시간 개방", "불규칙": "개방 불규칙", "미개방": "개방 안 함"}
 TRIP_TOILET_FILE = "trip_toilets.csv"
 TRIP_TOILET_CSV_URL = "https://file.localdata.go.kr/file/download/public_restroom_info/info"
@@ -14383,11 +14383,11 @@ def _trip_toilet_refresh(old):
             kept = _trip_toilet_save_live(rows, date)
         except Exception as e:
             kept = f"저장소 보관 실패 {e}"
-        _TRIP_TOILET_LIVE.update(rows=rows, date=date, ok_at=time.time(), note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
+        _TRIP_TOILET_LIVE.update(rows=rows, date=date, ok_at=time.time(), at=time.time(), note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
     except Exception as e:
-        _TRIP_TOILET_LIVE["note"] = f"갱신 실패: {e}"
+        _TRIP_TOILET_LIVE.update(note=f"갱신 실패: {e}", at=time.time() - TRIP_TOILET_REFRESH_SEC + 86400)   # 실패하면 하루 뒤 다시
     finally:
-        _TRIP_TOILET_LIVE.update(at=time.time(), busy=False)
+        _TRIP_TOILET_LIVE["busy"] = False
 
 
 def trip_load_toilets():
@@ -14399,8 +14399,8 @@ def trip_load_toilets():
                 got = _trip_toilet_load_store()
                 if got and got[1] >= _TRIP_TOILET_CACHE["date"]:  # 새로 push한 파일이 더 최신이면 파일 우선
                     _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
-            born = os.path.getmtime(_TRIP_TOILET_CACHE["key"][0]) if _TRIP_TOILET_CACHE["key"] else 0
-            due = time.time() - max(_TRIP_TOILET_LIVE["at"], born) > TRIP_TOILET_REFRESH_SEC
+            # push·재시작과 상관없이 '마지막으로 받은 때'(저장소 보관 시각)부터 7일. 한 번도 안 받았으면 바로 받음
+            due = time.time() - _TRIP_TOILET_LIVE["at"] > TRIP_TOILET_REFRESH_SEC
             if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
                 _TRIP_TOILET_LIVE["busy"] = True
                 threading.Thread(target=_trip_toilet_refresh, args=(_TRIP_TOILET_LIVE["rows"] or base,), daemon=True).start()
@@ -17415,7 +17415,7 @@ restoreLast();
 </div><div class="colB">
 <div id="here" class="here" style="display:none"></div>
 <div id="list"></div>
-<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}<span id="tdate">{% if toilet_date %}<br>화장실 자료 {{ toilet_date }} 기준 · 행정안전부{% endif %}</span></p>
+<p class="hint">반경 5km 안에서 가까운 15곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}<span id="tdate">{% if toilet_date %}<br>화장실 자료 {{ toilet_date }} 기준 · 행정안전부{% endif %}</span></p>
 </div></div>
 <div class="big" id="big"><div class="bbox">
   <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
