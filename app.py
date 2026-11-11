@@ -13802,11 +13802,13 @@ async function renameTeam(){
 #   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기
 #   - 이름·주민번호·전화번호는 받지 않고, 입력·사진·위치는 저장하지 않음 (DB 안 씀)
 #   - 환경변수: KAKAO_KEY, KAKAO_JS_KEY(기존) / DATA_GO_KR_KEY, SAFEMAP_KEY, OPENAI_API_KEY(추가)
-#   - 데이터 파일: 공중화장실.xlsx(기존), pills.csv(케어내비에서 복사)
+#   - 데이터 파일: trip_toilets.csv(전국 화장실, 없으면 공중화장실.xlsx), pills.csv(케어내비에서 복사)
 #   - 주소 자동완성은 안전로드 /search_place 를 그대로 씀
 #   - TRIP_DEMO=1 이면 키 없이 예시 화면
 # ================================================================================
 import math as _trip_math
+import csv
+import io
 from concurrent.futures import ThreadPoolExecutor
 from itertools import permutations
 from flask import Blueprint, render_template
@@ -14167,30 +14169,119 @@ def trip_interpret(bld, floor, mountain, missing=False):
     return facts, list(dict.fromkeys(checks))[:3]
 
 # ---------- 출장 도구함: toilets ----------
-_TRIP_TOILET_CACHE = {"mtime": None, "rows": []}
 TRIP_TOILET_RADIUS = 5000
 TRIP_TOILET_LIMIT = 10
 TRIP_OPEN_LABEL = {"상시": "상시 개방", "정시": "정해진 시간 개방", "불규칙": "개방 불규칙", "미개방": "개방 안 함"}
+TRIP_TOILET_FILE = "trip_toilets.csv"
+TRIP_TOILET_CSV_URL = "https://file.localdata.go.kr/file/download/public_restroom_info/info"
+TRIP_TOILET_INFO_URL = "https://file.localdata.go.kr/file/public_restroom_info/info"
+TRIP_TOILET_REFRESH_SEC = 7 * 86400
+TRIP_TOILET_NEW_GEOCODE_MAX = 800
 
-
-def _trip_toilet_path():
-    return os.environ.get("TOILET_FILE", "공중화장실.xlsx")
+# 행: (관리번호, 이름, 주소, 위도, 경도, 개방시간, 비상벨, 장애인화장실)
+_TRIP_TOILET_CACHE = {"key": None, "rows": [], "date": ""}
+_TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False}
+_TRIP_TOILET_LOCK = threading.Lock()
 
 
 def _trip_s(v):
-    return "" if pd.isna(v) else str(v).strip()
+    return "" if v is None or (isinstance(v, float) and _trip_math.isnan(v)) else str(v).strip()
 
 
-def trip_load_toilets():
-    path = _trip_toilet_path()
-    if not os.path.exists(path) and os.path.exists(os.path.join("mapdata", path)):
-        path = os.path.join("mapdata", path)
+def _trip_toilet_find(name):
+    for p in (name, os.path.join("mapdata", name)):
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _trip_toilet_num(v):
     try:
-        mtime = os.path.getmtime(path)
-    except OSError:
-        return []
-    if _TRIP_TOILET_CACHE["mtime"] == mtime:
-        return _TRIP_TOILET_CACHE["rows"]
+        return int(float(_trip_s(v) or 0))
+    except ValueError:
+        return 0
+
+
+def _trip_toilet_from_localdata(r):
+    """LOCALDATA 공중화장실 한 행(dict) → 좌표 없는 행. 구분명 이동화장실은 위치가 바뀌어서 뺀다"""
+    if _trip_s(r.get("구분명")) == "이동화장실":
+        return None
+    acc = any(_trip_toilet_num(r.get(c)) > 0 for c in ("남성용-장애인용대변기수", "남성용-장애인용소변기수", "여성용-장애인용대변기수"))
+    return {"id": _trip_s(r.get("관리번호")), "name": _trip_s(r.get("화장실명")),
+            "road": _trip_s(r.get("소재지도로명주소")), "jibun": _trip_s(r.get("소재지지번주소")),
+            "open": _trip_s(r.get("개방시간")), "bell": _trip_s(r.get("비상벨설치여부")) == "Y", "acc": acc,
+            "date": _trip_s(r.get("최종수정시점"))[:10]}
+
+
+TRIP_TOILET_CSV_HEAD = ["관리번호", "화장실명", "주소", "위도", "경도", "개방시간", "비상벨", "장애인화장실", "데이터기준일자"]
+
+
+def _trip_toilet_rows_from_csv(text):
+    rows, date = [], ""
+    for r in csv.DictReader(io.StringIO(text)):
+        try:
+            lat, lng = float(r["위도"]), float(r["경도"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows.append((_trip_s(r.get("관리번호")), _trip_s(r.get("화장실명")), _trip_s(r.get("주소")), lat, lng,
+                     _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y"))
+        date = max(date, _trip_s(r.get("데이터기준일자")))
+    return rows, date
+
+
+def _trip_toilet_rows_to_csv(rows, date):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(TRIP_TOILET_CSV_HEAD)
+    for t in rows:
+        w.writerow([t[0], t[1], t[2], round(t[3], 6), round(t[4], 6), t[5], "Y" if t[6] else "N",
+                    "Y" if t[7] else "N", date])
+    return buf.getvalue()
+
+
+def _trip_toilet_load_national(path):
+    return _trip_toilet_rows_from_csv(open(path, encoding="utf-8-sig").read())
+
+
+# ---- 새로 받은 자료를 Supabase 저장소(버킷 trip, 비공개)에 보관 → 서버가 재시작돼도 마지막 자료·날짜 유지 ----
+def _trip_toilet_store():
+    url, key = os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_KEY", "")
+    if not url or not key:
+        return None, None
+    return url.rstrip("/") + "/storage/v1", {"apikey": key, "Authorization": f"Bearer {key}"}
+
+
+def _trip_toilet_save_live(rows, date):
+    base, h = _trip_toilet_store()
+    if not base:
+        return "저장소 없음"
+    requests.post(f"{base}/bucket", headers=h, json={"id": "trip", "name": "trip", "public": False}, timeout=15)
+    r = requests.post(f"{base}/object/trip/toilets_live.csv", data=_trip_toilet_rows_to_csv(rows, date).encode("utf-8"),
+                      headers={**h, "x-upsert": "true", "Content-Type": "text/csv"}, timeout=60)
+    return "저장소 보관" if r.ok else f"저장소 보관 실패 {r.status_code}"
+
+
+def _trip_toilet_load_store():
+    """저장소에 보관된 마지막 자료 → (rows, date, 보관 시각). 없거나 실패하면 None"""
+    base, h = _trip_toilet_store()
+    if not base:
+        return None
+    try:
+        r = requests.get(f"{base}/object/authenticated/trip/toilets_live.csv", headers=h, timeout=30)
+        if not r.ok:
+            return None
+        rows, date = _trip_toilet_rows_from_csv(r.content.decode("utf-8-sig"))
+        try:
+            from email.utils import parsedate_to_datetime
+            at = parsedate_to_datetime(r.headers.get("Last-Modified", "")).timestamp()
+        except Exception:
+            at = time.time()
+        return (rows, date, at) if rows else None
+    except Exception:
+        return None
+
+
+def _trip_toilet_load_xlsx(path):
     df = pd.read_excel(path)
     if "구분" in df.columns:
         df = df[df["구분"].astype(str).str.strip() == "공중화장실"]
@@ -14198,18 +14289,123 @@ def trip_load_toilets():
     df["경도"] = pd.to_numeric(df["경도"], errors="coerce")
     df = df[df["위도"].notna() & df["경도"].notna()]
     name_col = next((c for c in ("화장실명", "시설명", "명칭") if c in df.columns), None)
-    rows = []
-    for r in df.to_dict("records"):
-        rows.append({
-            "name": _trip_s(r.get(name_col)) if name_col else "",
-            "address": _trip_s(r.get("주소")),
-            "lat": float(r["위도"]), "lng": float(r["경도"]),
-            "open": _trip_s(r.get("개방시간")),
-            "bell": _trip_s(r.get("비상벨")) == "Y",
-            "accessible": _trip_s(r.get("장애인화장실")) == "Y",
-        })
-    _TRIP_TOILET_CACHE.update(mtime=mtime, rows=rows)
-    return rows
+    return [("", _trip_s(r.get(name_col)) if name_col else "", _trip_s(r.get("주소")), float(r["위도"]), float(r["경도"]),
+             _trip_s(r.get("개방시간")), _trip_s(r.get("비상벨")) == "Y", _trip_s(r.get("장애인화장실")) == "Y")
+            for r in df.to_dict("records")]
+
+
+def _trip_toilet_base():
+    """파일에서 읽은 기본 자료 (파일이 바뀌면 다시 읽음). national=전국 파일 여부"""
+    path = _trip_toilet_find(os.environ.get("TRIP_TOILET_FILE", TRIP_TOILET_FILE))
+    national = bool(path)
+    if not path:
+        path = _trip_toilet_find(os.environ.get("TOILET_FILE", "공중화장실.xlsx"))
+    if not path:
+        return [], False
+    key = (path, os.path.getmtime(path))
+    if _TRIP_TOILET_CACHE["key"] != key:
+        if national:
+            rows, date = _trip_toilet_load_national(path)
+        else:
+            rows, date = _trip_toilet_load_xlsx(path), ""
+        _TRIP_TOILET_CACHE.update(key=key, rows=rows, date=date)
+    return _TRIP_TOILET_CACHE["rows"], national
+
+
+def _trip_toilet_geocode(road, jibun, name):
+    key = os.environ.get("KAKAO_KEY", "")
+    if not key:
+        return None
+    h = {"Authorization": f"KakaoAK {key}"}
+    tries = []
+    for a in (road, jibun):
+        if a:
+            tries.append(("address", a))
+            if " " in a:
+                tries.append(("address", a.split(" ", 1)[1]))     # 시·도 이름이 바뀐 경우 대비
+    if name and (road or jibun):
+        tries.append(("keyword", f"{(road or jibun).split(' ')[1] if ' ' in (road or jibun) else ''} {name}".strip()))
+    for kind, q in tries:
+        try:
+            r = requests.get(f"https://dapi.kakao.com/v2/local/search/{kind}.json", headers=h,
+                             params={"query": q, "size": 1}, timeout=6)
+            docs = r.json().get("documents", []) if r.ok else []
+        except Exception:
+            docs = []
+        if docs:
+            return float(docs[0]["y"]), float(docs[0]["x"])
+    return None
+
+
+def _trip_toilet_refresh(old):
+    """전국 파일을 다시 받아 기존 좌표를 이어 붙이고, 새 화장실만 카카오로 좌표를 붙인다"""
+    try:
+        s = requests.Session()
+        s.headers["User-Agent"] = "Mozilla/5.0"
+        try:
+            s.get(TRIP_TOILET_INFO_URL, timeout=15)
+        except Exception:
+            pass
+        r = s.get(TRIP_TOILET_CSV_URL, headers={"Referer": TRIP_TOILET_INFO_URL}, timeout=120)
+        r.raise_for_status()
+        raw = r.content
+        text = None
+        for enc in ("utf-8-sig", "cp949"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if not text or "관리번호" not in text[:2000]:
+            raise ValueError("전국 화장실 파일 형식이 아님")
+        by_id = {t[0]: (t[3], t[4]) for t in old if t[0]}
+        by_addr = {t[2]: (t[3], t[4]) for t in old if t[2]}
+        rows, new, date = [], 0, ""
+        for rec in csv.DictReader(io.StringIO(text)):
+            t = _trip_toilet_from_localdata(rec)
+            if not t or _trip_s(t["open"]) == "미개방":
+                continue
+            addr = t["road"] or t["jibun"]
+            xy = by_id.get(t["id"]) or by_addr.get(addr)
+            if not xy and new < TRIP_TOILET_NEW_GEOCODE_MAX and any(ch.isdigit() for ch in addr):   # 번지 없는 주소는 위치가 부정확해 뺌
+                new += 1
+                xy = _trip_toilet_geocode(t["road"], t["jibun"], t["name"])
+            if not xy:
+                continue
+            rows.append((t["id"], t["name"], addr, xy[0], xy[1], t["open"], t["bell"], t["acc"]))
+            date = max(date, t["date"])
+        if len(rows) < len(old) * 0.8:
+            raise ValueError(f"받은 건수가 너무 적음 ({len(rows)} / 기존 {len(old)})")
+        try:
+            kept = _trip_toilet_save_live(rows, date)
+        except Exception as e:
+            kept = f"저장소 보관 실패 {e}"
+        _TRIP_TOILET_LIVE.update(rows=rows, date=date, note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
+    except Exception as e:
+        _TRIP_TOILET_LIVE["note"] = f"갱신 실패: {e}"
+    finally:
+        _TRIP_TOILET_LIVE.update(at=time.time(), busy=False)
+
+
+def trip_load_toilets():
+    base, national = _trip_toilet_base()
+    if national:
+        with _TRIP_TOILET_LOCK:
+            if not _TRIP_TOILET_LIVE["store_tried"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
+                _TRIP_TOILET_LIVE["store_tried"] = True
+                got = _trip_toilet_load_store()
+                if got and got[1] >= _TRIP_TOILET_CACHE["date"]:  # 새로 push한 파일이 더 최신이면 파일 우선
+                    _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2])
+            born = os.path.getmtime(_TRIP_TOILET_CACHE["key"][0]) if _TRIP_TOILET_CACHE["key"] else 0
+            due = time.time() - max(_TRIP_TOILET_LIVE["at"], born) > TRIP_TOILET_REFRESH_SEC
+            if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
+                _TRIP_TOILET_LIVE["busy"] = True
+                threading.Thread(target=_trip_toilet_refresh, args=(_TRIP_TOILET_LIVE["rows"] or base,), daemon=True).start()
+    return _TRIP_TOILET_LIVE["rows"] if _TRIP_TOILET_LIVE["rows"] is not None else base
+
+
+def trip_toilet_data_date():
+    return _TRIP_TOILET_LIVE["date"] or _TRIP_TOILET_CACHE["date"]
 
 
 def _trip_dist(lat1, lng1, lat2, lng2):
@@ -14221,19 +14417,20 @@ def _trip_dist(lat1, lng1, lat2, lng2):
 
 
 def trip_nearest_toilets(lat, lng, rows, only_always=False, need_bell=False, need_accessible=False):
+    dlat, dlng = TRIP_TOILET_RADIUS / 111000, TRIP_TOILET_RADIUS / (111000 * max(0.2, _trip_math.cos(_trip_math.radians(lat))))
     out = []
     for t in rows:
-        if t["open"] == "미개방":
+        if isinstance(t, dict):        # 예시 데이터
+            t = ("", t["name"], t["address"], t["lat"], t["lng"], t["open"], t["bell"], t["accessible"])
+        _, name, addr, tlat, tlng, op, bell, acc = t
+        if abs(tlat - lat) > dlat or abs(tlng - lng) > dlng:
             continue
-        if only_always and t["open"] != "상시":
+        if op == "미개방" or (only_always and op != "상시") or (need_bell and not bell) or (need_accessible and not acc):
             continue
-        if need_bell and not t["bell"]:
-            continue
-        if need_accessible and not t["accessible"]:
-            continue
-        d = _trip_dist(lat, lng, t["lat"], t["lng"])
+        d = _trip_dist(lat, lng, tlat, tlng)
         if d <= TRIP_TOILET_RADIUS:
-            out.append({**t, "distance": int(d), "open_label": TRIP_OPEN_LABEL.get(t["open"], t["open"] or "정보 없음"),
+            out.append({"name": name, "address": addr, "lat": tlat, "lng": tlng, "open": op, "bell": bell,
+                        "accessible": acc, "distance": int(d), "open_label": TRIP_OPEN_LABEL.get(op, op or "정보 없음"),
                         "walk_min": max(1, round(d / 67))})
     out.sort(key=lambda x: x["distance"])
     return out[:TRIP_TOILET_LIMIT]
@@ -14900,7 +15097,14 @@ def trip_house_search():
 # ---------- 3. 내 근처 화장실 ----------
 @trip_bp.get("/toilet", endpoint="toilet_page")
 def trip_toilet_page():
-    return render_template("trip/toilet.html")
+    date = ""
+    if not trip_demo():
+        try:
+            trip_load_toilets()
+            date = trip_toilet_data_date()
+        except Exception:
+            date = ""
+    return render_template("trip/toilet.html", toilet_date=date)
 
 
 @trip_bp.get("/api/toilets", endpoint="api_toilets")
@@ -14911,7 +15115,7 @@ def trip_api_toilets():
         return jsonify(ok=False, message="위치를 가져오지 못했어요.")
     rows = TRIP_DEMO_TOILETS if trip_demo() else trip_load_toilets()
     if not rows:
-        return jsonify(ok=False, message="화장실 데이터(공중화장실.xlsx)가 없어요. 관리자에게 알려주세요.")
+        return jsonify(ok=False, message="화장실 데이터(trip_toilets.csv)가 없어요. 관리자에게 알려주세요.")
     a = request.args
     found = trip_nearest_toilets(lat, lng, rows, a.get("always") == "1", a.get("bell") == "1", a.get("acc") == "1")
     # 차로 몇 분: 카카오모빌리티 실제 경로(실패하면 직선거리로 추정, '약' 표시)
@@ -14933,7 +15137,7 @@ def trip_api_toilets():
             here = trip_where(lat, lng)
         except Exception:
             here = ""
-    return jsonify(ok=True, items=found, demo=trip_demo(), here=here,
+    return jsonify(ok=True, items=found, demo=trip_demo(), here=here, date="" if trip_demo() else trip_toilet_data_date(),
                    message="" if found else "주변 5km 안에 조건에 맞는 화장실이 없어요.")
 
 
@@ -17194,7 +17398,7 @@ restoreLast();
 </div><div class="colB">
 <div id="here" class="here" style="display:none"></div>
 <div id="list"></div>
-<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}</p>
+<p class="hint">반경 5km 안에서 가까운 10곳을 보여줘요.<br>문을 닫는 곳은 빼요.{% if demo %}<br>지금은 예시 3곳이에요.{% endif %}<span id="tdate">{% if toilet_date %}<br>화장실 자료 {{ toilet_date }} 기준 · 행정안전부{% endif %}</span></p>
 </div></div>
 <div class="big" id="big"><div class="bbox">
   <div class="sh"><div style="flex:1;min-width:0"><b id="bigT"></b><small id="bigA"></small></div><button type="button" id="bigX" aria-label="닫기">×</button></div>
@@ -17224,6 +17428,7 @@ function search(lat,lng){
   fetch("/trip/api/toilets?"+q).then(r=>r.json()).then(r=>{
     done();
     if(r.here){$("#here").innerHTML=`<span class="pin"></span><div><small>내 위치</small><b>${esc(r.here)}</b></div>`;$("#here").style.display="";}
+    if(r.date)$("#tdate").innerHTML="<br>화장실 자료 "+esc(r.date)+" 기준 · 행정안전부";
     if(!r.ok||!r.items.length){$("#msg").innerHTML=`<div class="err" style="margin:12px 0 0">${esc(r.message||"찾지 못했어요.")}</div>`;$("#list").innerHTML="";return;}
     $("#list").innerHTML=`<div class="card">${r.items.map(t=>`
       <div class="trow"><div class="sr-rv" data-lat="${t.lat}" data-lng="${t.lng}" data-i="${r.items.indexOf(t)}" role="button" title="로드뷰 크게 보기"><div class="sr-rv-pano"></div><div class="sr-rv-msg">로드뷰</div><div class="sr-rv-cover"></div></div>
