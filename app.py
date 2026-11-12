@@ -9995,6 +9995,7 @@ from collections import Counter
 SR_LIVE_CATS = ["상습결빙지역", "주차장", "자동심장충격기", "교통사고위험지역"]
 SR_LIVE_SIDOS = ["전남광주통합특별시", "전북특별자치도", "제주특별자치도"]
 SR_LIVE_REFRESH_SEC = 7 * 86400
+SR_NIGHT_HOURS = (2, 5)        # 다시 받는 건 새벽 2시~5시(한국시간)에만 시작. 한 번도 못 받은 항목은 바로 받음
 SR_LIVE_PAGE_SIZE = 1000
 SR_LIVE_MAX_PAGES = 2000
 SR_LIVE_SHRINK_GUARD = 0.5
@@ -10206,6 +10207,9 @@ def _sr_paged(url, base, label):
             return
         prev_first = first
         got += len(items)
+        if page % 5 == 0:
+            import gc
+            gc.collect()
         pages = math.ceil(total / size) if total else "?"
         _SR_LIVE["prog"] = f"{got:,}건 받음 · {page}/{pages}쪽"
         _sr_heartbeat()
@@ -10654,8 +10658,20 @@ SR_DEPLOY_ID = os.environ.get("RENDER_GIT_COMMIT", "") + "|" + str(int(os.path.g
 
 def _sr_lock_write(t):
     info = {"t": t, "deploy": SR_DEPLOY_ID, "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
-            "kakao": sum(_SR_KAKAO_USE["n"].values())}
+            "kakao": sum(_SR_KAKAO_USE["n"].values()), "mem": _sr_mem_mb()}
     _sr_store_put("refresh_lock.txt", json.dumps(info, ensure_ascii=False).encode("utf-8"), "application/json")
+
+
+def _sr_mem_mb():
+    """이 서버 프로세스가 지금 쓰는 메모리(MB). Render Starter는 512MB가 한도"""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return 0
 
 
 def _sr_heartbeat(force=False):
@@ -10706,6 +10722,30 @@ def _sr_live_reload_due(due, now):
                 _SR_LIVE["ver"] += 1
 
 
+def _sr_is_night():
+    h = datetime.now(KST).hour
+    return SR_NIGHT_HOURS[0] <= h < SR_NIGHT_HOURS[1]
+
+
+def _sr_night_loop():
+    """아무도 접속 안 하는 새벽에도 갱신이 시작되게 10분마다 확인 (토글 ON일 때만)"""
+    time.sleep(300)
+    while True:
+        try:
+            if _sr_is_night() and feature_detail_on():
+                b = load_df()
+                cnt = b["구분"].value_counts().to_dict()
+                cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
+                sr_live_tick(cnt)
+        except Exception as e:
+            print("안전로드 새벽 갱신 확인 실패:", e)
+        time.sleep(600)
+
+
+if os.environ.get("SR_LIVE_AUTO", "1") != "0":
+    threading.Thread(target=_sr_night_loop, daemon=True).start()
+
+
 def sr_live_tick(excel_counts):
     """토글 ON 상태에서 지도 자료·관리자 페이지를 부를 때: 처음이면 저장소 자료를 읽고, 7일 지난 항목은 뒤에서 새로 받음"""
     if os.environ.get("SR_LIVE_AUTO", "1") == "0":
@@ -10722,6 +10762,8 @@ def sr_live_tick(excel_counts):
         if due:
             _sr_live_reload_due(due, now)
             due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
+        if not _sr_is_night():
+            due = [c for c in due if c not in _SR_LIVE["data"]]      # 낮에는 처음 받는 항목만
         if not due:
             return
         # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (끝나면 지움, 6시간 지나면 무시)
@@ -10739,7 +10781,7 @@ def sr_live_status():
     now = time.time()
     if _SR_LIVE["busy"]:
         info = {"t": _SR_LIVE.get("beat", now), "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
-                "kakao": sum(_SR_KAKAO_USE["n"].values())}
+                "kakao": sum(_SR_KAKAO_USE["n"].values()), "mem": _sr_mem_mb()}
     else:
         info = _sr_lock_info()
         if info.get("deploy") != SR_DEPLOY_ID:
@@ -10753,10 +10795,12 @@ def sr_live_status():
         if running and info.get("cur") == cat:
             ago = int((now - float(info["t"])) // 60)
             note = (f"{info.get('prog') or '시작'} · 카카오 {int(info.get('kakao') or 0):,}회"
-                    f" · {'방금' if ago < 1 else f'{ago}분 전'} 소식")
+                    f" · 메모리 {int(info.get('mem') or 0)}MB · {'방금' if ago < 1 else f'{ago}분 전'} 소식")
             busy = True
         elif running and not has and not note:
             note, busy = "차례 기다리는 중", True
+        elif not running and cat in _SR_LIVE["data"] and not has and not note:
+            note = f"새벽 {SR_NIGHT_HOURS[0]}~{SR_NIGHT_HOURS[1]}시에 새로 받음"
         out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0), "busy": busy,
                     "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and cat in _SR_LIVE["data"] else "",
                     "note": note})
@@ -10783,8 +10827,12 @@ def admin_get_feature():
             _cnt["주차장"] = _cnt.get("공영주차장", 0) + _cnt.get("민영주차장", 0)
             sr_live_tick(_cnt)
         live = sr_live_status()
-        live.insert(0, {"cat": "공중화장실", "count": len(trip_load_toilets() or []), "date": trip_toilet_data_date(),
-                        "note": "", "sub": "출장 도구함과 같은 자료 (전국 건수)"})
+        live.append({"cat": "서버 메모리", "count": 0, "date": "", "busy": False,
+                     "note": "", "sub": f"지금 {_sr_mem_mb()}MB 사용 (한도 512MB)", "mem": True})
+        _d = _SR_LIVE_DF["df"]
+        _n = int((_d["구분"] == "공중화장실").sum()) if _d is not None else 0   # 안전로드에 실제로 나오는 건수 (4개 지역)
+        live.insert(0, {"cat": "공중화장실", "count": _n, "date": trip_toilet_data_date() if _n else "",
+                        "note": "", "sub": "출장 도구함 화장실 자료 중 광주·전남·전북·제주"})
     except Exception as e:
         live = [{"cat": "자동 갱신", "count": 0, "date": "", "note": f"상태 확인 실패: {e}"}]
     return jsonify(ok=True, on=v, live=live)
@@ -11765,13 +11813,14 @@ def stats():
             if(box && d.live){
               const e = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
               const badge = (t, bg, fg) => '<span style="flex:none;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:800;background:' + bg + ';color:' + fg + ';white-space:nowrap;">' + t + '</span>';
-              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 7일마다</span></div>' + d.live.map(x => {
+              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 7일마다 새벽 2~5시</span></div>' + d.live.map(x => {
                 const n = String(x.note || '');
                 let b, sub = x.sub || '';
                 if(x.busy && n !== '차례 기다리는 중'){ b = badge('받는 중', '#dbeafe', '#1d4ed8'); sub = n; }
                 else if(n === '차례 기다리는 중'){ b = badge('대기', '#f1f5f9', '#64748b'); }
                 else if(/^(갱신 실패|중단)/.test(n)){ b = badge(n.indexOf('중단') === 0 ? '중단' : '실패', '#fee2e2', '#b91c1c'); sub = n.replace(/^(갱신 실패|중단): ?/, ''); }
-                else if(x.date){ b = badge(e(x.date.slice(5).replace('-', '.')) + ' · ' + Number(x.count || 0).toLocaleString() + '건', '#dcfce7', '#15803d'); }
+                else if(x.mem){ b = badge(e(String(x.sub).replace(/^지금 | 사용.*$/g, '')), '#f1f5f9', '#475569'); sub = '한도 512MB · 넘으면 서버가 재시작됨'; }
+                else if(x.date){ if(/^새벽/.test(n)) sub = n; b = badge(e(x.date.slice(5).replace('-', '.')) + ' · ' + Number(x.count || 0).toLocaleString() + '건', '#dcfce7', '#15803d'); }
                 else { b = badge('엑셀 사용', '#f1f5f9', '#64748b'); sub = sub || n; }
                 return '<div style="padding:7px 0;border-top:1px solid #f1f5f9;">'
                   + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="font-weight:700;color:#334155;">' + e(x.cat) + '</span>' + b + '</div>'
