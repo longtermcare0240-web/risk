@@ -10563,8 +10563,12 @@ def _sr_live_refresh(due, old_counts):
 SR_LOCK_STALE = 20 * 60     # '받는 중' 표시가 20분 넘게 안 바뀌면 그 서버는 꺼진 걸로 봄 (재배포 등)
 
 
+# 이번 배포 표시: 같은 배포의 서버끼리는 같은 값. 재배포하면 바뀜
+SR_DEPLOY_ID = os.environ.get("RENDER_GIT_COMMIT", "") + "|" + str(int(os.path.getmtime(os.path.abspath(__file__))))
+
+
 def _sr_lock_write(t):
-    info = {"t": t, "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
+    info = {"t": t, "deploy": SR_DEPLOY_ID, "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
             "kakao": sum(_SR_KAKAO_USE["n"].values())}
     _sr_store_put("refresh_lock.txt", json.dumps(info, ensure_ascii=False).encode("utf-8"), "application/json")
 
@@ -10593,7 +10597,11 @@ def _sr_lock_info():
 
 
 def _sr_lock_time():
-    return float(_sr_lock_info().get("t") or 0)
+    """받는 중인 서버의 마지막 소식 시각. 이전 배포의 서버가 남긴 표시는 무시 (재배포하면 그 서버는 꺼졌으니 바로 다시 받음)"""
+    info = _sr_lock_info()
+    if info.get("deploy") != SR_DEPLOY_ID:
+        return 0.0
+    return float(info.get("t") or 0)
 
 
 def _sr_live_reload_due(due, now):
@@ -10649,6 +10657,8 @@ def sr_live_status():
                 "kakao": sum(_SR_KAKAO_USE["n"].values())}
     else:
         info = _sr_lock_info()
+        if info.get("deploy") != SR_DEPLOY_ID:
+            info = {"t": 0}
     running = now - float(info.get("t") or 0) < SR_LOCK_STALE
     out = []
     for cat in SR_LIVE_CATS:
