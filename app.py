@@ -611,9 +611,9 @@ def load_df():
 
 # 항목별로 앱에 보내는 추가 정보 (팝업·내 주변 찾기 조건용)
 
-EXTRA_INFO = {'공중화장실': ['개방시간', '비상벨', '장애인화장실'], '공영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '민영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '자동심장충격기': ['설치장소', '사용시간', '일요일사용'], '교통사고위험지역': ['사고건수', '보행자사고', '야간사고', '중상이상']}
+EXTRA_INFO = {'공중화장실': ['개방시간', '비상벨', '장애인화장실', '화장실명', '자료수정일'], '공영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '민영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '자동심장충격기': ['설치장소', '사용시간', '일요일사용'], '교통사고위험지역': ['사고건수', '보행자사고', '야간사고', '중상이상']}
 
-EXTRA_INFO_COLS = ['개방시간', '비상벨', '장애인화장실', '요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '설치장소', '사용시간', '일요일사용', '사고건수', '보행자사고', '야간사고', '중상이상']
+EXTRA_INFO_COLS = ['개방시간', '비상벨', '장애인화장실', '화장실명', '자료수정일', '요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '설치장소', '사용시간', '일요일사용', '사고건수', '보행자사고', '야간사고', '중상이상']
 
 
 
@@ -677,6 +677,9 @@ def row_to_dict(row):
 
     }
 
+    if feature_detail_on():
+        d["시설명"] = sr_place_name(row, category, address, town)
+
     # 항목별 추가 정보는 값이 있는 것만 보냄 (전송량 절약)
 
     for _c in (EXTRA_INFO.get(category, []) if feature_detail_on() else []):
@@ -691,6 +694,29 @@ def row_to_dict(row):
 
 
 
+
+
+# ===== 토글 ON: 목록·팝업 제목에 쓸 이름 =====
+# 엑셀에 이름 열이 있으면 그 값, 없으면 주소로 만듦 (예: 선운중앙로 결빙 구간)
+SR_NAME_COLS = ["화장실명", "시설명", "명칭", "이름", "주차장명", "설치기관명", "기관명", "지점명", "구간명", "장소명"]
+SR_NAME_SUFFIX = {"상습결빙지역": "결빙 구간", "교통사고위험지역": "사고 위험 지점", "공영주차장": "공영주차장",
+                  "민영주차장": "민영주차장", "자동심장충격기": "AED", "공중화장실": "공중화장실"}
+
+
+def sr_place_name(row, category, address, town):
+    for c in SR_NAME_COLS:
+        v = re.sub(r"\.0$", "", safe_str(row.get(c, "")))
+        if v and v != "0":
+            return v
+    place = ""
+    for tok in address.replace("(", " ").replace(")", " ").replace(",", " ").split():
+        if re.fullmatch(r"[가-힣][가-힣0-9]*(?:대로|로|길)", tok):
+            place = tok                        # 첫 도로 이름 (선운중앙로67번길 등)
+            break
+    if not place and town and town != "읍면동없음":
+        place = town
+    suffix = SR_NAME_SUFFIX.get(category, category)
+    return f"{place} {suffix}" if place else suffix
 
 
 HTML = r"""
@@ -1660,6 +1686,18 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 .sr-rv-tag{position:absolute;left:4px;top:4px;z-index:3;width:10px;height:10px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.25);}
 .sr-txt{flex:1;min-width:0;}
 .sr-txt b{display:block;}
+.sr-nm{font-size:13px;font-weight:700;color:#334155;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sr-upd{display:inline-block;margin-left:4px;padding:0 6px;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-weight:500;}
+.sr-upd.old{border-color:#f3c98b;color:#b45309;background:#fff7ed;}
+/* 로드뷰 속 시설 핀 (출장 도구함과 같은 모양) */
+.rvpin{display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
+.rvpin b{background:#e11d48;color:#fff;font-size:14px;font-weight:800;padding:6px 11px;border-radius:999px;white-space:nowrap;border:2px solid #fff}
+.rvpin i{width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-top:13px solid #e11d48;margin-top:-1px;animation:rvbob 1.1s ease-in-out infinite}
+@keyframes rvbob{50%{transform:translateY(5px)}}
+.rvpin.sm{filter:none}
+.rvpin.sm i{border-left-width:19px;border-right-width:19px;border-top-width:30px;border-top-color:#ff1f4b;
+  filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 2px 4px rgba(0,0,0,.7));
+  animation:rvbob .9s ease-in-out infinite}
 .sr-addr{font-size:12px;color:#6b7280;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:keep-all;}
 .mobile-result-item.sr-rich .mobile-result-distance{position:static!important;transform:none!important;flex-shrink:0;align-self:center;}
 @media (max-width:900px){
@@ -2690,12 +2728,13 @@ function srEnhanceList(){
     const addr = el.dataset.addr || "";
     const id = "srrv_" + (++srRvSeq);
     const area = el.innerHTML.split("<br>")[1] || "";
+    const nm = el.dataset.name || "";
     el.classList.add("sr-rich");
     el.innerHTML =
       `<div class="sr-rv" id="${id}_box" data-pano="${id}" data-lat="${el.dataset.lat}" data-lng="${el.dataset.lng}" data-gubun="${escapeHtml(el.dataset.gubun || "")}">` +
         `<div class="sr-rv-pano" id="${id}"></div><div class="sr-rv-msg" id="${id}_msg">로드뷰</div><span class="sr-rv-tag" style="background:${SR_TYPE_COLOR[el.dataset.gubun] || "#2563eb"};"></span><div class="sr-rv-cover"></div>` +
       `</div>` +
-      `<div class="sr-txt"><b>${label}</b><div class="sr-addr">${addr ? escapeHtml(addr) : area}</div></div>` +
+      `<div class="sr-txt"><b>${nm ? escapeHtml(nm) : label}</b><div class="sr-addr">${addr ? escapeHtml(addr) : area}</div></div>` +
       `<span class="mobile-result-distance">${dist}</span>`;
     const box = document.getElementById(id + "_box");
     if(srRvObserver) srRvObserver.observe(box);
@@ -2836,7 +2875,7 @@ function showMobileResults(items, userLat, userLng){
 
     el.className = "mobile-result-item";
 
-    el.dataset.gubun = item.구분; el.dataset.lat = item.위도; el.dataset.lng = item.경도; el.dataset.addr = item.주소 || "";
+    el.dataset.gubun = item.구분; el.dataset.lat = item.위도; el.dataset.lng = item.경도; el.dataset.addr = item.주소 || ""; el.dataset.name = item.시설명 || item.화장실명 || "";
 
     el.innerHTML = `
 
@@ -3139,7 +3178,7 @@ function buildPopupHtml(item){
 
 
 
-  <div class="popup-title">${gubunLabel(item.구분)}</div>
+  <div class="popup-title">${(window.FEATURE_DETAIL && (item.시설명 || item.화장실명)) ? escapeHtml(item.시설명 || item.화장실명) + srUpdChip(item.자료수정일) : gubunLabel(item.구분)}</div>
 
   <div class="popup-meta">
 
@@ -3214,7 +3253,7 @@ function buildPopupHtml(item){
 async function shareSpot(sid){
   const item = (window._popupItems || {})[sid];
   if(!item) return;
-  const name = item.구분 || "위치";
+  const name = (window.FEATURE_DETAIL && (item.시설명 || item.화장실명)) || item.구분 || "위치";
   const addr = item.주소 || ((item.시군구||"") + " " + (item.읍면동||""));
   const mapUrl = "https://map.kakao.com/link/map/" + encodeURIComponent(name) + "," + item.위도 + "," + item.경도;
   const shareText = name + "\n" + addr + "\n" + mapUrl;
@@ -3254,6 +3293,34 @@ function legacyCopyText(text){
 
 
 
+/* 로드뷰 속 시설 핀 (출장 도구함 화장실과 같은 방식). 건물에 붙어 같이 움직이고, 카메라는 핀 쪽으로.
+   작은 로드뷰(목록)는 화살표만, 팝업은 이름표 + 사진 찍힌 곳에서 거리 */
+const SR_PIN_LABEL = {"공중화장실":"화장실","공영주차장":"주차장","민영주차장":"주차장","자동심장충격기":"AED","상습결빙지역":"결빙 구간","교통사고위험지역":"사고 위험"};
+function srRvPin(rv, lat, lng, gubun, small){
+  const pos = new kakao.maps.LatLng(lat, lng);
+  const pin = document.createElement("div");
+  pin.className = small ? "rvpin sm" : "rvpin";
+  pin.innerHTML = "<i></i>";
+  const ov = new kakao.maps.CustomOverlay({position:pos, content:pin, xAnchor:.5, yAnchor:1});
+  kakao.maps.event.addListener(rv, "init", function(){
+    try{
+      const p = rv.getPosition();
+      if(!p) return;
+      if(!small){
+        const d = Math.round(calcDistance(p.getLat(), p.getLng(), lat, lng));
+        pin.innerHTML = `<b>${SR_PIN_LABEL[gubun] || "여기"}${d >= 10 ? " · " + (d < 1000 ? d + "m" : (d / 1000).toFixed(1) + "km") : ""}</b><i></i>`;
+      }
+      ov.setMap(rv);
+      let vp = null;
+      try{ vp = rv.getProjection().viewpointFromCoords(ov.getPosition(), ov.getAltitude()); }catch(e){}
+      if(vp){ rv.setViewpoint({pan:vp.pan, tilt:vp.tilt, zoom:0}); return; }
+      const R = Math.PI / 180, f1 = p.getLat() * R, f2 = lat * R, dl = (lng - p.getLng()) * R;
+      const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+      rv.setViewpoint({pan:((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360, tilt:0, zoom:0});
+    }catch(e){}
+  });
+}
+
 // 로드뷰 초기화 함수 (팝업 열릴 때 호출)
 
 function initRoadview(containerId, lat, lng, category){
@@ -3276,7 +3343,13 @@ function initRoadview(containerId, lat, lng, category){
 
       const position = new kakao.maps.LatLng(lat, lng);
 
-      rvClient.getNearestPanoId(position, 100, function(panoId){
+      const small = containerId.indexOf("srrv_") === 0;
+
+      const radii = (window.FEATURE_DETAIL && !small) ? [100, 200] : [100];
+
+      (function tryR(rs){ rvClient.getNearestPanoId(position, rs[0], function(panoId){
+
+        if(panoId === null && rs.length > 1) return tryR(rs.slice(1));
 
         if(panoId === null){
 
@@ -3285,6 +3358,8 @@ function initRoadview(containerId, lat, lng, category){
         } else {
 
           if(msg) msg.style.display = "none";
+
+          if(window.FEATURE_DETAIL){ srRvPin(roadview, lat, lng, category, small); roadview.setPanoId(panoId, position); return; }
 
           roadview.setPanoId(panoId, position);
 
@@ -3348,7 +3423,7 @@ function initRoadview(containerId, lat, lng, category){
 
         }
 
-      });
+      }); })(radii);
 
     }catch(e){
 
@@ -3476,7 +3551,7 @@ function drawUserLocation(lat,lng){
 
     [lat,lng],
 
-    { icon: buildUserIcon() }
+    { icon: buildUserIcon(), zIndexOffset: 1000 }
 
   ).addTo(map);
 
@@ -4406,6 +4481,10 @@ function openMobileMap(){
 
 
     window.mobileLeafletMap.addLayer(window.mobileMarkerGroup);
+    // 내 위치(초록 원·점)는 시설 마커와 같이 묶이지 않게 따로 그림. 마커를 지울 때 같이 지움
+    window.mobileUserGroup = L.layerGroup().addTo(window.mobileLeafletMap);
+    (function(g){ const cl = g.clearLayers.bind(g);
+      g.clearLayers = function(){ window.mobileUserGroup.clearLayers(); return cl(); }; })(window.mobileMarkerGroup);
 
 
 
@@ -4611,15 +4690,15 @@ function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
 
     [userLat, userLng],
 
-    { icon: buildUserIcon() }
+    { icon: buildUserIcon(), zIndexOffset: 1000 }
 
   );
 
 
 
-  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileUserGroup.addLayer(userCircle);
 
-  window.mobileMarkerGroup.addLayer(userMarker);
+  window.mobileUserGroup.addLayer(userMarker);
 
 
 
@@ -4647,7 +4726,7 @@ function syncToMobileMap(items, userLat=null, userLng=null, radiusMeter=null){
 
     );
 
-    window.mobileMarkerGroup.addLayer(circle);
+    window.mobileUserGroup.addLayer(circle);
 
   }
 
@@ -5307,7 +5386,7 @@ function showResultList(items, userLat, userLng){
 
     el.className = "mobile-result-item";
 
-    el.dataset.gubun = item.구분; el.dataset.lat = item.위도; el.dataset.lng = item.경도; el.dataset.addr = item.주소 || "";
+    el.dataset.gubun = item.구분; el.dataset.lat = item.위도; el.dataset.lng = item.경도; el.dataset.addr = item.주소 || ""; el.dataset.name = item.시설명 || item.화장실명 || "";
 
 
 
@@ -5628,6 +5707,7 @@ if(window.mobileMarkerGroup){
   var __rm = [];
   window.mobileMarkerGroup.eachLayer(function(l){ if(!l.itemData) __rm.push(l); });
   __rm.forEach(function(l){ window.mobileMarkerGroup.removeLayer(l); });
+  if(window.mobileUserGroup) window.mobileUserGroup.clearLayers();
 
 
 
@@ -5657,15 +5737,15 @@ if(window.mobileMarkerGroup){
 
     [lat, lng],
 
-    { icon: buildUserIcon() }
+    { icon: buildUserIcon(), zIndexOffset: 1000 }
 
   );
 
 
 
-  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileUserGroup.addLayer(userCircle);
 
-  window.mobileMarkerGroup.addLayer(userMarker);
+  window.mobileUserGroup.addLayer(userMarker);
 
 }
 
@@ -5843,15 +5923,15 @@ if(isMobile() && window.mobileLeafletMap){
 
     [lat, lng],
 
-    { icon: buildUserIcon() }
+    { icon: buildUserIcon(), zIndexOffset: 1000 }
 
   );
 
 
 
-  window.mobileMarkerGroup.addLayer(userCircle);
+  window.mobileUserGroup.addLayer(userCircle);
 
-  window.mobileMarkerGroup.addLayer(userMarker);
+  window.mobileUserGroup.addLayer(userMarker);
 
 }
 
@@ -7825,6 +7905,14 @@ function aedOpenNow(item){
   return timeRangeOpen(aedTodayRange(item));
 }
 
+/* 화장실 자료 마지막 수정 연월. 2년 넘으면 주황색 (현장 확인 필요) */
+function srUpdChip(u){
+  if(!u || !/^\d{4}-\d{2}/.test(u)) return "";
+  const y = +u.slice(0,4), m = +u.slice(5,7), now = new Date();
+  const old = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m) >= 24;
+  return `<span class="sr-upd${old ? " old" : ""}" title="지자체가 이 화장실 정보를 마지막으로 고친 때">${y}.${String(m).padStart(2,"0")} 자료</span>`;
+}
+
 function infoLine(html){
   return `<div class="popup-meta" style="margin-top:2px;">${html}</div>`;
 }
@@ -9586,7 +9674,7 @@ def spot_location():
 
     try:
 
-        df = load_df()
+        df = sr_df()
 
         row = df[df["순번"].astype(str) == str(spot_id)]
 
@@ -9684,6 +9772,808 @@ def feature_detail_on():
     return v
 
 
+# ===== 토글 ON: 공중화장실을 엑셀 대신 출장 도구함 화장실 자료(행안부 전국 자료, 7일마다 자동 갱신)로 =====
+# 안전로드는 광주·전남·전북·제주만 보여줌. 다른 항목(결빙·사고·주차장·AED)은 엑셀 그대로.
+# 첫 이름으로 통일 (광주·전남은 2026.7.1 전남광주통합특별시로 통합. 옛 주소 표기도 같은 곳으로 봄)
+SR_TOILET_REGIONS = {
+    "전남광주": ("전남광주통합특별시", "전남광주특별시", "광주특별시", "광주광역시", "광주", "전라남도", "전남"),
+    "전북": ("전북특별자치도", "전라북도", "전북"),
+    "제주": ("제주특별자치도", "제주도", "제주"),
+}
+_SR_TOILET_DF = {"key": None, "df": None, "rows": None}
+SR_GWANGJU_GU = {"동구", "서구", "남구", "북구", "광산구"}
+
+
+def _sr_region(sido):
+    for k, names in SR_TOILET_REGIONS.items():
+        if sido in names:
+            return k
+    return None
+
+
+def _sr_df_with_trip_toilets(base):
+    rows = trip_load_toilets()
+    if not rows:
+        return base
+    key = (id(base), id(rows), len(rows))
+    if _SR_TOILET_DF["key"] == key:
+        return _SR_TOILET_DF["df"]
+    import numpy as np
+    # 시도 이름 통일: 엑셀에 광주광역시·전라남도·전라북도 같은 옛 이름이 섞여 있어도 한 이름으로 (다른 항목도 같이)
+    base = base.copy()
+    base["시도"] = [SR_TOILET_REGIONS[_sr_region(v)][0] if _sr_region(v) else v for v in base["시도"]]
+    cities = {}
+    for sd, ct in zip(base["시도"], base["시군구"]):
+        cities.setdefault(sd, set()).add(ct)
+    old_t = base[base["구분"] == "공중화장실"]
+    addr_town = {a: t for a, t in zip(old_t["주소"], old_t["읍면동"]) if a and t != "읍면동없음"}
+    # 읍면동을 주소로 못 찾으면 같은 시군구의 가장 가까운 기존 지점 읍면동을 씀 (도로명주소 대비)
+    ref = base[base["읍면동"] != "읍면동없음"]
+    near = {k: (g["위도"].to_numpy(), g["경도"].to_numpy(), g["읍면동"].tolist())
+            for k, g in ref.groupby(["시도", "시군구"])}
+
+    def town_of(sd, ct, addr, lat, lng):
+        t = addr_town.get(addr) or extract_town_from_address(addr)
+        if t != "읍면동없음" and not t[0].isdigit():      # '101동' 같은 건물 동은 제외
+            return t
+        g = near.get((sd, ct))
+        if not g:
+            return "읍면동없음"
+        d = (g[0] - lat) ** 2 + ((g[1] - lng) * 0.82) ** 2
+        i = int(np.argmin(d))
+        return g[2][i] if d[i] < 0.03 ** 2 else "읍면동없음"   # 약 3km 안
+
+    recs = []
+    for t in rows:
+        _id, name, addr, lat, lng, op, bell, acc = t[:8]
+        upd = t[8] if len(t) > 8 else ""
+        tok = str(addr).split()
+        if op == "미개방" or len(tok) < 2:
+            continue
+        k = _sr_region(tok[0])
+        if not k:
+            continue
+        sd = SR_TOILET_REGIONS[k][0]
+        ct = tok[1]
+        if len(tok) > 2 and ct.endswith("시") and tok[2].endswith("구") and f"{ct} {tok[2]}" in cities.get(sd, ()):
+            ct = f"{ct} {tok[2]}"
+        if k == "전남광주" and ct in SR_GWANGJU_GU:
+            ct = "광주" + ct                     # 안전로드 엑셀 표기 (광주광산구 등)
+        recs.append({"구분": "공중화장실", "시도": sd, "시군구": ct, "읍면동": town_of(sd, ct, addr, lat, lng),
+                     "주소": " ".join(tok[1:]), "위도": float(lat), "경도": float(lng), "날짜": upd,
+                     "개방시간": op, "비상벨": "Y" if bell else "N", "장애인화장실": "Y" if acc else "N",
+                     "화장실명": name, "자료수정일": upd})
+    if not recs:
+        _SR_TOILET_DF.update(key=key, df=base, rows=rows)
+        return base
+    other = base[base["구분"] != "공중화장실"]
+    new = pd.DataFrame(recs).reindex(columns=base.columns)
+    for c in new.columns:
+        if c not in ("위도", "경도"):
+            new[c] = new[c].fillna("")
+    start = int(base["순번"].max()) + 1      # 다른 항목 순번은 그대로 두고 화장실만 뒤에 붙임
+    new["순번"] = range(start, start + len(new))
+    df = pd.concat([other, new], ignore_index=True)
+    _SR_TOILET_DF.update(key=key, df=df, rows=rows)
+    return df
+
+
+_SR_LIVE_DF = {"key": None, "df": None}
+
+
+def _sr_apply_live(df):
+    """자동 갱신 자료가 있는 항목(결빙·사고·주차장·AED)은 엑셀 대신 그 자료로"""
+    key = (id(df), _SR_LIVE["ver"])
+    if _SR_LIVE_DF["key"] == key:
+        return _SR_LIVE_DF["df"]
+    out = df.copy()
+    out["시도"] = [SR_TOILET_REGIONS[_sr_region(v)][0] if _sr_region(v) else v for v in out["시도"]]
+    if "시설명" not in out.columns:
+        out["시설명"] = ""
+    for cat, live in list(_SR_LIVE["data"].items()):
+        gubuns = ("공영주차장", "민영주차장") if cat == "주차장" else (cat,)
+        old_n = int(out["구분"].isin(gubuns).sum())
+        if old_n and len(live) < old_n * SR_LIVE_SHRINK_GUARD:
+            _SR_LIVE["note"][cat] = f"엑셀 {old_n:,}건보다 너무 적어({len(live):,}건) 엑셀 사용"
+            continue
+        new = live.reindex(columns=out.columns)
+        for c in new.columns:
+            if c not in ("위도", "경도"):
+                new[c] = new[c].fillna("")
+        new["사고설명"], new["사진URL"] = "", ""
+        start = int(pd.to_numeric(out["순번"], errors="coerce").max() or 0) + 1
+        new["순번"] = range(start, start + len(new))
+        out = pd.concat([out[~out["구분"].isin(gubuns)], new], ignore_index=True)
+    _SR_LIVE_DF.update(key=key, df=out)
+    return out
+
+
+def sr_df():
+    """안전로드 지도 자료. 토글 OFF = 엑셀 그대로 / ON = 화장실은 출장 도구함 자료, 나머지는 자동 갱신 자료로"""
+    base = load_df()
+    if not feature_detail_on():
+        return base
+    try:
+        df = _sr_df_with_trip_toilets(base)
+    except Exception as e:
+        print("안전로드 화장실(출장 도구함 자료) 합치기 실패, 엑셀 사용:", e)
+        df = base
+    try:
+        cnt = base["구분"].value_counts().to_dict()
+        cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
+        sr_live_tick(cnt)
+        return _sr_apply_live(df)
+    except Exception as e:
+        print("안전로드 자동 갱신 자료 합치기 실패, 엑셀 사용:", e)
+        return df
+
+
+# =====================================================================
+# 안전로드 자료 자동 갱신 (토글 ON) — 데이터 갱신 프로그램(exe)과 같은 API·같은 규칙을 서버에서 7일마다
+#   상습결빙지역·교통사고위험지역: 생활안전지도(safemap) IF_0103 / IF_0093  (SAFEMAP_KEY)
+#   주차장: 공공데이터포털 전국주차장 표준데이터                       (PARKING_KEY, 없으면 DATA_GO_KR_KEY)
+#   자동심장충격기: 공공데이터포털 AED 정보                           (DATA_GO_KR_KEY)
+#   시도·시군구·읍면동은 카카오 좌표→행정구역 (exe와 같은 정리 규칙). 조회 결과는 저장소에 보관해 다시 안 부름
+#   받은 자료는 Supabase 저장소(버킷 safetyroad, 비공개)에 CSV로 보관 → 재시작·재배포해도 유지
+#   실패하거나 건수가 기존 엑셀의 절반도 안 되면 엑셀 그대로 씀
+# =====================================================================
+import math
+import csv
+import io
+from collections import Counter
+SR_LIVE_CATS = ["상습결빙지역", "교통사고위험지역", "주차장", "자동심장충격기"]
+SR_LIVE_SIDOS = ["전남광주통합특별시", "전북특별자치도", "제주특별자치도"]
+SR_LIVE_REFRESH_SEC = 7 * 86400
+SR_LIVE_PAGE_SIZE = 1000
+SR_LIVE_MAX_PAGES = 2000
+SR_LIVE_SHRINK_GUARD = 0.5
+# 카카오는 앱 검색과 같은 키를 쓰므로 갱신은 하루 API별 이만큼만 (넘으면 다음 날 이어서)
+SR_LIVE_KAKAO_DAILY = int(os.environ.get("SR_KAKAO_DAILY", "30000"))
+SR_SAFEMAP_URL = "http://safemap.go.kr/openapi2/{code}"
+SR_PARKING_URL = "https://api.data.go.kr/openapi/tn_pubr_prkplce_info_api"
+SR_AED_URL = "https://apis.data.go.kr/B552657/AEDInfoInqireService/getEgytAedManageInfoInqire"
+SR_SIDO_ALIASES = {
+    "전북특별자치도": ["전라북도", "전북"],
+    "전남광주통합특별시": ["광주광역시", "전라남도", "광주", "전남"],
+    "제주특별자치도": ["제주도", "제주"],
+}
+SR_ALIAS_TO_SIDO = {}
+for _s, _al in SR_SIDO_ALIASES.items():
+    SR_ALIAS_TO_SIDO[_s] = _s
+    for _a in _al:
+        SR_ALIAS_TO_SIDO[_a] = _s
+SR_AED_Q0 = {s: [a for a in [s] + al if a.endswith(("시", "도")) and len(a) >= 3] for s, al in SR_SIDO_ALIASES.items()}
+SR_SIDO_BBOX = {"전북특별자치도": (125.9, 35.25, 127.95, 36.18), "전남광주통합특별시": (124.9, 33.8, 127.95, 35.55),
+                "제주특별자치도": (125.95, 32.95, 127.05, 34.1)}
+SR_CTPRVN = {"29": "전남광주통합특별시", "46": "전남광주통합특별시", "45": "전북특별자치도", "52": "전북특별자치도",
+             "50": "제주특별자치도"}
+SR_ROAD_TYPES = {"시도", "국도", "고속국도", "구도", "광역시도", "일반국도", "군도", "고속도로", "도시계획도로", "특별광역시도",
+                 "지방도", "국가지원지방도", "시군도", "농어촌도로"}
+SR_LIVE_COLS = ["구분", "시도", "시군구", "읍면동", "주소", "위도", "경도", "시설명"]
+SR_LIVE_EXTRA = {"주차장": ["요금", "요금상세", "운영평일", "운영토요일", "운영공휴일"],
+                 "자동심장충격기": ["설치장소", "사용시간", "일요일사용"],
+                 "교통사고위험지역": ["사고건수", "보행자사고", "야간사고", "중상이상"]}
+SR_LIVE_OBJ = {"상습결빙지역": "ice", "교통사고위험지역": "acc", "주차장": "parking", "자동심장충격기": "aed"}
+_SR_LIVE = {"data": {}, "at": {}, "note": {}, "count": {}, "busy": False, "loaded": False, "ver": 0}
+_SR_LIVE_LOCK = threading.Lock()
+_SR_KAKAO_USE = {"date": "", "n": {}}
+_SR_KAKAO_CACHE = {"d": None, "dirty": 0}
+
+
+class _SrStop(Exception):
+    pass
+
+
+def _sr_s(v):
+    return "" if v is None else str(v).strip()
+
+
+def _sr_num(v):
+    try:
+        f = float(str(v).replace(",", "").strip())
+        return None if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _sr_int(v):
+    try:
+        return int(float(str(v).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+# ---- 저장소 ----
+def _sr_store():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None, None
+    return SUPABASE_URL.rstrip("/") + "/storage/v1", {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+
+
+def _sr_store_put(name, data, ctype):
+    base, h = _sr_store()
+    if not base:
+        return False
+    requests.post(f"{base}/bucket", headers=h, json={"id": "safetyroad", "name": "safetyroad", "public": False}, timeout=15)
+    r = requests.post(f"{base}/object/safetyroad/{name}", data=data, headers={**h, "x-upsert": "true", "Content-Type": ctype},
+                      timeout=120)
+    return r.ok
+
+
+def _sr_store_get(name):
+    """→ (bytes, 보관 시각) 또는 None"""
+    base, h = _sr_store()
+    if not base:
+        return None
+    try:
+        r = requests.get(f"{base}/object/authenticated/safetyroad/{name}", headers=h, timeout=60)
+        if not r.ok:
+            return None
+        try:
+            from email.utils import parsedate_to_datetime
+            at = parsedate_to_datetime(r.headers.get("Last-Modified", "")).timestamp()
+        except Exception:
+            at = time.time()
+        return r.content, at
+    except Exception:
+        return None
+
+
+# ---- 응답 해석 (exe parse_response 와 같은 방식: JSON/XML 모두, item 목록 자동 탐색) ----
+def _sr_flat(d):
+    return {str(k): ("" if v is None else str(v).strip()) for k, v in d.items() if not isinstance(v, (dict, list))}
+
+
+def _sr_json_find(o, key):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if str(k).lower() == key and not isinstance(v, (dict, list)):
+                return v
+        for v in o.values():
+            r = _sr_json_find(v, key)
+            if r is not None:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = _sr_json_find(v, key)
+            if r is not None:
+                return r
+    return None
+
+
+def _sr_json_items(data):
+    best = []
+
+    def walk(o):
+        nonlocal best
+        if isinstance(o, list):
+            dicts = [x for x in o if isinstance(x, dict)]
+            if dicts and len(dicts) == len(o) and len(o) > len(best):
+                best = o
+            for x in o:
+                walk(x)
+        elif isinstance(o, dict):
+            for k, v in o.items():
+                if str(k).lower() in ("item", "row") and isinstance(v, dict) and not best:
+                    best = [v]
+                walk(v)
+    walk(data)
+    return [_sr_flat(x) for x in best]
+
+
+def _sr_parse(content):
+    text = content.decode("utf-8", errors="replace").strip() if isinstance(content, bytes) else str(content).strip()
+    if not text:
+        return [], None, "빈 응답"
+    if text[0] in "{[":
+        try:
+            data = json.loads(text)
+        except ValueError as e:
+            return [], None, f"JSON 해석 실패: {e}"
+        items = _sr_json_items(data)
+        total = _sr_int(_sr_json_find(data, "totalcount"))
+        code = _sr_json_find(data, "resultcode")
+        msg = _sr_json_find(data, "resultmsg") or _sr_json_find(data, "errmsg") or _sr_json_find(data, "message")
+    else:
+        import xml.etree.ElementTree as ET
+        try:
+            root = ET.fromstring(text.encode("utf-8"))
+        except ET.ParseError:
+            return [], None, "응답 해석 실패: " + text[:200]
+
+        def xf(key):
+            for el in root.iter():
+                if el.tag.split("}")[-1].lower() == key and (el.text or "").strip():
+                    return el.text.strip()
+            return None
+        items = [{c.tag.split("}")[-1]: (c.text or "").strip() for c in el} for el in root.iter()
+                 if el.tag.split("}")[-1].lower() in ("item", "row") and len(list(el))]
+        total = _sr_int(xf("totalcount"))
+        code = xf("resultcode") or xf("returnreasoncode")
+        msg = xf("resultmsg") or xf("returnauthmsg") or xf("errmsg")
+    err = None
+    if not items:
+        if code is not None and str(code).strip().upper() not in {"OK", "SUCCESS", "0", "INFO-000", "200", "NORMAL_SERVICE", "00", "000"}:
+            err = f"[{code}] {msg or ''}".strip()
+        elif msg and re.search(r"(error|invalid|not registered|unauthor|인증|오류|실패)", str(msg), re.I):
+            err = str(msg)
+    return items, total, err
+
+
+def _sr_http(url, params, headers=None, timeout=30, tries=3):
+    last = None
+    for i in range(tries):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code >= 500:
+                raise requests.HTTPError(f"HTTP {r.status_code}")
+            return r
+        except requests.RequestException as e:
+            last = e
+            time.sleep(1.5 * (i + 1))
+    raise RuntimeError(f"접속 실패: {last}")
+
+
+def _sr_paged(url, base, label):
+    """exe _paged 와 같음: 서버가 한 번에 주는 최대 건수에 맞춰 페이지 크기를 줄이고, 같은 페이지가 반복되면 멈춤"""
+    page, got, total, prev_first, size = 1, 0, None, None, SR_LIVE_PAGE_SIZE
+    while page <= SR_LIVE_MAX_PAGES:
+        r = _sr_http(url, {**base, "pageNo": page, "numOfRows": size})
+        items, tot, err = _sr_parse(r.content)
+        if page == 1 and tot and len(items) < size and len(items) < tot:
+            size = len(items)
+        if r.status_code >= 400 and not items:
+            raise RuntimeError(f"{label}: HTTP {r.status_code} {err or r.text[:200]}")
+        if err:
+            raise RuntimeError(f"{label}: {err}")
+        if tot is not None:
+            total = tot
+        if not items:
+            return
+        first = json.dumps(items[0], ensure_ascii=False, sort_keys=True)
+        if first == prev_first:
+            return
+        prev_first = first
+        got += len(items)
+        yield items
+        if total is not None and got >= total:
+            return
+        page += 1
+
+
+def _sr_fetch(cat):
+    if cat in ("상습결빙지역", "교통사고위험지역"):
+        key = os.environ.get("SAFEMAP_KEY", "")
+        if not key:
+            raise RuntimeError("SAFEMAP_KEY(생활안전정보 인증키) 환경변수가 없습니다")
+        code = "IF_0103" if cat == "상습결빙지역" else "IF_0093"
+        yield from _sr_paged(SR_SAFEMAP_URL.format(code=code), {"serviceKey": key, "returnType": "json"}, code)
+    elif cat == "주차장":
+        cands = list(dict.fromkeys(k for k in (os.environ.get("PARKING_KEY"), os.environ.get("DATA_GO_KR_KEY")) if k))
+        if not cands:
+            raise RuntimeError("PARKING_KEY(공공데이터 키2) 환경변수가 없습니다")
+        for i, key in enumerate(cands):
+            try:
+                yield from _sr_paged(SR_PARKING_URL, {"serviceKey": key, "type": "json"}, "전국주차장")
+                return
+            except RuntimeError as e:
+                if "SERVICE_KEY" in str(e) and i < len(cands) - 1:
+                    continue        # 키 인증 실패 → 다른 키로
+                raise
+    elif cat == "자동심장충격기":
+        key = os.environ.get("DATA_GO_KR_KEY", "")
+        if not key:
+            raise RuntimeError("DATA_GO_KR_KEY(공공데이터포털 인증키) 환경변수가 없습니다")
+        for sido in SR_LIVE_SIDOS:
+            for q0 in SR_AED_Q0.get(sido, [sido]):
+                yield from _sr_paged(SR_AED_URL, {"serviceKey": key, "Q0": q0}, f"AED {q0}")
+
+
+# ---- 좌표 ----
+def _sr_in_korea(lon, lat):
+    return 124.0 <= lon <= 132.0 and 32.8 <= lat <= 39.0
+
+
+def _sr_to_wgs84(x, y, crs=None):
+    if x is None or y is None:
+        return None
+    if crs is None:
+        if _sr_in_korea(x, y) or _sr_in_korea(y, x):
+            crs = 4326
+        elif 13000000 < x < 15000000 and 3500000 < y < 5000000:
+            crs = 3857
+    r = None
+    if crs == 4326:
+        r = (x, y) if _sr_in_korea(x, y) else ((y, x) if _sr_in_korea(y, x) else None)
+    elif crs == 3857:
+        lon = x / 6378137.0 * 180 / math.pi
+        lat = (2 * math.atan(math.exp(y / 6378137.0)) - math.pi / 2) * 180 / math.pi
+        r = (lon, lat)
+    if r and _sr_in_korea(r[0], r[1]):
+        return float(r[0]), float(r[1])
+    return None
+
+
+# ---- 카카오 (조회 결과는 저장소에 보관 → 같은 좌표는 다시 안 부름) ----
+def _sr_kakao_cache():
+    if _SR_KAKAO_CACHE["d"] is None:
+        got = _sr_store_get("kakao_cache.json")
+        try:
+            _SR_KAKAO_CACHE["d"] = json.loads(got[0].decode("utf-8")) if got else {}
+        except Exception:
+            _SR_KAKAO_CACHE["d"] = {}
+    return _SR_KAKAO_CACHE["d"]
+
+
+def _sr_kakao_save():
+    if _SR_KAKAO_CACHE["dirty"] and _SR_KAKAO_CACHE["d"] is not None:
+        try:
+            _sr_store_put("kakao_cache.json", json.dumps(_SR_KAKAO_CACHE["d"], ensure_ascii=False).encode("utf-8"),
+                          "application/json")
+            _SR_KAKAO_CACHE["dirty"] = 0
+        except Exception:
+            pass
+
+
+def _sr_kakao_get(path, params):
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    if _SR_KAKAO_USE["date"] != today:
+        _SR_KAKAO_USE.update(date=today, n={})
+    if _SR_KAKAO_USE["n"].get(path, 0) >= SR_LIVE_KAKAO_DAILY:
+        raise _SrStop(f"카카오 오늘 몫({SR_LIVE_KAKAO_DAILY:,}회) 다 씀 → 내일 이어서")
+    if not KAKAO_KEY:
+        raise _SrStop("KAKAO_KEY 환경변수가 없습니다")
+    _SR_KAKAO_USE["n"][path] = _SR_KAKAO_USE["n"].get(path, 0) + 1
+    r = _sr_http("https://dapi.kakao.com/v2/local" + path, params, headers={"Authorization": f"KakaoAK {KAKAO_KEY}"})
+    if r.status_code in (401, 403, 429):
+        raise _SrStop(f"카카오 {r.status_code}")
+    if r.status_code >= 400:
+        return None
+    time.sleep(0.02)
+    return r.json()
+
+
+def _sr_kakao_cached(key, fn):
+    c = _sr_kakao_cache()
+    if key in c:
+        return c[key] or None
+    val = fn()
+    c[key] = val or {}
+    _SR_KAKAO_CACHE["dirty"] += 1
+    if _SR_KAKAO_CACHE["dirty"] >= 2000:
+        _sr_kakao_save()
+    return val or None
+
+
+def _sr_kakao_region(lon, lat):
+    def fn():
+        d = _sr_kakao_get("/geo/coord2regioncode.json", {"x": lon, "y": lat}) or {}
+        for doc in d.get("documents", []):
+            if doc.get("region_type") == "B":
+                return {"r1": doc.get("region_1depth_name", ""), "r2": doc.get("region_2depth_name", ""),
+                        "r3": doc.get("region_3depth_name", "")}
+        return None
+    return _sr_kakao_cached(f"rc|{lon:.6f},{lat:.6f}", fn)
+
+
+def _sr_address_of(lon, lat):
+    def fn():
+        d = _sr_kakao_get("/geo/coord2address.json", {"x": lon, "y": lat}) or {}
+        docs = d.get("documents") or []
+        if not docs:
+            return None
+        a = (docs[0].get("address") or {}).get("address_name") or (docs[0].get("road_address") or {}).get("address_name") or ""
+        return {"addr": a} if a else None
+    return (_sr_kakao_cached(f"c2a|{lon:.6f},{lat:.6f}", fn) or {}).get("addr", "")
+
+
+def _sr_geocode(query):
+    if not query:
+        return None
+
+    def fn():
+        for path in ("/search/address.json", "/search/keyword.json"):
+            d = _sr_kakao_get(path, {"query": query, "size": 1}) or {}
+            docs = d.get("documents") or []
+            if docs:
+                return {"x": float(docs[0]["x"]), "y": float(docs[0]["y"])}
+        return None
+    return _sr_kakao_cached(f"geo|{query}", fn)
+
+
+# ---- 행 만들기 (exe make_row / extra_fields 와 같은 규칙) ----
+def _sr_sido_from_address(addr):
+    tok = addr.split()[0] if addr and addr.split() else ""
+    return SR_ALIAS_TO_SIDO.get(tok)
+
+
+def _sr_strip_sido(addr):
+    toks = (addr or "").split()
+    if toks and toks[0] in SR_ALIAS_TO_SIDO:
+        toks = toks[1:]
+    return " ".join(toks)
+
+
+def _sr_clean_addr(addr):
+    a = re.sub(r"\([^)]*\)", " ", addr or "").split(",")[0]
+    a = re.sub(r"(일대|번지)", " ", a)
+    return re.sub(r"\s+", " ", a).strip()
+
+
+def _sr_normalize_region(r1, r2):
+    r1 = (r1 or "").strip()
+    sido = SR_ALIAS_TO_SIDO.get(r1, r1)
+    sgg = (r2 or "").strip()
+    if sido == "전남광주통합특별시" and (r1.startswith("광주") or sgg in SR_GWANGJU_GU) and sgg and not sgg.startswith("광주"):
+        sgg = "광주" + sgg
+    return sido, (sgg or sido)
+
+
+def _sr_iget(item, name):
+    if name in item:
+        return _sr_s(item.get(name))
+    low = name.lower()
+    for k, v in item.items():
+        if k.lower() == low:
+            return _sr_s(v)
+    return ""
+
+
+def _sr_hhmm(v):
+    t = re.sub(r"[^0-9]", "", v or "")
+    if not t or len(t) > 4:
+        return ""
+    t = t.zfill(4)
+    h, mi = int(t[:2]), int(t[2:])
+    return "" if h > 24 or mi > 59 else f"{h:02d}:{mi:02d}"
+
+
+def _sr_range(a, b):
+    a, b = _sr_hhmm(a), _sr_hhmm(b)
+    return f"{a}~{b}" if a and b else ""
+
+
+def _sr_extra(cat, item):
+    out = {}
+    if cat == "주차장":
+        out["요금"] = _sr_iget(item, "parkingchrgeInfo") or _sr_iget(item, "요금정보")
+        bt, bc = _sr_iget(item, "basicTime"), _sr_iget(item, "basicCharge")
+        at, ac = _sr_iget(item, "addUnitTime"), _sr_iget(item, "addUnitCharge")
+        detail = []
+        if bt and bc:
+            detail.append(f"기본 {bt}분 {_sr_int(bc):,}원" if _sr_int(bc) is not None else f"기본 {bt}분 {bc}원")
+        if at and ac:
+            detail.append(f"추가 {at}분당 {_sr_int(ac):,}원" if _sr_int(ac) is not None else f"추가 {at}분 {ac}원")
+        out["요금상세"] = " · ".join(detail)
+        out["운영평일"] = _sr_range(_sr_iget(item, "weekdayOperOpenHhmm"), _sr_iget(item, "weekdayOperColseHhmm"))
+        out["운영토요일"] = _sr_range(_sr_iget(item, "satOperOperOpenHhmm"), _sr_iget(item, "satOperCloseHhmm"))
+        out["운영공휴일"] = _sr_range(_sr_iget(item, "holidayOperOpenHhmm"), _sr_iget(item, "holidayCloseOpenHhmm"))
+    elif cat == "자동심장충격기":
+        org, place = _sr_iget(item, "org"), _sr_iget(item, "buildPlace")
+        out["설치장소"] = " ".join(x for x in (org, place) if x)
+        days = [_sr_range(_sr_iget(item, f"{d}SttTme"), _sr_iget(item, f"{d}EndTme"))
+                for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")]
+        out["사용시간"] = ",".join(days) if any(days) else ""
+        weeks = [_sr_iget(item, f"sun{w}Yon").upper()[:1] for w in ("Frt", "Scd", "Thi", "Fur", "Fif")]
+        out["일요일사용"] = "".join(w if w in ("Y", "N") else "-" for w in weeks) if any(weeks) else ""
+    elif cat == "교통사고위험지역":
+        sclas, wlkg, lclas = _sr_iget(item, "sclas"), _sr_iget(item, "wlkg"), _sr_iget(item, "lclas")
+        hour, death = _sr_int(_sr_iget(item, "occu_tm")), _sr_int(_sr_iget(item, "death")) or 0
+        out["사고건수"] = 1
+        out["보행자사고"] = 1 if ("사람" in sclas or "보행" in sclas or wlkg not in ("", "0", "N", "n")) else 0
+        out["야간사고"] = 1 if (hour is not None and (hour >= 18 or hour < 6)) else 0
+        out["중상이상"] = 1 if (death > 0 or "사망" in lclas or "중상" in lclas) else 0
+    return out
+
+
+def _sr_make_row(cat, item, stats):
+    road = jibun = area = kind = sido_code = roadtype = ""
+    crs = None
+    if cat == "상습결빙지역":
+        lon, lat, crs, area = _sr_num(item.get("x")), _sr_num(item.get("y")), 3857, _sr_s(item.get("area_name"))
+        roadtype = _sr_s(item.get("road_name"))
+        if roadtype not in SR_ROAD_TYPES:
+            roadtype = ""
+    elif cat == "교통사고위험지역":
+        lon, lat, crs, sido_code = _sr_num(item.get("x")), _sr_num(item.get("y")), 3857, _sr_s(item.get("ctprvn_cd"))
+    elif cat == "주차장":
+        road, jibun = _sr_s(item.get("rdnmadr")), _sr_s(item.get("lnmadr"))
+        lon, lat, kind = _sr_num(item.get("longitude")), _sr_num(item.get("latitude")), _sr_s(item.get("prkplceSe"))
+    else:
+        road = _sr_s(item.get("buildAddress"))
+        lon, lat = _sr_num(item.get("wgs84Lon")), _sr_num(item.get("wgs84Lat"))
+    if jibun == road:
+        jibun = ""
+    addr = road or jibun
+    coords = _sr_to_wgs84(lon, lat, crs)
+    pre = _sr_sido_from_address(road) or _sr_sido_from_address(jibun) or _sr_sido_from_address(area)
+    if not pre and sido_code:
+        pre = SR_CTPRVN.get(sido_code[:2], "기타")
+    if pre and pre not in SR_LIVE_SIDOS:
+        stats["선택지역 외"] += 1
+        return None
+    if not pre:
+        if coords and not any(SR_SIDO_BBOX[s][0] <= coords[0] <= SR_SIDO_BBOX[s][2] and
+                              SR_SIDO_BBOX[s][1] <= coords[1] <= SR_SIDO_BBOX[s][3] for s in SR_LIVE_SIDOS):
+            stats["선택지역 외"] += 1
+            return None
+        if not coords and not addr:
+            stats["좌표·주소 없음"] += 1
+            return None
+    if not coords:
+        hit = _sr_geocode(_sr_clean_addr(addr)) or (_sr_geocode(_sr_clean_addr(jibun)) if road and jibun else None)
+        if not hit:
+            stats["지오코딩 실패"] += 1
+            return None
+        coords = (hit["x"], hit["y"])
+    lon, lat = coords
+    reg = _sr_kakao_region(lon, lat)
+    if not reg:
+        stats["역지오코딩 실패"] += 1
+        return None
+    sido, sgg = _sr_normalize_region(reg["r1"], reg["r2"])
+    if sido not in SR_LIVE_SIDOS:
+        stats["선택지역 외"] += 1
+        return None
+    emd = re.sub(r"\d+가$", "", (reg.get("r3") or "").strip())
+    if not emd:
+        found = re.findall(r"([가-힣0-9]+(?:읍|면|동))", addr or "")
+        emd = found[-1] if found else "읍면동없음"
+    if not addr:
+        addr = _sr_address_of(lon, lat)
+    disp = _sr_strip_sido(addr)
+    gubun = cat
+    name = ""
+    if cat == "주차장":
+        gubun = "민영주차장" if "민영" in kind else "공영주차장"
+        name = _sr_s(item.get("prkplceNm"))
+    elif cat == "자동심장충격기":
+        name = _sr_s(item.get("org"))
+    elif cat == "상습결빙지역" and roadtype:
+        disp = f"{disp} ({roadtype})" if disp else f"{sgg} {roadtype}"
+    if not disp:
+        disp = f"{sgg} {emd}".strip()
+    row = {"구분": gubun, "시도": sido, "시군구": sgg, "읍면동": emd, "주소": disp,
+           "위도": round(lat, 7), "경도": round(lon, 7), "시설명": name}
+    row.update(_sr_extra(cat, item))
+    return row
+
+
+def _sr_collect(cat):
+    stats, rows, seen = Counter(), [], {}
+    for items in _sr_fetch(cat):
+        for it in items:
+            stats["수신"] += 1
+            if cat == "교통사고위험지역":
+                # 같은 지점 사고는 카카오 부르기 전에 미리 합침 (결과는 exe와 같고 호출 수만 줄어듦)
+                c = _sr_to_wgs84(_sr_num(it.get("x")), _sr_num(it.get("y")), 3857)
+                if c:
+                    k = (round(c[1], 6), round(c[0], 6))
+                    if k in seen:
+                        if seen[k] is not None:
+                            ex = _sr_extra(cat, it)
+                            for col in ("사고건수", "보행자사고", "야간사고", "중상이상"):
+                                seen[k][col] += ex[col]
+                            stats["같은 지점 사고 합침"] += 1
+                        continue
+            try:
+                row = _sr_make_row(cat, it, stats)
+            except _SrStop:
+                raise
+            except RuntimeError:
+                stats["통신 오류"] += 1
+                continue
+            if cat == "교통사고위험지역":
+                if c:
+                    seen[k] = row
+                if row:
+                    rows.append(row)
+                continue
+            if not row:
+                continue
+            key = (row["구분"], round(row["위도"], 6), round(row["경도"], 6), row["주소"])
+            if key in seen:
+                stats["중복"] += 1
+                continue
+            seen[key] = row
+            rows.append(row)
+    return rows, stats
+
+
+def _sr_rows_to_csv(cat, rows):
+    cols = SR_LIVE_COLS + SR_LIVE_EXTRA.get(cat, [])
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    return buf.getvalue().encode("utf-8")
+
+
+def _sr_csv_to_df(data):
+    df = pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
+    df["위도"] = pd.to_numeric(df["위도"], errors="coerce")
+    df["경도"] = pd.to_numeric(df["경도"], errors="coerce")
+    return df[df["위도"].notna() & df["경도"].notna()].reset_index(drop=True)
+
+
+def _sr_live_load_store():
+    """서버 시작 후 처음: 저장소에 보관된 마지막 자료를 읽음"""
+    for cat, obj in SR_LIVE_OBJ.items():
+        got = _sr_store_get(f"{obj}.csv")
+        if not got:
+            continue
+        try:
+            df = _sr_csv_to_df(got[0])
+        except Exception:
+            continue
+        if len(df):
+            _SR_LIVE["data"][cat], _SR_LIVE["at"][cat], _SR_LIVE["count"][cat] = df, got[1], len(df)
+    _SR_LIVE["ver"] += 1
+
+
+def _sr_live_refresh(due, old_counts):
+    try:
+        for cat in due:
+            try:
+                rows, stats = _sr_collect(cat)
+                old = old_counts.get(cat, 0)
+                if old and len(rows) < old * SR_LIVE_SHRINK_GUARD:
+                    raise RuntimeError(f"받은 건수가 너무 적음 ({len(rows):,} / 기존 {old:,})")
+                if not rows:
+                    raise RuntimeError("받은 자료 없음")
+                data = _sr_rows_to_csv(cat, rows)
+                kept = "저장소 보관" if _sr_store_put(f"{SR_LIVE_OBJ[cat]}.csv", data, "text/csv") else "저장소 보관 실패"
+                df = _sr_csv_to_df(data)
+                _SR_LIVE["data"][cat], _SR_LIVE["at"][cat], _SR_LIVE["count"][cat] = df, time.time(), len(df)
+                _SR_LIVE["note"][cat] = f"{len(df):,}건 · " + ", ".join(f"{k} {v:,}" for k, v in stats.items()) + f" · {kept}"
+                _SR_LIVE["ver"] += 1
+            except _SrStop as e:
+                _SR_LIVE["note"][cat] = f"중단: {e}"
+                break
+            except Exception as e:
+                _SR_LIVE["note"][cat] = f"갱신 실패: {e}"
+                _SR_LIVE["at"][cat] = time.time() - SR_LIVE_REFRESH_SEC + 86400   # 실패하면 하루 뒤 다시
+            finally:
+                _sr_kakao_save()
+    finally:
+        _SR_LIVE["busy"] = False
+
+
+def sr_live_tick(excel_counts):
+    """토글 ON 상태에서 지도 자료를 부를 때마다: 처음이면 저장소 자료를 읽고, 7일 지난 항목은 뒤에서 새로 받음"""
+    if os.environ.get("SR_LIVE_AUTO", "1") == "0":
+        return
+    with _SR_LIVE_LOCK:
+        if not _SR_LIVE["loaded"]:
+            _SR_LIVE["loaded"] = True
+            _sr_live_load_store()
+        if _SR_LIVE["busy"]:
+            return
+        now = time.time()
+        due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
+        if not due:
+            return
+        # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (6시간 유효)
+        got = _sr_store_get("refresh_lock.txt")
+        if got and now - got[1] < 6 * 3600:
+            return
+        _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
+        _SR_LIVE["busy"] = True
+        old = {c: (_SR_LIVE["count"].get(c) or excel_counts.get(c, 0)) for c in due}
+        threading.Thread(target=_sr_live_refresh, args=(due, old), daemon=True).start()
+
+
+def sr_live_status():
+    out = []
+    for cat in SR_LIVE_CATS:
+        at = _SR_LIVE["at"].get(cat)
+        out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0),
+                    "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and cat in _SR_LIVE["data"] else "",
+                    "note": _SR_LIVE["note"].get(cat, "")})
+    return out
+
+
 @app.route("/api/admin/feature", methods=["GET"])
 @admin_required
 def admin_get_feature():
@@ -9694,7 +10584,13 @@ def admin_get_feature():
     if err:
         return jsonify(ok=False, on=False, error=err)
     _FEATURE_CACHE.update(v=v, t=time.time())
-    return jsonify(ok=True, on=v)
+    try:
+        live = sr_live_status()
+        live.insert(0, {"cat": "공중화장실", "count": len(trip_load_toilets() or []), "date": trip_toilet_data_date(),
+                        "note": "출장 도구함 화장실 자료 (전국, 안전로드엔 광주·전남·전북·제주만)"})
+    except Exception as e:
+        live = [{"cat": "자동 갱신", "count": 0, "date": "", "note": f"상태 확인 실패: {e}"}]
+    return jsonify(ok=True, on=v, live=live)
 
 
 @app.route("/api/admin/feature", methods=["POST"])
@@ -10439,6 +11335,7 @@ def stats():
             <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
             <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
           </div>
+          <div id="srLiveStatus" style="margin-top:10px;font-size:12.5px;color:#475569;line-height:1.7;"></div>
         </div>
 
         <script>
@@ -10682,6 +11579,13 @@ def stats():
             const r = await fetch('/api/admin/feature');
             const d = await r.json();
             showFeatureDetail(d.on, d.ok ? '' : (d.error || '확인 실패'));
+            const box = document.getElementById('srLiveStatus');
+            if(box && d.live){
+              const e = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+              box.innerHTML = '<b>자료 자동 갱신 (ON일 때, 7일마다)</b><br>' + d.live.map(x =>
+                '· ' + e(x.cat) + ': ' + (x.date ? e(x.date) + ' 갱신 · ' + Number(x.count || 0).toLocaleString() + '건' : '아직 엑셀 사용')
+                + (x.note ? ' <span style="color:#94a3b8;">(' + e(x.note) + ')</span>' : '')).join('<br>');
+            }
           }catch(e){ showFeatureDetail(false, '확인 실패'); }
         }
         async function setFeatureDetail(on){
@@ -11345,7 +12249,7 @@ def stats_excel():
 
 def meta():
 
-    df = load_df()
+    df = sr_df()
 
 
 
@@ -11379,7 +12283,7 @@ def cities():
 
 
 
-    df = load_df()
+    df = sr_df()
 
 
 
@@ -11411,7 +12315,7 @@ def towns():
 
 
 
-    df = load_df()
+    df = sr_df()
 
 
 
@@ -11455,7 +12359,7 @@ def data():
 
 
 
-    df = load_df()
+    df = sr_df()
 
 
 
@@ -11525,7 +12429,7 @@ def data_all():
 
 
 
-    df = load_df()
+    df = sr_df()
 
 
 
