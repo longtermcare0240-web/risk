@@ -11690,14 +11690,14 @@ def stats():
                 + (x.note ? ' <span style="color:#94a3b8;">(' + e(x.note) + ')</span>' : '')).join('<br>');
               clearTimeout(window._srLiveTimer); window._srLiveTimer = null;
               if(d.live.some(x => x.busy)){
-                box.innerHTML += '<br><span style="color:#94a3b8;">30초마다 저절로 새로 고침</span>';
-                window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 30000);
+                box.innerHTML += '<br><span style="color:#94a3b8;">10초마다 저절로 새로 고침</span>';
+                window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 10000);
               } else {
                 window._srLiveTimer = 1;   // 다 끝났으면 자동 새로 고침 멈춤
               }
             }
           }catch(e){ showFeatureDetail(false, '확인 실패'); }
-          if(!window._srLiveTimer){ window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 30000); }
+          if(!window._srLiveTimer){ window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 10000); }
         }
         async function setFeatureDetail(on){
           showFeatureDetail(on, '');
