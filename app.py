@@ -10135,6 +10135,7 @@ def _sr_paged(url, base, label):
             return
         prev_first = first
         got += len(items)
+        _sr_heartbeat()
         yield items
         if total is not None and got >= total:
             return
@@ -10554,6 +10555,20 @@ def _sr_live_refresh(due, old_counts):
             pass
 
 
+SR_LOCK_STALE = 20 * 60     # '받는 중' 표시가 20분 넘게 안 바뀌면 그 서버는 꺼진 걸로 봄 (재배포 등)
+
+
+def _sr_heartbeat():
+    """받는 중인 서버가 5분마다 '아직 받는 중' 표시를 새로 씀"""
+    now = time.time()
+    if _SR_LIVE["busy"] and now - _SR_LIVE.get("beat", 0) > 300:
+        _SR_LIVE["beat"] = now
+        try:
+            _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
+        except Exception:
+            pass
+
+
 def _sr_lock_time():
     """다른 서버 프로세스가 받기 시작한 시각 (끝나면 0)"""
     got = _sr_store_get("refresh_lock.txt")
@@ -10599,16 +10614,17 @@ def sr_live_tick(excel_counts):
         if not due:
             return
         # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (끝나면 지움, 6시간 지나면 무시)
-        if now - _sr_lock_time() < 6 * 3600:
+        if now - _sr_lock_time() < SR_LOCK_STALE:
             return
         _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
         _SR_LIVE["busy"] = True
+        _SR_LIVE["beat"] = now
         old = {c: (_SR_LIVE["count"].get(c) or excel_counts.get(c, 0)) for c in due}
         threading.Thread(target=_sr_live_refresh, args=(due, old), daemon=True).start()
 
 
 def sr_live_status():
-    other = (not _SR_LIVE["busy"]) and time.time() - _sr_lock_time() < 6 * 3600
+    other = (not _SR_LIVE["busy"]) and time.time() - _sr_lock_time() < SR_LOCK_STALE
     out = []
     for cat in SR_LIVE_CATS:
         at = _SR_LIVE["at"].get(cat)
