@@ -10547,7 +10547,7 @@ def _sr_collect(cat):
                 if c:
                     k = (round(c[1], 6), round(c[0], 6))
                     if k in seen:
-                        if seen[k] is not None:
+                        if True:
                             ex = _sr_extra(cat, it)
                             for col in ("사고건수", "보행자사고", "야간사고", "중상이상"):
                                 seen[k][col] += ex[col]
@@ -10561,9 +10561,9 @@ def _sr_collect(cat):
                 stats["통신 오류"] += 1
                 continue
             if cat == "교통사고위험지역":
-                if c:
-                    seen[k] = row
                 if row:
+                    if c:
+                        seen[k] = row
                     rows.append(row)
                 continue
             if not row:
@@ -12624,30 +12624,37 @@ def data():
 
 
 
+_DATA_ALL_CACHE = {"key": None, "gz": None}
+_DATA_ALL_LOCK = threading.Lock()
+
+
 @app.route("/data/all")
 
 def data_all():
-
-
-
+    """지도 전체 자료. 4만여 건을 요청마다 새로 만들면 메모리가 크게 튀어서(서버 재시작 원인),
+    자료가 바뀔 때 한 번만 만들어 압축해 두고 그대로 보냄"""
+    import gzip
     df = sr_df()
-
-
-
-    records = df.apply(row_to_dict, axis=1).tolist()
-
-
-
-    return jsonify({
-
-        "total": len(records),
-
-        "too_many": False,
-
-        "data": records
-
-    })
-
+    key = (id(df), bool(feature_detail_on()), len(df))
+    with _DATA_ALL_LOCK:
+        if _DATA_ALL_CACHE["key"] != key:
+            _DATA_ALL_CACHE.update(key=None, gz=None)
+            records = df.apply(row_to_dict, axis=1).tolist()
+            raw = json.dumps({"total": len(records), "too_many": False, "data": records},
+                             ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            del records
+            gz = gzip.compress(raw, 6)
+            del raw
+            _DATA_ALL_CACHE.update(key=key, gz=gz)
+        gz = _DATA_ALL_CACHE["gz"]
+    if "gzip" in request.headers.get("Accept-Encoding", ""):
+        resp = Response(gz, mimetype="application/json")
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = Response(gzip.decompress(gz), mimetype="application/json")
+    resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.route("/sample-image")
