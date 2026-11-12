@@ -9921,7 +9921,7 @@ import math
 import csv
 import io
 from collections import Counter
-SR_LIVE_CATS = ["상습결빙지역", "교통사고위험지역", "주차장", "자동심장충격기"]
+SR_LIVE_CATS = ["상습결빙지역", "주차장", "자동심장충격기", "교통사고위험지역"]
 SR_LIVE_SIDOS = ["전남광주통합특별시", "전북특별자치도", "제주특별자치도"]
 SR_LIVE_REFRESH_SEC = 7 * 86400
 SR_LIVE_PAGE_SIZE = 1000
@@ -10516,6 +10516,7 @@ def _sr_live_refresh(due, old_counts):
     try:
         for cat in due:
             try:
+                _SR_LIVE["note"][cat] = "받는 중…"
                 rows, stats = _sr_collect(cat)
                 old = old_counts.get(cat, 0)
                 if old and len(rows) < old * SR_LIVE_SHRINK_GUARD:
