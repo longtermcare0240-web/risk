@@ -10141,32 +10141,41 @@ def _sr_paged(url, base, label):
         page += 1
 
 
+def _sr_keys(*names):
+    return list(dict.fromkeys(os.environ.get(n) for n in names if os.environ.get(n)))
+
+
+def _sr_paged_keys(cands, label, make):
+    """키 후보를 차례로: 첫 페이지에서 오류가 나면 다음 키로 (받기 시작한 뒤의 오류는 그대로 알림)"""
+    if not cands:
+        raise RuntimeError(f"{label} 인증키 환경변수가 없습니다")
+    for i, key in enumerate(cands):
+        url, base = make(key)
+        started = False
+        try:
+            for items in _sr_paged(url, base, label):
+                started = True
+                yield items
+            return
+        except RuntimeError:
+            if started or i == len(cands) - 1:
+                raise
+
+
+# 키: 안전로드 전용(SR_…)이 있으면 그걸 먼저, 없으면 출장 도구함과 같은 키
 def _sr_fetch(cat):
     if cat in ("상습결빙지역", "교통사고위험지역"):
-        key = os.environ.get("SAFEMAP_KEY", "")
-        if not key:
-            raise RuntimeError("SAFEMAP_KEY(생활안전정보 인증키) 환경변수가 없습니다")
         code = "IF_0103" if cat == "상습결빙지역" else "IF_0093"
-        yield from _sr_paged(SR_SAFEMAP_URL.format(code=code), {"serviceKey": key, "returnType": "json"}, code)
+        yield from _sr_paged_keys(_sr_keys("SR_SAFEMAP_KEY", "SAFEMAP_KEY"), code,
+                                  lambda k: (SR_SAFEMAP_URL.format(code=code), {"serviceKey": k, "returnType": "json"}))
     elif cat == "주차장":
-        cands = list(dict.fromkeys(k for k in (os.environ.get("PARKING_KEY"), os.environ.get("DATA_GO_KR_KEY")) if k))
-        if not cands:
-            raise RuntimeError("PARKING_KEY(공공데이터 키2) 환경변수가 없습니다")
-        for i, key in enumerate(cands):
-            try:
-                yield from _sr_paged(SR_PARKING_URL, {"serviceKey": key, "type": "json"}, "전국주차장")
-                return
-            except RuntimeError as e:
-                if "SERVICE_KEY" in str(e) and i < len(cands) - 1:
-                    continue        # 키 인증 실패 → 다른 키로
-                raise
+        yield from _sr_paged_keys(_sr_keys("PARKING_KEY", "SR_DATA_GO_KR_KEY", "DATA_GO_KR_KEY"), "전국주차장",
+                                  lambda k: (SR_PARKING_URL, {"serviceKey": k, "type": "json"}))
     elif cat == "자동심장충격기":
-        key = os.environ.get("DATA_GO_KR_KEY", "")
-        if not key:
-            raise RuntimeError("DATA_GO_KR_KEY(공공데이터포털 인증키) 환경변수가 없습니다")
+        cands = _sr_keys("SR_DATA_GO_KR_KEY", "DATA_GO_KR_KEY")
         for sido in SR_LIVE_SIDOS:
             for q0 in SR_AED_Q0.get(sido, [sido]):
-                yield from _sr_paged(SR_AED_URL, {"serviceKey": key, "Q0": q0}, f"AED {q0}")
+                yield from _sr_paged_keys(cands, f"AED {q0}", lambda k, q0=q0: (SR_AED_URL, {"serviceKey": k, "Q0": q0}))
 
 
 # ---- 좌표 ----
@@ -10539,25 +10548,58 @@ def _sr_live_refresh(due, old_counts):
                 _sr_kakao_save()
     finally:
         _SR_LIVE["busy"] = False
+        try:
+            _sr_store_put("refresh_lock.txt", b"0", "text/plain")
+        except Exception:
+            pass
+
+
+def _sr_lock_time():
+    """다른 서버 프로세스가 받기 시작한 시각 (끝나면 0)"""
+    got = _sr_store_get("refresh_lock.txt")
+    try:
+        return float(got[0].decode()) if got else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _sr_live_reload_due(due, now):
+    """다른 프로세스가 이미 새로 받아 저장소에 올렸으면 그걸 읽어옴 (10분에 한 번만 확인)"""
+    if now - _SR_LIVE.get("checked", 0) < 600:
+        return
+    _SR_LIVE["checked"] = now
+    for cat in due:
+        got = _sr_store_get(f"{SR_LIVE_OBJ[cat]}.csv")
+        if got and got[1] > _SR_LIVE["at"].get(cat, 0) and now - got[1] < SR_LIVE_REFRESH_SEC:
+            try:
+                df = _sr_csv_to_df(got[0])
+            except Exception:
+                continue
+            if len(df):
+                _SR_LIVE["data"][cat], _SR_LIVE["at"][cat], _SR_LIVE["count"][cat] = df, got[1], len(df)
+                _SR_LIVE["ver"] += 1
 
 
 def sr_live_tick(excel_counts):
-    """토글 ON 상태에서 지도 자료를 부를 때마다: 처음이면 저장소 자료를 읽고, 7일 지난 항목은 뒤에서 새로 받음"""
+    """토글 ON 상태에서 지도 자료·관리자 페이지를 부를 때: 처음이면 저장소 자료를 읽고, 7일 지난 항목은 뒤에서 새로 받음"""
     if os.environ.get("SR_LIVE_AUTO", "1") == "0":
         return
     with _SR_LIVE_LOCK:
+        now = time.time()
         if not _SR_LIVE["loaded"]:
             _SR_LIVE["loaded"] = True
+            _SR_LIVE["checked"] = now
             _sr_live_load_store()
         if _SR_LIVE["busy"]:
             return
-        now = time.time()
         due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
+        if due:
+            _sr_live_reload_due(due, now)
+            due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
         if not due:
             return
-        # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (6시간 유효)
-        got = _sr_store_get("refresh_lock.txt")
-        if got and now - got[1] < 6 * 3600:
+        # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (끝나면 지움, 6시간 지나면 무시)
+        if now - _sr_lock_time() < 6 * 3600:
             return
         _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
         _SR_LIVE["busy"] = True
@@ -10566,12 +10608,14 @@ def sr_live_tick(excel_counts):
 
 
 def sr_live_status():
+    other = (not _SR_LIVE["busy"]) and time.time() - _sr_lock_time() < 6 * 3600
     out = []
     for cat in SR_LIVE_CATS:
         at = _SR_LIVE["at"].get(cat)
+        has = cat in _SR_LIVE["data"]
+        note = _SR_LIVE["note"].get(cat, "") or ("받는 중… (다른 서버 프로세스)" if other and not has else "")
         out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0),
-                    "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and cat in _SR_LIVE["data"] else "",
-                    "note": _SR_LIVE["note"].get(cat, "")})
+                    "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and has else "", "note": note})
     return out
 
 
@@ -10586,6 +10630,11 @@ def admin_get_feature():
         return jsonify(ok=False, on=False, error=err)
     _FEATURE_CACHE.update(v=v, t=time.time())
     try:
+        if v:
+            _b = load_df()
+            _cnt = _b["구분"].value_counts().to_dict()
+            _cnt["주차장"] = _cnt.get("공영주차장", 0) + _cnt.get("민영주차장", 0)
+            sr_live_tick(_cnt)
         live = sr_live_status()
         live.insert(0, {"cat": "공중화장실", "count": len(trip_load_toilets() or []), "date": trip_toilet_data_date(),
                         "note": "출장 도구함 화장실 자료 (전국, 안전로드엔 광주·전남·전북·제주만)"})
@@ -11313,22 +11362,7 @@ def stats():
         .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
         </style>
         {% if detail_on %}
-        <style>@media (max-width:700px){ .sr-tool-card{display:none!important;} }</style>
-        <div class="ft-card sr-tool-card" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-          <div style="width:44px;height:44px;border-radius:13px;background:#eff6ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
-          </div>
-          <div style="flex:1;min-width:180px;">
-            <div style="font-size:16px;font-weight:800;">데이터 갱신 프로그램</div>
-            <div style="font-size:12.5px;color:#6b7280;margin-top:3px;">지도 엑셀 5개를 공공 API로 새로 만드는 프로그램 · Windows
-              {% if refresh_exe.ok %} · {{ refresh_exe.size }} · {{ refresh_exe.date }} 올림{% endif %}</div>
-          </div>
-          {% if refresh_exe.ok %}
-          <a href="/admin/refresh_tool" download="안전로드_데이터갱신.exe" style="display:inline-flex;align-items:center;height:42px;padding:0 18px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;font-weight:800;font-size:14px;text-decoration:none;box-shadow:0 4px 14px rgba(37,99,235,.25);">다운로드</a>
-          {% else %}
-          <span style="font-size:12.5px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 12px;">서버에 파일 없음 — 저장소에 안전로드_데이터갱신.exe 를 올려 주세요</span>
-          {% endif %}
-        </div>
+        {# 데이터 갱신 프로그램(exe) 내려받기 카드는 뺌 — 토글 ON이면 서버가 7일마다 직접 받음 #}
         {% endif %}
         <div class="ft-card">
           <div style="display:flex;align-items:center;gap:12px;">
