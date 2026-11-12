@@ -9784,6 +9784,15 @@ SR_TOILET_REGIONS = {
 }
 _SR_TOILET_DF = {"key": None, "df": None, "rows": None}
 SR_GWANGJU_GU = {"동구", "서구", "남구", "북구", "광산구"}
+# 안전로드 관할 시군구 (화장실 주소가 '서구독립로'처럼 붙어 쓰인 경우를 바로잡는 기준)
+SR_HQ_SGG = {
+    "전남광주통합특별시": ["광주동구", "광주서구", "광주남구", "광주북구", "광주광산구", "목포시", "여수시", "순천시", "나주시",
+                    "광양시", "담양군", "곡성군", "구례군", "고흥군", "보성군", "화순군", "장흥군", "강진군", "해남군",
+                    "영암군", "무안군", "함평군", "영광군", "장성군", "완도군", "진도군", "신안군"],
+    "전북특별자치도": ["전주시", "군산시", "익산시", "정읍시", "남원시", "김제시", "완주군", "진안군", "무주군", "장수군",
+                "임실군", "순창군", "고창군", "부안군"],
+    "제주특별자치도": ["제주시", "서귀포시"],
+}
 
 
 def _sr_region(sido):
@@ -9801,9 +9810,15 @@ def _sr_df_with_trip_toilets(base):
     # 시도 이름 통일: 엑셀에 광주광역시·전라남도·전라북도 같은 옛 이름이 섞여 있어도 한 이름으로 (다른 항목도 같이)
     base = base.copy()
     base["시도"] = [SR_TOILET_REGIONS[_sr_region(v)][0] if _sr_region(v) else v for v in base["시도"]]
-    cities = {}
+    # 시군구: 관할 목록 + 엑셀에 쓰인 '전주시 완산구' 같은 표기만 인정
+    valid = {sd: set(v) for sd, v in SR_HQ_SGG.items()}
     for sd, ct in zip(base["시도"], base["시군구"]):
-        cities.setdefault(sd, set()).add(ct)
+        if sd in valid and any(ct == h or ct.startswith(h + " ") for h in SR_HQ_SGG[sd]):
+            valid[sd].add(ct)
+    towns = {}
+    for sd, ct, tw in zip(base["시도"], base["시군구"], base["읍면동"]):
+        if tw and tw != "읍면동없음":
+            towns.setdefault((sd, ct), set()).add(tw)
     old_t = base[base["구분"] == "공중화장실"]
     addr_town = {a: t for a, t in zip(old_t["주소"], old_t["읍면동"]) if a and t != "읍면동없음"}
     # 읍면동을 주소로 못 찾으면 같은 시군구의 가장 가까운 기존 지점 읍면동을 씀 (도로명주소 대비)
@@ -9811,10 +9826,44 @@ def _sr_df_with_trip_toilets(base):
     near = {k: (g["위도"].to_numpy(), g["경도"].to_numpy(), g["읍면동"].tolist())
             for k, g in ref.groupby(["시도", "시군구"])}
 
+    near_sd = {}
+    for (sd, ct), g in near.items():
+        near_sd.setdefault(sd, []).append((ct, g))
+
+    def city_of(k, sd, tok, lat, lng):
+        ok = valid.get(sd, set())
+        a = tok[1]
+        if len(tok) > 2 and f"{a} {tok[2]}" in ok:
+            return f"{a} {tok[2]}"
+        if a in ok:
+            return a
+        if k == "전남광주" and "광주" + a in ok:
+            return "광주" + a
+        # 붙어 쓰인 주소: '서구독립로' → 광주서구, '여수시문수동111-3' → 여수시
+        for v in sorted(ok, key=len, reverse=True):
+            short = v[2:] if (k == "전남광주" and v.startswith("광주") and v[2:] in SR_GWANGJU_GU) else v
+            if a.startswith(v) or a.startswith(short):
+                return v
+        # 그래도 모르면 같은 시도에서 가장 가까운 기존 지점의 시군구 (약 5km 안)
+        best, bd = None, 0.05 ** 2
+        for ct, g in near_sd.get(sd, []):
+            d = (g[0] - lat) ** 2 + ((g[1] - lng) * 0.82) ** 2
+            i = int(np.argmin(d))
+            if d[i] < bd:
+                best, bd = ct, d[i]
+        return best
+
     def town_of(sd, ct, addr, lat, lng):
         t = addr_town.get(addr) or extract_town_from_address(addr)
-        if t != "읍면동없음" and not t[0].isdigit():      # '101동' 같은 건물 동은 제외
-            return t
+        known = towns.get((sd, ct))
+        if t != "읍면동없음":
+            # '여수시문수동' 처럼 앞에 시군구가 붙은 경우 → '문수동'
+            cands = [t] + [t[i + 1:] for i, ch in enumerate(t[:-1]) if ch in "시군구"]
+            for c in cands:
+                if known and c in known:
+                    return c
+            if not known and re.fullmatch(r"[가-힣]{1,6}\d*(읍|면|동|가)", t) and not re.search(r"[시군구]", t[:-1]):
+                return t
         g = near.get((sd, ct))
         if not g:
             return "읍면동없음"
@@ -9833,11 +9882,9 @@ def _sr_df_with_trip_toilets(base):
         if not k:
             continue
         sd = SR_TOILET_REGIONS[k][0]
-        ct = tok[1]
-        if len(tok) > 2 and ct.endswith("시") and tok[2].endswith("구") and f"{ct} {tok[2]}" in cities.get(sd, ()):
-            ct = f"{ct} {tok[2]}"
-        if k == "전남광주" and ct in SR_GWANGJU_GU:
-            ct = "광주" + ct                     # 안전로드 엑셀 표기 (광주광산구 등)
+        ct = city_of(k, sd, tok, lat, lng)
+        if not ct:
+            continue                             # 시군구를 알 수 없는 곳은 뺌
         recs.append({"구분": "공중화장실", "시도": sd, "시군구": ct, "읍면동": town_of(sd, ct, addr, lat, lng),
                      "주소": " ".join(tok[1:]), "위도": float(lat), "경도": float(lng), "날짜": upd,
                      "개방시간": op, "비상벨": "Y" if bell else "N", "장애인화장실": "Y" if acc else "N",
