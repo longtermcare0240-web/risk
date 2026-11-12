@@ -10142,7 +10142,7 @@ def _sr_paged(url, base, label):
         prev_first = first
         got += len(items)
         pages = math.ceil(total / size) if total else "?"
-        _SR_LIVE["prog"] = f"{got:,}건 받음 ({label} {page}/{pages}쪽)"
+        _SR_LIVE["prog"] = f"{got:,}건 받음 · {page}/{pages}쪽"
         _sr_heartbeat()
         yield items
         if total is not None and got >= total:
@@ -10673,8 +10673,8 @@ def sr_live_status():
         note, busy = _SR_LIVE["note"].get(cat, ""), False
         if running and info.get("cur") == cat:
             ago = int((now - float(info["t"])) // 60)
-            note = (f"받는 중… {info.get('prog') or ''} · 카카오 오늘 {int(info.get('kakao') or 0):,}회"
-                    f" · 마지막 소식 {'방금' if ago < 1 else f'{ago}분 전'}")
+            note = (f"{info.get('prog') or '시작'} · 카카오 {int(info.get('kakao') or 0):,}회"
+                    f" · {'방금' if ago < 1 else f'{ago}분 전'} 소식")
             busy = True
         elif running and not has and not note:
             note, busy = "차례 기다리는 중", True
@@ -10705,7 +10705,7 @@ def admin_get_feature():
             sr_live_tick(_cnt)
         live = sr_live_status()
         live.insert(0, {"cat": "공중화장실", "count": len(trip_load_toilets() or []), "date": trip_toilet_data_date(),
-                        "note": "출장 도구함 화장실 자료 (전국, 안전로드엔 광주·전남·전북·제주만)"})
+                        "note": "", "sub": "출장 도구함과 같은 자료 (전국 건수)"})
     except Exception as e:
         live = [{"cat": "자동 갱신", "count": 0, "date": "", "note": f"상태 확인 실패: {e}"}]
     return jsonify(ok=True, on=v, live=live)
@@ -11685,12 +11685,23 @@ def stats():
             const box = document.getElementById('srLiveStatus');
             if(box && d.live){
               const e = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
-              box.innerHTML = '<b>자료 자동 갱신 (ON일 때, 7일마다)</b><br>' + d.live.map(x =>
-                '· ' + e(x.cat) + ': ' + (x.date ? e(x.date) + ' 갱신 · ' + Number(x.count || 0).toLocaleString() + '건' : '아직 엑셀 사용')
-                + (x.note ? ' <span style="color:#94a3b8;">(' + e(x.note) + ')</span>' : '')).join('<br>');
+              const badge = (t, bg, fg) => '<span style="flex:none;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:800;background:' + bg + ';color:' + fg + ';white-space:nowrap;">' + t + '</span>';
+              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 7일마다</span></div>' + d.live.map(x => {
+                const n = String(x.note || '');
+                let b, sub = x.sub || '';
+                if(x.busy && n !== '차례 기다리는 중'){ b = badge('받는 중', '#dbeafe', '#1d4ed8'); sub = n; }
+                else if(n === '차례 기다리는 중'){ b = badge('대기', '#f1f5f9', '#64748b'); }
+                else if(/^(갱신 실패|중단)/.test(n)){ b = badge(n.indexOf('중단') === 0 ? '중단' : '실패', '#fee2e2', '#b91c1c'); sub = n.replace(/^(갱신 실패|중단): ?/, ''); }
+                else if(x.date){ b = badge(e(x.date.slice(5).replace('-', '.')) + ' · ' + Number(x.count || 0).toLocaleString() + '건', '#dcfce7', '#15803d'); }
+                else { b = badge('엑셀 사용', '#f1f5f9', '#64748b'); sub = sub || n; }
+                return '<div style="padding:7px 0;border-top:1px solid #f1f5f9;">'
+                  + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="font-weight:700;color:#334155;">' + e(x.cat) + '</span>' + b + '</div>'
+                  + (sub ? '<div style="font-size:11.5px;color:#94a3b8;margin-top:3px;word-break:keep-all;">' + e(sub) + '</div>' : '')
+                  + '</div>';
+              }).join('');
               clearTimeout(window._srLiveTimer); window._srLiveTimer = null;
               if(d.live.some(x => x.busy)){
-                box.innerHTML += '<br><span style="color:#94a3b8;">10초마다 저절로 새로 고침</span>';
+                box.innerHTML += '<div style="font-size:11.5px;color:#94a3b8;margin-top:4px;">10초마다 저절로 새로 고침</div>';
                 window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 10000);
               } else {
                 window._srLiveTimer = 1;   // 다 끝났으면 자동 새로 고침 멈춤
