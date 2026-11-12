@@ -9752,7 +9752,7 @@ def _fetch_feature():
     if not SUPABASE_URL or not SUPABASE_KEY:
         return False, "Supabase 환경변수 없음"
     r = requests.get(f"{SUPABASE_URL}/rest/v1/app_settings?key=eq.{FEATURE_KEY}&select=value",
-                     headers=_sb_headers(), timeout=3)
+                     headers=_sb_headers(), timeout=6)
     if r.status_code >= 400:
         return False, "app_settings 표가 없습니다 (SQL 먼저 실행)"
     rows = r.json()
@@ -9765,7 +9765,9 @@ def feature_detail_on():
         return _FEATURE_CACHE["v"]
     v = _FEATURE_CACHE["v"] or False
     try:
-        v, _err = _fetch_feature()
+        _v, _err = _fetch_feature()
+        if not _err:
+            v = _v
     except Exception:
         pass   # 조회 실패 시 직전 값 유지 (처음이면 OFF)
     _FEATURE_CACHE.update(v=v, t=now)
@@ -9795,9 +9797,6 @@ def _sr_df_with_trip_toilets(base):
     rows = trip_load_toilets()
     if not rows:
         return base
-    key = (id(base), id(rows), len(rows))
-    if _SR_TOILET_DF["key"] == key:
-        return _SR_TOILET_DF["df"]
     import numpy as np
     # 시도 이름 통일: 엑셀에 광주광역시·전라남도·전라북도 같은 옛 이름이 섞여 있어도 한 이름으로 (다른 항목도 같이)
     base = base.copy()
@@ -9844,7 +9843,6 @@ def _sr_df_with_trip_toilets(base):
                      "개방시간": op, "비상벨": "Y" if bell else "N", "장애인화장실": "Y" if acc else "N",
                      "화장실명": name, "자료수정일": upd})
     if not recs:
-        _SR_TOILET_DF.update(key=key, df=base, rows=rows)
         return base
     other = base[base["구분"] != "공중화장실"]
     new = pd.DataFrame(recs).reindex(columns=base.columns)
@@ -9853,9 +9851,7 @@ def _sr_df_with_trip_toilets(base):
             new[c] = new[c].fillna("")
     start = int(base["순번"].max()) + 1      # 다른 항목 순번은 그대로 두고 화장실만 뒤에 붙임
     new["순번"] = range(start, start + len(new))
-    df = pd.concat([other, new], ignore_index=True)
-    _SR_TOILET_DF.update(key=key, df=df, rows=rows)
-    return df
+    return pd.concat([other, new], ignore_index=True)
 
 
 _SR_LIVE_DF = {"key": None, "df": None}
@@ -9863,10 +9859,7 @@ _SR_LIVE_DF = {"key": None, "df": None}
 
 def _sr_apply_live(df):
     """자동 갱신 자료가 있는 항목(결빙·사고·주차장·AED)은 엑셀 대신 그 자료로"""
-    key = (id(df), _SR_LIVE["ver"])
-    if _SR_LIVE_DF["key"] == key:
-        return _SR_LIVE_DF["df"]
-    out = df.copy()
+    out = df.copy() if df is DATA_CACHE else df
     out["시도"] = [SR_TOILET_REGIONS[_sr_region(v)][0] if _sr_region(v) else v for v in out["시도"]]
     if "시설명" not in out.columns:
         out["시설명"] = ""
@@ -9884,7 +9877,6 @@ def _sr_apply_live(df):
         start = int(pd.to_numeric(out["순번"], errors="coerce").max() or 0) + 1
         new["순번"] = range(start, start + len(new))
         out = pd.concat([out[~out["구분"].isin(gubuns)], new], ignore_index=True)
-    _SR_LIVE_DF.update(key=key, df=out)
     return out
 
 
@@ -9894,18 +9886,32 @@ def sr_df():
     if not feature_detail_on():
         return base
     try:
+        cnt = base["구분"].value_counts().to_dict()
+        cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
+        sr_live_tick(cnt)
+    except Exception as e:
+        print("안전로드 자동 갱신 확인 실패:", e)
+    try:
+        rows = trip_load_toilets() or []
+    except Exception:
+        rows = []
+    key = (id(base), id(rows), len(rows), _SR_LIVE["ver"])
+    if _SR_LIVE_DF["key"] == key:
+        return _SR_LIVE_DF["df"]
+    _SR_LIVE_DF.update(key=None, df=None)      # 예전 결과를 먼저 버려 메모리에 두 벌 안 겹치게
+    try:
         df = _sr_df_with_trip_toilets(base)
     except Exception as e:
         print("안전로드 화장실(출장 도구함 자료) 합치기 실패, 엑셀 사용:", e)
         df = base
     try:
-        cnt = base["구분"].value_counts().to_dict()
-        cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
-        sr_live_tick(cnt)
-        return _sr_apply_live(df)
+        df = _sr_apply_live(df)
     except Exception as e:
         print("안전로드 자동 갱신 자료 합치기 실패, 엑셀 사용:", e)
-        return df
+    import gc
+    gc.collect()
+    _SR_LIVE_DF.update(key=key, df=df)
+    return df
 
 
 # =====================================================================
@@ -10684,10 +10690,13 @@ def admin_get_feature():
     try:
         v, err = _fetch_feature()
     except Exception as e:
-        return jsonify(ok=False, on=False, error=str(e))
-    if err:
+        v, err = None, str(e)
+    if err and _FEATURE_CACHE["v"] is None:
         return jsonify(ok=False, on=False, error=err)
-    _FEATURE_CACHE.update(v=v, t=time.time())
+    if err:
+        v = _FEATURE_CACHE["v"]          # 잠깐 응답이 늦은 것: 직전 값 그대로 (화면에 OFF로 잘못 안 보이게)
+    else:
+        _FEATURE_CACHE.update(v=v, t=time.time())
     try:
         if v:
             _b = load_df()
@@ -11679,13 +11688,16 @@ def stats():
               box.innerHTML = '<b>자료 자동 갱신 (ON일 때, 7일마다)</b><br>' + d.live.map(x =>
                 '· ' + e(x.cat) + ': ' + (x.date ? e(x.date) + ' 갱신 · ' + Number(x.count || 0).toLocaleString() + '건' : '아직 엑셀 사용')
                 + (x.note ? ' <span style="color:#94a3b8;">(' + e(x.note) + ')</span>' : '')).join('<br>');
-              clearTimeout(window._srLiveTimer);
+              clearTimeout(window._srLiveTimer); window._srLiveTimer = null;
               if(d.live.some(x => x.busy)){
                 box.innerHTML += '<br><span style="color:#94a3b8;">30초마다 저절로 새로 고침</span>';
-                window._srLiveTimer = setTimeout(loadFeatureDetail, 30000);
+                window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 30000);
+              } else {
+                window._srLiveTimer = 1;   // 다 끝났으면 자동 새로 고침 멈춤
               }
             }
           }catch(e){ showFeatureDetail(false, '확인 실패'); }
+          if(!window._srLiveTimer){ window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 30000); }
         }
         async function setFeatureDetail(on){
           showFeatureDetail(on, '');
