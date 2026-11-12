@@ -10135,6 +10135,8 @@ def _sr_paged(url, base, label):
             return
         prev_first = first
         got += len(items)
+        pages = math.ceil(total / size) if total else "?"
+        _SR_LIVE["prog"] = f"{got:,}건 받음 ({label} {page}/{pages}쪽)"
         _sr_heartbeat()
         yield items
         if total is not None and got >= total:
@@ -10526,7 +10528,9 @@ def _sr_live_refresh(due, old_counts):
     try:
         for cat in due:
             try:
-                _SR_LIVE["note"][cat] = "받는 중…"
+                _SR_LIVE["note"][cat] = ""
+                _SR_LIVE["cur"], _SR_LIVE["prog"] = cat, "시작"
+                _sr_heartbeat(force=True)
                 rows, stats = _sr_collect(cat)
                 old = old_counts.get(cat, 0)
                 if old and len(rows) < old * SR_LIVE_SHRINK_GUARD:
@@ -10549,8 +10553,9 @@ def _sr_live_refresh(due, old_counts):
                 _sr_kakao_save()
     finally:
         _SR_LIVE["busy"] = False
+        _SR_LIVE["cur"], _SR_LIVE["prog"] = "", ""
         try:
-            _sr_store_put("refresh_lock.txt", b"0", "text/plain")
+            _sr_store_put("refresh_lock.txt", b'{"t": 0}', "application/json")
         except Exception:
             pass
 
@@ -10558,24 +10563,37 @@ def _sr_live_refresh(due, old_counts):
 SR_LOCK_STALE = 20 * 60     # '받는 중' 표시가 20분 넘게 안 바뀌면 그 서버는 꺼진 걸로 봄 (재배포 등)
 
 
-def _sr_heartbeat():
-    """받는 중인 서버가 5분마다 '아직 받는 중' 표시를 새로 씀"""
+def _sr_lock_write(t):
+    info = {"t": t, "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
+            "kakao": sum(_SR_KAKAO_USE["n"].values())}
+    _sr_store_put("refresh_lock.txt", json.dumps(info, ensure_ascii=False).encode("utf-8"), "application/json")
+
+
+def _sr_heartbeat(force=False):
+    """받는 중인 서버가 1분마다 '아직 받는 중 + 어디까지 받았는지'를 저장소에 씀"""
     now = time.time()
-    if _SR_LIVE["busy"] and now - _SR_LIVE.get("beat", 0) > 300:
+    if _SR_LIVE["busy"] and (force or now - _SR_LIVE.get("beat", 0) > 60):
         _SR_LIVE["beat"] = now
         try:
-            _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
+            _sr_lock_write(now)
         except Exception:
             pass
 
 
-def _sr_lock_time():
-    """다른 서버 프로세스가 받기 시작한 시각 (끝나면 0)"""
+def _sr_lock_info():
+    """받는 중인 서버가 남긴 표시 → {"t": 마지막 소식 시각(끝났으면 0), "cur": 항목, "prog": 진행, "kakao": 카카오 횟수}"""
     got = _sr_store_get("refresh_lock.txt")
+    if not got:
+        return {"t": 0.0}
     try:
-        return float(got[0].decode()) if got else 0.0
+        d = json.loads(got[0].decode("utf-8"))
+        return d if isinstance(d, dict) else {"t": float(d)}
     except ValueError:
-        return 0.0
+        return {"t": 0.0}
+
+
+def _sr_lock_time():
+    return float(_sr_lock_info().get("t") or 0)
 
 
 def _sr_live_reload_due(due, now):
@@ -10616,22 +10634,37 @@ def sr_live_tick(excel_counts):
         # 여러 서버 프로세스가 동시에 받지 않게 저장소에 '받는 중' 표시 (끝나면 지움, 6시간 지나면 무시)
         if now - _sr_lock_time() < SR_LOCK_STALE:
             return
-        _sr_store_put("refresh_lock.txt", str(now).encode(), "text/plain")
         _SR_LIVE["busy"] = True
         _SR_LIVE["beat"] = now
+        _SR_LIVE["cur"], _SR_LIVE["prog"] = due[0], "시작"
+        _sr_lock_write(now)
         old = {c: (_SR_LIVE["count"].get(c) or excel_counts.get(c, 0)) for c in due}
         threading.Thread(target=_sr_live_refresh, args=(due, old), daemon=True).start()
 
 
 def sr_live_status():
-    other = (not _SR_LIVE["busy"]) and time.time() - _sr_lock_time() < SR_LOCK_STALE
+    now = time.time()
+    if _SR_LIVE["busy"]:
+        info = {"t": _SR_LIVE.get("beat", now), "cur": _SR_LIVE.get("cur", ""), "prog": _SR_LIVE.get("prog", ""),
+                "kakao": sum(_SR_KAKAO_USE["n"].values())}
+    else:
+        info = _sr_lock_info()
+    running = now - float(info.get("t") or 0) < SR_LOCK_STALE
     out = []
     for cat in SR_LIVE_CATS:
         at = _SR_LIVE["at"].get(cat)
-        has = cat in _SR_LIVE["data"]
-        note = _SR_LIVE["note"].get(cat, "") or ("받는 중… (다른 서버 프로세스)" if other and not has else "")
-        out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0),
-                    "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and has else "", "note": note})
+        has = cat in _SR_LIVE["data"] and now - (at or 0) < SR_LIVE_REFRESH_SEC
+        note, busy = _SR_LIVE["note"].get(cat, ""), False
+        if running and info.get("cur") == cat:
+            ago = int((now - float(info["t"])) // 60)
+            note = (f"받는 중… {info.get('prog') or ''} · 카카오 오늘 {int(info.get('kakao') or 0):,}회"
+                    f" · 마지막 소식 {'방금' if ago < 1 else f'{ago}분 전'}")
+            busy = True
+        elif running and not has and not note:
+            note, busy = "차례 기다리는 중", True
+        out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0), "busy": busy,
+                    "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and cat in _SR_LIVE["data"] else "",
+                    "note": note})
     return out
 
 
@@ -11636,6 +11669,11 @@ def stats():
               box.innerHTML = '<b>자료 자동 갱신 (ON일 때, 7일마다)</b><br>' + d.live.map(x =>
                 '· ' + e(x.cat) + ': ' + (x.date ? e(x.date) + ' 갱신 · ' + Number(x.count || 0).toLocaleString() + '건' : '아직 엑셀 사용')
                 + (x.note ? ' <span style="color:#94a3b8;">(' + e(x.note) + ')</span>' : '')).join('<br>');
+              clearTimeout(window._srLiveTimer);
+              if(d.live.some(x => x.busy)){
+                box.innerHTML += '<br><span style="color:#94a3b8;">30초마다 저절로 새로 고침</span>';
+                window._srLiveTimer = setTimeout(loadFeatureDetail, 30000);
+              }
             }
           }catch(e){ showFeatureDetail(false, '확인 실패'); }
         }
