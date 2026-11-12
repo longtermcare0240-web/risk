@@ -10258,7 +10258,7 @@ def _sr_kakao_cached(key, fn):
     val = fn()
     c[key] = val or {}
     _SR_KAKAO_CACHE["dirty"] += 1
-    if _SR_KAKAO_CACHE["dirty"] >= 2000:
+    if _SR_KAKAO_CACHE["dirty"] >= 300:
         _sr_kakao_save()
     return val or None
 
