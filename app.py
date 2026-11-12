@@ -611,7 +611,7 @@ def load_df():
 
 # 항목별로 앱에 보내는 추가 정보 (팝업·내 주변 찾기 조건용)
 
-EXTRA_INFO = {'공중화장실': ['개방시간', '비상벨', '장애인화장실', '화장실명', '자료수정일'], '공영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '민영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일'], '자동심장충격기': ['설치장소', '사용시간', '일요일사용'], '교통사고위험지역': ['사고건수', '보행자사고', '야간사고', '중상이상']}
+EXTRA_INFO = {'공중화장실': ['개방시간', '비상벨', '장애인화장실', '화장실명', '자료수정일'], '공영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '자료수정일'], '민영주차장': ['요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '자료수정일'], '자동심장충격기': ['설치장소', '사용시간', '일요일사용', '자료수정일'], '교통사고위험지역': ['사고건수', '보행자사고', '야간사고', '중상이상', '자료수정일'], '상습결빙지역': ['자료수정일']}
 
 EXTRA_INFO_COLS = ['개방시간', '비상벨', '장애인화장실', '화장실명', '자료수정일', '요금', '요금상세', '운영평일', '운영토요일', '운영공휴일', '설치장소', '사용시간', '일요일사용', '사고건수', '보행자사고', '야간사고', '중상이상']
 
@@ -1687,8 +1687,10 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 .sr-txt{flex:1;min-width:0;}
 .sr-txt b{display:block;}
 .sr-nm{font-size:13px;font-weight:700;color:#334155;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.sr-upd{display:inline-block;margin-left:4px;padding:0 6px;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-weight:500;}
-.sr-upd.old{border-color:#f3c98b;color:#b45309;background:#fff7ed;}
+.sr-upd{display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:2px 8px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:11px;font-weight:600;line-height:1.4;vertical-align:2px;white-space:nowrap;letter-spacing:-.2px;}
+.sr-upd::before{content:"";width:5px;height:5px;border-radius:50%;background:#94a3b8;}
+.sr-upd.old{background:#fff7ed;color:#c2410c;}
+.sr-upd.old::before{background:#f59e0b;}
 /* 로드뷰 속 시설 핀 (출장 도구함과 같은 모양) */
 .rvpin{display:flex;flex-direction:column;align-items:center;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
 .rvpin b{background:#e11d48;color:#fff;font-size:14px;font-weight:800;padding:6px 11px;border-radius:999px;white-space:nowrap;border:2px solid #fff}
@@ -3302,22 +3304,38 @@ function srRvPin(rv, lat, lng, gubun, small){
   pin.className = small ? "rvpin sm" : "rvpin";
   pin.innerHTML = "<i></i>";
   const ov = new kakao.maps.CustomOverlay({position:pos, content:pin, xAnchor:.5, yAnchor:1});
-  kakao.maps.event.addListener(rv, "init", function(){
+  // 카메라를 핀 쪽으로: 방향(pan)은 사진 찍은 곳 → 시설 방위각으로 직접 계산 (가장 확실),
+  // 위아래(tilt)만 카카오 계산값을 조금 씀. 카카오가 사진을 띄운 직후 시야를 덮어쓰는 경우가 있어 몇 번 더 맞춤
+  function aim(){
     try{
       const p = rv.getPosition();
       if(!p) return;
-      if(!small){
+      const R = Math.PI / 180, f1 = p.getLat() * R, f2 = lat * R, dl = (lng - p.getLng()) * R;
+      const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+      const pan = ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+      let tilt = 0;
+      try{
+        const vp = rv.getProjection().viewpointFromCoords(ov.getPosition(), ov.getAltitude());
+        if(vp && isFinite(vp.tilt)) tilt = Math.max(-25, Math.min(10, vp.tilt));
+      }catch(e){}
+      rv.setViewpoint({pan: pan, tilt: tilt, zoom: 0});
+    }catch(e){}
+  }
+  let done = false;
+  kakao.maps.event.addListener(rv, "init", function(){
+    try{
+      const p = rv.getPosition();
+      if(p && !small){
         const d = Math.round(calcDistance(p.getLat(), p.getLng(), lat, lng));
         pin.innerHTML = `<b>${SR_PIN_LABEL[gubun] || "여기"}${d >= 10 ? " · " + (d < 1000 ? d + "m" : (d / 1000).toFixed(1) + "km") : ""}</b><i></i>`;
       }
       ov.setMap(rv);
-      let vp = null;
-      try{ vp = rv.getProjection().viewpointFromCoords(ov.getPosition(), ov.getAltitude()); }catch(e){}
-      if(vp){ rv.setViewpoint({pan:vp.pan, tilt:vp.tilt, zoom:0}); return; }
-      const R = Math.PI / 180, f1 = p.getLat() * R, f2 = lat * R, dl = (lng - p.getLng()) * R;
-      const y = Math.sin(dl) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
-      rv.setViewpoint({pan:((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360, tilt:0, zoom:0});
     }catch(e){}
+    if(done) return;
+    done = true;
+    aim();
+    setTimeout(aim, 250);
+    setTimeout(aim, 800);
   });
 }
 
@@ -7910,7 +7928,7 @@ function srUpdChip(u){
   if(!u || !/^\d{4}-\d{2}/.test(u)) return "";
   const y = +u.slice(0,4), m = +u.slice(5,7), now = new Date();
   const old = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m) >= 24;
-  return `<span class="sr-upd${old ? " old" : ""}" title="지자체가 이 화장실 정보를 마지막으로 고친 때">${y}.${String(m).padStart(2,"0")} 자료</span>`;
+  return `<span class="sr-upd${old ? " old" : ""}" title="이 정보를 관리기관이 마지막으로 고친(기준으로 삼은) 때">${y}.${String(m).padStart(2,"0")} 자료</span>`;
 }
 
 function infoLine(html){
@@ -10002,7 +10020,7 @@ SR_CTPRVN = {"29": "전남광주통합특별시", "46": "전남광주통합특�
              "50": "제주특별자치도"}
 SR_ROAD_TYPES = {"시도", "국도", "고속국도", "구도", "광역시도", "일반국도", "군도", "고속도로", "도시계획도로", "특별광역시도",
                  "지방도", "국가지원지방도", "시군도", "농어촌도로"}
-SR_LIVE_COLS = ["구분", "시도", "시군구", "읍면동", "주소", "위도", "경도", "시설명"]
+SR_LIVE_COLS = ["구분", "시도", "시군구", "읍면동", "주소", "위도", "경도", "시설명", "자료수정일"]
 SR_LIVE_EXTRA = {"주차장": ["요금", "요금상세", "운영평일", "운영토요일", "운영공휴일"],
                  "자동심장충격기": ["설치장소", "사용시간", "일요일사용"],
                  "교통사고위험지역": ["사고건수", "보행자사고", "야간사고", "중상이상"]}
@@ -10431,6 +10449,20 @@ def _sr_extra(cat, item):
     return out
 
 
+# API 응답에서 자료 기준일·수정일 찾기 (칸 이름이 API마다 달라 이름에 들어간 단어로 찾음)
+SR_DATE_KEYS = ("referencedate", "stdr", "crtr", "lastupdt", "updt", "update", "mdfcn", "modif", "lastmod", "regist")
+
+
+def _sr_find_date(item):
+    for want in SR_DATE_KEYS:
+        for k, v in item.items():
+            if want in k.lower().replace("_", ""):
+                m = re.search(r"((?:19|20)\d{2})[-./]?(\d{2})[-./]?(\d{2})", str(v))
+                if m:
+                    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return ""
+
+
 def _sr_make_row(cat, item, stats):
     road = jibun = area = kind = sido_code = roadtype = ""
     crs = None
@@ -10499,7 +10531,7 @@ def _sr_make_row(cat, item, stats):
     if not disp:
         disp = f"{sgg} {emd}".strip()
     row = {"구분": gubun, "시도": sido, "시군구": sgg, "읍면동": emd, "주소": disp,
-           "위도": round(lat, 7), "경도": round(lon, 7), "시설명": name}
+           "위도": round(lat, 7), "경도": round(lon, 7), "시설명": name, "자료수정일": _sr_find_date(item)}
     row.update(_sr_extra(cat, item))
     return row
 
