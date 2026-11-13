@@ -1232,6 +1232,17 @@ html,body{
 }
 
 .user-marker-wrap{position:relative;width:28px;height:28px;}
+/* 내 위치로 버튼 (지도 오른쪽 아래, 결과 창이 올라오면 그 위로) */
+.leaflet-control.sr-locate-wrap{border:none!important;background:none!important;box-shadow:none!important;margin-right:14px!important;transition:margin-bottom .18s ease;}
+.sr-locate{width:46px;height:46px;border-radius:50%;background:#fff;border:1px solid #e5e7eb;box-shadow:0 3px 10px rgba(15,23,42,.18);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;}
+.sr-locate:active{transform:scale(.94);}
+.sr-locate{color:#111827;}
+.sr-locate.on,.sr-locate.busy{color:#2563eb;}
+.sr-locate svg{width:24px;height:24px;stroke:currentColor;}
+.sr-locate.on svg{stroke:#2563eb;}
+.sr-locate.busy svg{animation:srLocSpin 1s linear infinite;stroke:#2563eb;}
+@keyframes srLocSpin{to{transform:rotate(360deg)}}
+.sr-locate-toast{position:absolute;right:0;bottom:56px;white-space:nowrap;background:rgba(17,24,39,.88);color:#fff;font-size:12.5px;padding:7px 11px;border-radius:10px;pointer-events:none;}
 
 .user-marker-pulse{
 
@@ -2352,6 +2363,67 @@ function gubunLabel(g){
 
 
 const map = L.map("map", { zoomControl:true }).setView([34.85, 126.90], 9);
+
+/* 내 위치로 버튼: 누르면 지금 위치로 이동하고 초록 원·점으로 표시 (토글 ON일 때, 모든 안전로드 지도) */
+function srAddLocateBtn(m){
+  if(!window.FEATURE_DETAIL || !m || m._srLocate) return;
+  const me = L.layerGroup().addTo(m);
+  const Ctl = L.Control.extend({
+    options: {position: "bottomright"},
+    onAdd: function(){
+      const wrap = L.DomUtil.create("div", "leaflet-control sr-locate-wrap");
+      wrap.innerHTML = '<button type="button" class="sr-locate" title="내 위치로" aria-label="내 위치로">'
+        + '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>';
+      L.DomEvent.disableClickPropagation(wrap);
+      L.DomEvent.disableScrollPropagation(wrap);
+      const btn = wrap.querySelector("button");
+      function toast(msg){
+        let t = wrap.querySelector(".sr-locate-toast");
+        if(!t){ t = document.createElement("div"); t.className = "sr-locate-toast"; wrap.appendChild(t); }
+        t.textContent = msg;
+        clearTimeout(t._h); t._h = setTimeout(function(){ t.remove(); }, 2600);
+      }
+      btn.addEventListener("click", function(){
+        if(!navigator.geolocation){ toast("이 기기에서는 위치를 쓸 수 없어요"); return; }
+        if(btn.classList.contains("busy")) return;
+        btn.classList.add("busy");
+        navigator.geolocation.getCurrentPosition(function(pos){
+          btn.classList.remove("busy"); btn.classList.add("on");
+          const lat = pos.coords.latitude, lng = pos.coords.longitude;
+          const acc = Math.max(30, Math.min(pos.coords.accuracy || 80, 300));
+          me.clearLayers();
+          L.circle([lat, lng], {radius: acc, color: "#22c55e", fillColor: "#22c55e", fillOpacity: .18, weight: 1.5}).addTo(me);
+          L.marker([lat, lng], {icon: buildUserIcon(), zIndexOffset: 1000, interactive: false}).addTo(me);
+          m.setView([lat, lng], Math.max(m.getZoom(), 16), {animate: false});
+          if(m._srLift) m.panBy([0, m._srLift / 2], {animate: false});   // 결과 창에 가리지 않게 보이는 부분 가운데로
+        }, function(err){
+          btn.classList.remove("busy");
+          toast(err && err.code === 1 ? "위치 권한을 허용해 주세요" : "위치를 찾지 못했어요. 다시 눌러 주세요");
+        }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 15000});
+      });
+      return wrap;
+    }
+  });
+  const ctl = new Ctl().addTo(m);
+  m._srLocate = ctl;
+  // 아래 결과 창이 지도를 덮으면 버튼을 그 위로 올림
+  const el = ctl.getContainer();
+  setInterval(function(){
+    try{
+      const panel = document.getElementById("mobileResultPanel");
+      let lift = 0;
+      if(panel && getComputedStyle(panel).display !== "none" && el.offsetParent){
+        const pr = panel.getBoundingClientRect(), br = el.getBoundingClientRect(), mr = m.getContainer().getBoundingClientRect();
+        const horiz = pr.left < br.right && pr.right > br.left;
+        if(horiz && pr.top < mr.bottom && pr.bottom > pr.top) lift = Math.max(0, mr.bottom - pr.top);
+      }
+      m._srLift = lift;
+      const want = (lift ? lift + 12 : 18) + "px";
+      if(el.style.marginBottom !== want) el.style.marginBottom = want;
+    }catch(e){}
+  }, 300);
+}
+srAddLocateBtn(map);
 
 
 
@@ -4471,6 +4543,7 @@ function openMobileMap(){
     // 줌 컨트롤을 알약 메뉴 아래(왼쪽)에 배치
 
     L.control.zoom({position: 'topleft'}).addTo(window.mobileLeafletMap);
+    srAddLocateBtn(window.mobileLeafletMap);
 
 
 
