@@ -18946,19 +18946,27 @@ TRIP_CSS += r'''
 .pd-ans .yes{background:#13863f}.pd-ans .no{background:#c0262d}.pd-ans .dk{background:#6b6f72;font-size:20px;letter-spacing:-0.04em}
 .pd-pad{display:none;flex:1;min-height:0;margin:16px 14px 10px;border:2px dashed #c9c6bd;border-radius:18px;touch-action:none;background:#fff}
 .pd.hc .pd-pad{background:#000;border-color:#555}
-.pd.drawing .pd-face{display:none}.pd.drawing .pd-pad{display:block}
+.pd.drawing .pd-pad{display:block}
+/* 손글씨 + 답 버튼: 글씨판 아래에 예/아니요/모르겠어요 (뒤집기면 위로) */
+.pd.drawing .pd-txt{display:none}
+.pd.drawing .pd-face{flex:none;order:2;padding:0 14px 10px}
+.pd.drawing.flip .pd-face{order:0;padding:10px 14px 0}
+.pd.drawing:not(.answers) .pd-face{display:none}
+.pd.drawing .pd-pad{order:1}.pd.drawing .pd-tools{order:3}
 .pd-pad{transition:transform .25s}.pd.flip .pd-pad{transform:rotate(180deg)}
 .pd-tools{display:flex;gap:8px;padding:8px 14px calc(12px + env(safe-area-inset-bottom));border-top:1px solid #e7e4dc;background:#f4f2ec}
 .pd.hc .pd-tools{background:#111;border-color:#333}
 .pd-tools button{flex:1;height:50px;border:1px solid #d9d6cd;border-radius:13px;background:#fff;color:#1b1d1c;font-family:inherit;font-size:14px;font-weight:700;line-height:1.2;cursor:pointer;padding:0 4px}
 .pd-tools button.on{background:#1b1d1c;color:#fff;border-color:#1b1d1c}
 .pd.hc .pd-tools button{background:#222;color:#ffe600;border-color:#444}.pd.hc .pd-tools button.on{background:#ffe600;color:#000;border-color:#ffe600}
-.pd.answers .pd-ans{display:grid}.pd.drawing #tAns{display:none}
+.pd.answers .pd-ans{display:grid}
 .pd-zoom{position:absolute;top:calc(10px + env(safe-area-inset-top));right:10px;z-index:3;display:flex;gap:8px}
 .pd-zoom button{width:48px;height:48px;border-radius:50%;border:1px solid #d9d6cd;background:rgba(255,255,255,.92);color:#1b1d1c;font-family:inherit;font-size:28px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
 .pd-zoom button:disabled{opacity:.3}
 .pd.hc .pd-zoom button{background:#222;color:#ffe600;border-color:#444}
 .pd.drawing .pd-zoom{display:none}
+/* 뒤집기 상태: 글자 영역이 돌아가며 빈 여백이 아래(직원 쪽)로 오므로 −/+ 도 아래로 옮김 (위쪽 답 버튼과 안 겹치게) */
+.pd.flip .pd-zoom{top:auto;bottom:calc(84px + env(safe-area-inset-bottom))}
 .pd-face{padding-top:66px}
 .pd-tools .clr{display:none}.pd.drawing .pd-tools .clr{display:block}
 @media (min-width:960px){.t-board .wrap,.t-cards .wrap{max-width:820px;margin-left:auto;margin-right:auto}.t-board .ctabs button{font-size:15px;padding:9px 14px}.pd-tools{justify-content:center}.pd-tools button{flex:0 1 160px;height:54px;font-size:16px}.pd-zoom button{width:56px;height:56px}.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
@@ -19131,7 +19139,10 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
 })();
 $("#wClr").onclick=()=>{$("#w").value="";};
 $("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
-document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>setText(b.textContent,b.dataset.a);});
+document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>{
+  /* 손글씨 중에 답을 누르면 답을 크게 보여줌 (쓴 글씨는 남아 있어 [손글씨]로 다시 볼 수 있음) */
+  if(pd.classList.contains("drawing")){pd.classList.remove("drawing");$("#tPad").classList.remove("on");}
+  setText(b.textContent,b.dataset.a);};});
 txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
 $("#tClose").onclick=()=>history.back();
 window.addEventListener("popstate",hide);
@@ -19145,11 +19156,17 @@ const pad=$("#pad"), ctx=pad.getContext("2d");let drawing=false, last=null;
 function drawColor(){ctx.strokeStyle=pd.classList.contains("hc")?"#ffe600":"#111";}
 function sizePad(){
   if(!pd.classList.contains("drawing"))return;
-  const r=pad.getBoundingClientRect(), d=window.devicePixelRatio||1;
-  pad.width=Math.round(r.width*d);pad.height=Math.round(r.height*d);
+  const r=pad.getBoundingClientRect(), d=window.devicePixelRatio||1, W=Math.round(r.width*d), H=Math.round(r.height*d);
+  if(W===pad.width&&H===pad.height)return;
+  /* 크기가 바뀌어도 쓴 글씨는 남김 (답 버튼 켜고 끄기, 화면 회전 등) */
+  let old=null;if(pad.width&&pad.height){old=document.createElement("canvas");old.width=pad.width;old.height=pad.height;old.getContext("2d").drawImage(pad,0,0);}
+  pad.width=W;pad.height=H;
+  if(old){ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(old,0,0);}
   ctx.setTransform(d,0,0,d,0,0);ctx.lineWidth=6;ctx.lineCap="round";ctx.lineJoin="round";drawColor();
 }
-$("#tAns").onclick=()=>{const on=pd.classList.toggle("answers");$("#tAns").classList.toggle("on",on);if(!on&&txt.classList.contains("ans"))setText(cur);else fit();};
+$("#tAns").onclick=()=>{const on=pd.classList.toggle("answers");$("#tAns").classList.toggle("on",on);
+  if(pd.classList.contains("drawing")){sizePad();return;}
+  if(!on&&txt.classList.contains("ans"))setText(cur);else fit();};
 $("#tPad").onclick=()=>{
   const on=pd.classList.toggle("drawing");$("#tPad").classList.toggle("on",on);
   if(on)sizePad();else fit();
