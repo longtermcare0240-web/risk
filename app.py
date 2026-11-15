@@ -18070,7 +18070,6 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
 {% from "trip/_m.html" import icon %}
 {% block theme %}t-home{% endblock %}
 {% block body %}
-<div class="fit">
 <div class="hello">
   <div class="date" id="today"></div>
   <h1>오늘 출장,<br> 무엇부터 할까요?</h1>
@@ -18094,7 +18093,6 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
   <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
-</div>
 </div>
 <p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 서버에 저장하지 않아요.<br class="mbr"> 최근 검색 주소만 이 기기에 5개까지 남아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
@@ -18901,24 +18899,21 @@ TRIP_CSS += r'''
 /* 5. 큰 글씨 대화 · 6. 낱말카드 */
 :root{--board:#c23a63;--board-bg:#fbe9ef;--cards:#4a6b8a;--cards-bg:#e8eef4}
 .tile.board .ico{background:var(--board-bg);color:var(--board)}
-/* 홈: 폰에서는 메뉴 6개가 항상 한 화면에 꽉 차게 (안내 문구는 그 아래로 스크롤) */
+/* 홈: 폰에서 메뉴 6개가 한 화면에 들어오게. 원래 여백·비율은 두고, 카드 높이만 화면 높이에 맞춰 줄임
+   (카드 높이 = (화면 높이 - 제목 영역) ÷ 3, 최대 168px 원래 크기 / 최소 124px, 더 작은 화면은 아래로 스크롤) */
 @media (max-width:959px){
-  .t-home .fit{display:flex;flex-direction:column;height:calc(100vh - 30px);height:calc(100dvh - 30px);min-height:480px}
-  .t-home .hello{flex:none;margin-bottom:14px}
-  .t-home .tiles{flex:1;min-height:0;grid-template-rows:repeat(3,minmax(0,1fr));gap:10px}
-  .t-home .tile{min-height:0;padding:14px;border-radius:20px}
-  .t-home .tile .t{margin:8px 0 2px}
+  .t-home .tiles{gap:10px}
+  .t-home .tile{min-height:clamp(124px,calc((100vh - 172px) / 3),168px);min-height:clamp(124px,calc((100dvh - 172px) / 3),168px);padding:14px 16px}
+  .t-home .tile .t{margin:10px 0 2px}
   .t-home .tile .d{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 }
 @media (max-width:959px) and (max-height:760px){
-  .t-home .hello h1{font-size:22px}
-  .t-home .hello h1 br{display:none}
   .t-home .tile .ico{width:40px;height:40px;border-radius:13px}
   .t-home .tile .ico svg{width:22px;height:22px}
-  .t-home .tile .t{font-size:16px;margin:6px 0 1px}
+  .t-home .tile .t{font-size:16px;margin:8px 0 1px}
   .t-home .tile .d{font-size:12px}
+  .t-home .tile.cards .d{display:none}
 }
-@media (max-width:959px) and (max-height:600px){.t-home .tile .d{display:none}}
 .tile.cards .ico{background:var(--cards-bg);color:var(--cards)}
 @media (min-width:960px){.tiles{grid-template-columns:repeat(3,1fr)}}
 .t-board .btn.main{background:var(--board)}
@@ -18951,6 +18946,7 @@ TRIP_CSS += r'''
 .pd-pad{display:none;flex:1;min-height:0;margin:16px 14px 10px;border:2px dashed #c9c6bd;border-radius:18px;touch-action:none;background:#fff}
 .pd.hc .pd-pad{background:#000;border-color:#555}
 .pd.drawing .pd-face{display:none}.pd.drawing .pd-pad{display:block}
+.pd-pad{transition:transform .25s}.pd.flip .pd-pad{transform:rotate(180deg)}
 .pd-tools{display:flex;gap:8px;padding:8px 14px calc(12px + env(safe-area-inset-bottom));border-top:1px solid #e7e4dc;background:#f4f2ec}
 .pd.hc .pd-tools{background:#111;border-color:#333}
 .pd-tools button{flex:1;height:50px;border:1px solid #d9d6cd;border-radius:13px;background:#fff;color:#1b1d1c;font-family:inherit;font-size:14px;font-weight:700;line-height:1.2;cursor:pointer;padding:0 4px}
@@ -19126,7 +19122,8 @@ $("#tPad").onclick=()=>{
   if(on)sizePad();else fit();
 };
 $("#tClr").onclick=()=>ctx.clearRect(0,0,pad.width,pad.height);
-function pt(e){const r=pad.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
+function pt(e){const r=pad.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  return pd.classList.contains("flip")?{x:r.width-x,y:r.height-y}:{x:x,y:y};}  /* 뒤집힌 상태면 좌표도 뒤집음 */
 pad.addEventListener("pointerdown",e=>{drawing=true;last=pt(e);pad.setPointerCapture(e.pointerId);
   ctx.beginPath();ctx.arc(last.x,last.y,3,0,Math.PI*2);ctx.fillStyle=ctx.strokeStyle;ctx.fill();});
 pad.addEventListener("pointermove",e=>{if(!drawing)return;const p=pt(e);
