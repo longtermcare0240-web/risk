@@ -18900,17 +18900,18 @@ TRIP_CSS += r'''
 :root{--board:#c23a63;--board-bg:#fbe9ef;--cards:#4a6b8a;--cards-bg:#e8eef4}
 .tile.board .ico{background:var(--board-bg);color:var(--board)}
 /* 홈: 폰에서 메뉴 6개가 한 화면에 들어오게. 원래 여백·비율은 두고, 카드 높이만 화면 높이에 맞춰 줄임
-   (카드 높이 = (화면 높이 - 제목 영역) ÷ 3, 최대 168px 원래 크기 / 최소 124px, 더 작은 화면은 아래로 스크롤) */
+   (카드 안은 아이콘 바로 아래 제목, 큰 제목과 카드 사이는 넓게) */
 @media (max-width:959px){
-  .t-home .tiles{gap:10px}
-  .t-home .tile{min-height:clamp(124px,calc((100vh - 172px) / 3),168px);min-height:clamp(124px,calc((100dvh - 172px) / 3),168px);padding:14px 16px}
-  .t-home .tile .t{margin:10px 0 2px}
+  .t-home .hello{margin-bottom:30px}
+  .t-home .tiles{gap:10px;grid-auto-rows:1fr}
+  .t-home .tile{min-height:0;justify-content:flex-start;padding:16px}
+  .t-home .tile .t{margin:14px 0 3px}
   .t-home .tile .d{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 }
 @media (max-width:959px) and (max-height:760px){
   .t-home .tile .ico{width:40px;height:40px;border-radius:13px}
   .t-home .tile .ico svg{width:22px;height:22px}
-  .t-home .tile .t{font-size:16px;margin:8px 0 1px}
+  .t-home .tile .t{font-size:16px;margin:10px 0 2px}
   .t-home .tile .d{font-size:12px}
   .t-home .tile.cards .d{display:none}
 }
@@ -19081,7 +19082,20 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
   $("#wHint").innerHTML="말로 입력은 휴대폰 음성인식을 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
   let rec=null, base="";
   $("#wClr").addEventListener("click",()=>{if(rec){try{rec.abort();}catch(e){}}});
-  function stop(){mic.classList.remove("on");mic.querySelector("span").textContent="말로 입력";rec=null;}
+  /* 시작·종료 소리: 케어내비 사례검색 음성입력(playBeep)과 같은 소리 (시작 880Hz, 종료 660Hz, 0.18초) */
+  function playBeep(type){
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+      const ctx=new AC(), osc=ctx.createOscillator(), gain=ctx.createGain();
+      osc.type="sine";osc.frequency.value=(type==="start")?880:660;
+      gain.gain.setValueAtTime(0.001,ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.7,ctx.currentTime+0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.18);
+      osc.connect(gain);gain.connect(ctx.destination);
+      osc.start();osc.stop(ctx.currentTime+0.18);
+    }catch(e){}
+  }
+  function stop(){if(rec)playBeep("end");mic.classList.remove("on");mic.querySelector("span").textContent="말로 입력";rec=null;}
   mic.onclick=()=>{
     if(rec){try{rec.stop();}catch(e){}return;}
     try{rec=new SR();}catch(e){return;}
@@ -19093,6 +19107,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
     rec.onerror=e=>{if(e.error==="not-allowed")$("#wHint").textContent="마이크 권한을 허용해 주세요.";};
     rec.onend=stop;
     mic.classList.add("on");mic.querySelector("span").textContent="듣는 중 · 말이 끝나면 멈춰요";
+    playBeep("start");
     try{rec.start();}catch(e){stop();}
   };
 })();
