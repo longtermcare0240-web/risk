@@ -18954,8 +18954,14 @@ TRIP_CSS += r'''
 .pd-tools button.on{background:#1b1d1c;color:#fff;border-color:#1b1d1c}
 .pd.hc .pd-tools button{background:#222;color:#ffe600;border-color:#444}.pd.hc .pd-tools button.on{background:#ffe600;color:#000;border-color:#ffe600}
 .pd.answers .pd-ans{display:grid}.pd.drawing #tAns{display:none}
+.pd-zoom{position:absolute;top:calc(10px + env(safe-area-inset-top));right:10px;z-index:3;display:flex;gap:8px}
+.pd-zoom button{width:48px;height:48px;border-radius:50%;border:1px solid #d9d6cd;background:rgba(255,255,255,.92);color:#1b1d1c;font-family:inherit;font-size:28px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.pd-zoom button:disabled{opacity:.3}
+.pd.hc .pd-zoom button{background:#222;color:#ffe600;border-color:#444}
+.pd.drawing .pd-zoom{display:none}
+.pd-face{padding-top:66px}
 .pd-tools .clr{display:none}.pd.drawing .pd-tools .clr{display:block}
-@media (min-width:960px){.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
+@media (min-width:960px){.t-board .wrap,.t-cards .wrap{max-width:820px;margin-left:auto;margin-right:auto}.t-board .ctabs button{font-size:15px;padding:9px 14px}.pd-tools{justify-content:center}.pd-tools button{flex:0 1 160px;height:54px;font-size:16px}.pd-zoom button{width:56px;height:56px}.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
 '''
 
 
@@ -18989,6 +18995,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
 <p class="note">누르면 화면 가득 크게 보여요.<br>어르신이 버튼으로 답하게 하려면 큰 화면에서 [답 버튼]을 켜세요.</p>
 
 <div class="pd" id="pd">
+  <div class="pd-zoom"><button type="button" id="zOut" aria-label="글자 작게">−</button><button type="button" id="zIn" aria-label="글자 크게">+</button></div>
   <div class="pd-face">
     <div class="pd-txt" id="txt"><span id="txtS"></span></div>
     <div class="pd-ans">
@@ -19050,17 +19057,28 @@ function alertLine(m){const h=$("#myHint");h.style.display="block";h.style.color
   setTimeout(()=>{h.style.color="";h.innerHTML="내 문장은 이 기기에만 남아요.<br>이름·주소·전화번호는 넣지 마세요.";},3000);}
 
 /* 크게 보기 */
-const pd=$("#pd"), txt=$("#txt"), sp=$("#txtS");
+const pd=$("#pd"), txt=$("#txt"), sp=$("#txtS"), zIn=$("#zIn"), zOut=$("#zOut"), ZKEY="trip_board_zoom", ZMIN=-3, ZMAX=6;
+let zoom=0;try{zoom=parseInt(sessionStorage.getItem(ZKEY)||"0",10)||0;}catch(e){}  /* 탭을 닫기 전까지 유지 */
+function setZoom(z){zoom=Math.max(ZMIN,Math.min(ZMAX,z));try{sessionStorage.setItem(ZKEY,String(zoom));}catch(e){}fit();}
+let capZ=ZMAX;
+zIn.onclick=()=>{if(!zIn.disabled)setZoom(zoom+1);};zOut.onclick=()=>setZoom(Math.min(zoom,capZ)-1);  /* 최대에서 −를 누르면 바로 한 단계 작아지게 */
 let cur="";
 function fit(){
   if(!pd.classList.contains("on")||pd.classList.contains("drawing"))return;
   const W=txt.clientWidth, H=txt.clientHeight;
   if(txt.classList.contains("ans")){  /* 답: 글자 수로 크기 계산 (좌우 여백 포함, 상자 밖으로 안 나가게) */
     const n=[...sp.textContent].length;sp.style.fontSize=Math.floor(Math.min(W*0.82/(n+1),H*0.4))+"px";return;}
-  let lo=16, hi=Math.floor(Math.max(24,Math.min(H,W)));
-  while(hi-lo>1){const m=(lo+hi)>>1;sp.style.fontSize=m+"px";
-    if(sp.scrollWidth<=sp.clientWidth+1&&sp.offsetWidth<=W&&sp.offsetHeight<=H)lo=m;else hi=m;}
-  sp.style.fontSize=Math.floor(lo*0.94)+"px";
+  /* 기본(zoom 0) = 단어를 끊지 않고 화면에 맞는 최대 크기.
+     [+]로 더 키우면 단어 안에서도 줄을 바꿔 화면 안에서 더 크게 (끊어서 맞는 최대 크기까지) */
+  function best(wb){sp.style.wordBreak=wb;let lo=16, hi=Math.floor(Math.max(24,Math.min(H,W)));
+    while(hi-lo>1){const m=(lo+hi)>>1;sp.style.fontSize=m+"px";
+      if(sp.scrollWidth<=sp.clientWidth+1&&sp.offsetWidth<=W&&sp.offsetHeight<=H)lo=m;else hi=m;}
+    return Math.floor(lo*0.97);}
+  const S1=best("keep-all"), S2=Math.max(S1,best("break-all")), t=Math.round(S1*Math.pow(1.25,zoom));
+  if(t<=S1){sp.style.wordBreak="keep-all";sp.style.fontSize=t+"px";}
+  else{sp.style.wordBreak="break-all";sp.style.fontSize=Math.min(t,S2)+"px";}
+  capZ=Math.max(0,Math.ceil(Math.log(S2/S1)/Math.log(1.25)-1e-9));  /* 이 문장에서 더 커지지 않는 단계 */
+  zIn.disabled=t>=S2;zOut.disabled=zoom<=ZMIN;
 }
 function setText(t,cls){sp.textContent=t;txt.className="pd-txt"+(cls?" ans "+cls:"");fit();}
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);
@@ -19079,7 +19097,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition, mic=$("#mic"), w=$("#w");
   if(!SR){w.placeholder="여기에 쓰거나, 키보드의 마이크로 말하세요";$("#wHint").innerHTML="키보드의 마이크 버튼으로 말해도 글자로 바뀌어요.<br>쓴 글은 저장하지 않아요.";return;}
   mic.hidden=false;
-  $("#wHint").innerHTML="말로 입력은 휴대폰 음성인식을 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
+  $("#wHint").innerHTML="말로 입력은 음성인식 서비스(구글 등)를 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
   let rec=null, base="";
   $("#wClr").addEventListener("click",()=>{if(rec){try{rec.abort();}catch(e){}}});
   /* 시작·종료 소리: 케어내비 사례검색 음성입력(playBeep)과 같은 소리 (시작 880Hz, 종료 660Hz, 0.18초) */
