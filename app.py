@@ -18080,18 +18080,18 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
   <a class="tile house" href="{{ url_for('trip.house_page') }}">
     <span class="ico">{{ icon('house') }}</span>
     <span><div class="t">집 미리보기</div><div class="d">주소 하나로 어떤 집인지 미리 알고 가요</div></span></a>
-  <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}">
-    <span class="ico">{{ icon('toilet') }}</span>
-    <span><div class="t">내 근처 화장실</div><div class="d">지금 위치에서 가까운 공중화장실</div></span></a>
-  <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
-    <span class="ico">{{ icon('pill') }}</span>
-    <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
   <a class="tile board" href="{{ url_for('trip.board_page') }}">
     <span class="ico">{{ icon('board') }}</span>
     <span><div class="t">필담판</div><div class="d">귀가 어두운 분께 글자를 크게 보여드려요</div></span></a>
   <a class="tile cards" href="{{ url_for('trip.cards_page') }}">
     <span class="ico">{{ icon('cards') }}</span>
     <span><div class="t">낱말카드</div><div class="d">준비 중이에요</div></span></a>
+  <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}">
+    <span class="ico">{{ icon('toilet') }}</span>
+    <span><div class="t">내 근처 화장실</div><div class="d">지금 위치에서 가까운 공중화장실</div></span></a>
+  <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
+    <span class="ico">{{ icon('pill') }}</span>
+    <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
 </div>
 <p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 서버에 저장하지 않아요.<br class="mbr"> 최근 검색 주소만 이 기기에 5개까지 남아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
@@ -18909,6 +18909,8 @@ TRIP_CSS += r'''
 .pbtn:active{background:var(--board-bg)}
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
+.btn.mic{width:100%;margin-top:10px;height:50px;color:var(--board);border-color:var(--board)}
+.btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
 .myadd input{flex:1}
 /* 크게 보기 화면 */
@@ -18921,7 +18923,7 @@ TRIP_CSS += r'''
 .pd-txt span{display:inline-block;max-width:100%;font-weight:800;line-height:1.25;letter-spacing:-0.02em;white-space:pre-line;word-break:keep-all;overflow-wrap:normal}
 .pd-txt.ans span{color:#fff;padding:.1em .5em;border-radius:.25em}
 .pd-txt.ans.yes span{background:#13863f}.pd-txt.ans.no span{background:#c0262d}.pd-txt.ans.dk span{background:#6b6f72}
-.pd-ans{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px}
+.pd-ans{display:none;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px}
 .pd-ans button{height:84px;border:none;border-radius:18px;color:#fff;font-family:inherit;font-size:28px;font-weight:800;line-height:1;cursor:pointer}
 .pd-ans .yes{background:#13863f}.pd-ans .no{background:#c0262d}.pd-ans .dk{background:#6b6f72;font-size:20px;letter-spacing:-0.04em}
 .pd-pad{display:none;flex:1;min-height:0;margin:16px 14px 10px;border:2px dashed #c9c6bd;border-radius:18px;touch-action:none;background:#fff}
@@ -18932,6 +18934,7 @@ TRIP_CSS += r'''
 .pd-tools button{flex:1;height:50px;border:1px solid #d9d6cd;border-radius:13px;background:#fff;color:#1b1d1c;font-family:inherit;font-size:14px;font-weight:700;line-height:1.2;cursor:pointer;padding:0 4px}
 .pd-tools button.on{background:#1b1d1c;color:#fff;border-color:#1b1d1c}
 .pd.hc .pd-tools button{background:#222;color:#ffe600;border-color:#444}.pd.hc .pd-tools button.on{background:#ffe600;color:#000;border-color:#ffe600}
+.pd.answers .pd-ans{display:grid}.pd.drawing #tAns{display:none}
 .pd-tools .clr{display:none}.pd.drawing .pd-tools .clr{display:block}
 @media (min-width:960px){.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
 '''
@@ -18945,9 +18948,10 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
 {{ topbar('필담판') }}
 <div class="card">
   <label class="l" for="w">보여줄 말</label>
-  <textarea id="w" placeholder="여기에 쓰거나, 키보드의 마이크 버튼을 눌러 말하세요"></textarea>
+  <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
+  <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말로 입력</span></button>
   <button class="btn main" type="button" id="showW">크게 보여주기</button>
-  <p class="hint">키보드 마이크로 말하면 글자로 바뀌어요.<br>쓴 글은 저장하지 않아요.</p>
+  <p class="hint" id="wHint">쓴 글은 저장하지 않아요.</p>
 </div>
 
 <div class="card">
@@ -18960,7 +18964,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
   </div>
   <p class="hint" id="myHint" style="display:none">내 문장은 이 기기에만 남아요.<br>이름·주소·전화번호는 넣지 마세요.</p>
 </div>
-<p class="note">누르면 화면 가득 크게 보여요.<br>어르신은 아래 버튼으로 예·아니요를 답할 수 있어요.</p>
+<p class="note">누르면 화면 가득 크게 보여요.<br>어르신이 버튼으로 답하게 하려면 큰 화면에서 [답 버튼]을 켜세요.</p>
 
 <div class="pd" id="pd">
   <div class="pd-face">
@@ -18977,6 +18981,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
     <button type="button" id="tFlip">뒤집기</button>
     <button type="button" id="tHc">고대비</button>
     <button type="button" id="tPad">손글씨</button>
+    <button type="button" id="tAns">답 버튼</button>
     <button type="button" id="tClr" class="clr">지우기</button>
   </div>
 </div>
@@ -19027,13 +19032,16 @@ const pd=$("#pd"), txt=$("#txt"), sp=$("#txtS");
 let cur="";
 function fit(){
   if(!pd.classList.contains("on")||pd.classList.contains("drawing"))return;
-  const W=txt.clientWidth, H=txt.clientHeight, ans=txt.classList.contains("ans");
-  let lo=16, hi=Math.floor(Math.max(24,Math.min(H,W)*(ans?0.45:1)));
+  const W=txt.clientWidth, H=txt.clientHeight;
+  if(txt.classList.contains("ans")){  /* 답: 글자 수로 크기 계산 (좌우 여백 포함, 상자 밖으로 안 나가게) */
+    const n=[...sp.textContent].length;sp.style.fontSize=Math.floor(Math.min(W*0.82/(n+1),H*0.4))+"px";return;}
+  let lo=16, hi=Math.floor(Math.max(24,Math.min(H,W)));
   while(hi-lo>1){const m=(lo+hi)>>1;sp.style.fontSize=m+"px";
     if(sp.scrollWidth<=sp.clientWidth+1&&sp.offsetWidth<=W&&sp.offsetHeight<=H)lo=m;else hi=m;}
-  sp.style.fontSize=lo+"px";
+  sp.style.fontSize=Math.floor(lo*0.94)+"px";
 }
 function setText(t,cls){sp.textContent=t;txt.className="pd-txt"+(cls?" ans "+cls:"");fit();}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);
 async function wake(){try{if("wakeLock" in navigator)lock=await navigator.wakeLock.request("screen");}catch(e){lock=null;}}
 function show(t){
   t=String(t||"").trim();if(!t)return;cur=t;
@@ -19044,6 +19052,26 @@ function show(t){
   if(!was)history.pushState({pd:1},"");
 }
 function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lock&&lock.release();}catch(e){}lock=null;}
+/* 말로 입력: 브라우저 음성인식이 되면 버튼을 보여줌 (앱 화면 등 안 되는 곳은 키보드 마이크 안내) */
+(function(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, mic=$("#mic"), w=$("#w");
+  if(!SR){w.placeholder="여기에 쓰거나, 키보드의 마이크로 말하세요";$("#wHint").innerHTML="키보드의 마이크 버튼으로 말해도 글자로 바뀌어요.<br>쓴 글은 저장하지 않아요.";return;}
+  mic.hidden=false;
+  $("#wHint").innerHTML="말로 입력은 휴대폰 음성인식을 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
+  let rec=null, base="";
+  function stop(){mic.classList.remove("on");mic.querySelector("span").textContent="말로 입력";rec=null;}
+  mic.onclick=()=>{
+    if(rec){try{rec.stop();}catch(e){}return;}
+    try{rec=new SR();}catch(e){return;}
+    rec.lang="ko-KR";rec.interimResults=true;rec.continuous=true;
+    base=w.value.trim()?w.value.trim()+" ":"";
+    rec.onresult=e=>{let t="";for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;w.value=base+t.trim();};
+    rec.onerror=e=>{if(e.error==="not-allowed")$("#wHint").textContent="마이크 권한을 허용해 주세요.";};
+    rec.onend=stop;
+    mic.classList.add("on");mic.querySelector("span").textContent="듣는 중 · 누르면 멈춤";
+    try{rec.start();}catch(e){stop();}
+  };
+})();
 $("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
 document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>setText(b.textContent,b.dataset.a);});
 txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
@@ -19063,6 +19091,7 @@ function sizePad(){
   pad.width=Math.round(r.width*d);pad.height=Math.round(r.height*d);
   ctx.setTransform(d,0,0,d,0,0);ctx.lineWidth=6;ctx.lineCap="round";ctx.lineJoin="round";drawColor();
 }
+$("#tAns").onclick=()=>{const on=pd.classList.toggle("answers");$("#tAns").classList.toggle("on",on);if(!on&&txt.classList.contains("ans"))setText(cur);else fit();};
 $("#tPad").onclick=()=>{
   const on=pd.classList.toggle("drawing");$("#tPad").classList.toggle("on",on);
   if(on)sizePad();else fit();
