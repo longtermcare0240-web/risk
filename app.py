@@ -18926,7 +18926,7 @@ TRIP_CSS += r'''
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
 .wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1;height:50px}
-.btn.mic{color:var(--board);border-color:var(--board);flex:1.4!important;gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px}.btn.wclr{color:var(--sub)}
+.btn.mic{color:var(--board);border-color:var(--board);gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px}.btn.wclr{color:var(--sub)}
 .btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
 .myadd input{flex:1}
@@ -18982,8 +18982,8 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
   <label class="l" for="w">보여줄 말</label>
   <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
   <div class="wrow">
-  <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말로 입력</span></button>
-  <button class="btn wpad" type="button" id="wPad">손글씨</button>
+  <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말하기</span></button>
+  <button class="btn wpad" type="button" id="wPad">글쓰기</button>
   <button class="btn wclr" type="button" id="wClr">지우기</button>
   </div>
   <button class="btn main" type="button" id="showW">크게 보여주기</button>
@@ -19017,7 +19017,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
     <button type="button" id="tClose">닫기</button>
     <button type="button" id="tFlip">뒤집기</button>
     <button type="button" id="tHc">고대비</button>
-    <button type="button" id="tPad">손글씨</button>
+    <button type="button" id="tPad">글쓰기</button>
     <button type="button" id="tAns">답변</button>
     <button type="button" id="tClr" class="clr">지우기</button>
   </div>
@@ -19099,7 +19099,7 @@ function show(t){
   setText(t);wake();
   if(!was)history.pushState({pd:1},"");
 }
-/* 손글씨로 바로 열기 (입력 화면의 [손글씨] 버튼) */
+/* 글쓰기(손글씨)로 바로 열기 (입력 화면의 [글쓰기] 버튼) */
 function openPad(){
   const was=pd.classList.contains("on");
   if(!cur){cur=" ";setText("");}
@@ -19114,7 +19114,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition, mic=$("#mic"), w=$("#w");
   if(!SR){w.placeholder="여기에 쓰거나, 키보드의 마이크로 말하세요";$("#wHint").innerHTML="키보드의 마이크 버튼으로 말해도 글자로 바뀌어요.<br>쓴 글은 저장하지 않아요.";return;}
   mic.hidden=false;
-  $("#wHint").innerHTML="말로 입력은 음성인식 서비스(구글 등)를 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
+  $("#wHint").innerHTML="말하기는 음성인식 서비스(구글 등)를 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
   let rec=null, base="";
   $("#wClr").addEventListener("click",()=>{if(rec){try{rec.abort();}catch(e){}}});
   /* 시작·종료 소리: 케어내비 사례검색 음성입력(playBeep)과 같은 소리 (시작 880Hz, 종료 660Hz, 0.18초) */
@@ -19130,7 +19130,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
       osc.start();osc.stop(ctx.currentTime+0.18);
     }catch(e){}
   }
-  function stop(){if(rec)playBeep("end");mic.classList.remove("on");mic.querySelector("span").textContent="말로 입력";rec=null;}
+  function stop(){if(rec)playBeep("end");mic.classList.remove("on");mic.querySelector("span").textContent="말하기";rec=null;}
   mic.onclick=()=>{
     if(rec){try{rec.stop();}catch(e){}return;}
     try{rec=new SR();}catch(e){return;}
@@ -19141,7 +19141,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
     rec.onresult=e=>{const r=e.results[e.results.length-1];w.value=base+String(r[0].transcript||"").trim();};
     rec.onerror=e=>{if(e.error==="not-allowed")$("#wHint").textContent="마이크 권한을 허용해 주세요.";};
     rec.onend=stop;
-    mic.classList.add("on");mic.querySelector("span").textContent="듣는 중 · 말이 끝나면 멈춰요";
+    mic.classList.add("on");mic.querySelector("span").textContent="듣는 중";
     playBeep("start");
     try{rec.start();}catch(e){stop();}
   };
@@ -19150,7 +19150,7 @@ $("#wPad").onclick=()=>openPad();
 $("#wClr").onclick=()=>{$("#w").value="";};
 $("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
 document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>{
-  /* 손글씨 중에 답을 누르면 답을 크게 보여줌 (쓴 글씨는 남아 있어 [손글씨]로 다시 볼 수 있음) */
+  /* 손글씨 중에 답을 누르면 답을 크게 보여줌 (쓴 글씨는 남아 있어 [글쓰기]로 다시 볼 수 있음) */
   if(pd.classList.contains("drawing")){pd.classList.remove("drawing");$("#tPad").classList.remove("on");}
   setText(b.textContent,b.dataset.a);};});
 txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
