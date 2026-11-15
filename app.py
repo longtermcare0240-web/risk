@@ -18925,7 +18925,7 @@ TRIP_CSS += r'''
 .pbtn:active{background:var(--board-bg)}
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
-.wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1;height:50px}
+.wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;height:50px}  /* 글자가 바뀌어도 세 버튼 폭 고정 */
 .btn.mic{color:var(--board);border-color:var(--board);gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px}.btn.wclr{color:var(--sub)}
 .btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
