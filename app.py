@@ -18967,7 +18967,11 @@ TRIP_CSS += r'''
 /* 뒤집기 상태: 글자 영역이 돌아가며 빈 여백이 아래(직원 쪽)로 오므로 −/+ 도 아래로 옮김 (위쪽 답 버튼과 안 겹치게) */
 .pd.flip .pd-zoom{top:auto;bottom:calc(84px + env(safe-area-inset-bottom))}
 .pd-face{padding-top:66px}
-.pd-tools .clr{display:none}.pd.drawing .pd-tools .clr{display:block}
+/* 글쓰기 화면의 지우개: 글씨판 오른쪽 위 구석 (뒤집기면 직원 쪽인 아래 구석) */
+.pd-erase{display:none;position:absolute;top:calc(26px + env(safe-area-inset-top));right:24px;z-index:3;width:52px;height:52px;border-radius:50%;border:1px solid #d9d6cd;background:rgba(255,255,255,.92);color:#1b1d1c;cursor:pointer;align-items:center;justify-content:center;padding:0}
+.pd.drawing .pd-erase{display:flex}
+.pd.drawing.flip .pd-erase{top:auto;bottom:calc(94px + env(safe-area-inset-bottom))}
+.pd.hc .pd-erase{background:#222;color:#ffe600;border-color:#444}
 @media (min-width:960px){.t-board .wrap,.t-cards .wrap{max-width:820px;margin-left:auto;margin-right:auto}.t-board .ctabs button{font-size:15px;padding:9px 14px}.pd-tools{justify-content:center}.pd-tools button{flex:0 1 160px;height:54px;font-size:16px}.pd-zoom button{width:56px;height:56px}.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
 '''
 
@@ -19003,6 +19007,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
 <p class="note">누르면 화면 가득 크게 보여요.<br>어르신이 버튼으로 답하게 하려면 큰 화면에서 [답변]을 켜세요.</p>
 
 <div class="pd" id="pd">
+  <button type="button" class="pd-erase" id="tClr" aria-label="글씨 지우기"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21l-4-4a2 2 0 0 1 0-2.8L13.2 4a2 2 0 0 1 2.8 0l4.6 4.6a2 2 0 0 1 0 2.8L11 21z"/><path d="M8.5 9.5l6 6M7 21h14"/></svg></button>
   <div class="pd-zoom"><button type="button" id="zOut" aria-label="글자 작게">−</button><button type="button" id="zIn" aria-label="글자 크게">+</button></div>
   <div class="pd-face">
     <div class="pd-txt" id="txt"><span id="txtS"></span></div>
@@ -19019,7 +19024,6 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
     <button type="button" id="tHc">고대비</button>
     <button type="button" id="tPad">글쓰기</button>
     <button type="button" id="tAns">답변</button>
-    <button type="button" id="tClr" class="clr">지우기</button>
   </div>
 </div>
 <script type="application/json" id="phr">{{ phrases|tojson }}</script>
@@ -19157,7 +19161,10 @@ txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
 $("#tClose").onclick=()=>history.back();
 window.addEventListener("popstate",hide);
 $("#tFlip").onclick=()=>{pd.classList.toggle("flip");$("#tFlip").classList.toggle("on");};
-$("#tHc").onclick=()=>{pd.classList.toggle("hc");$("#tHc").classList.toggle("on");drawColor();};
+$("#tHc").onclick=()=>{pd.classList.toggle("hc");$("#tHc").classList.toggle("on");drawColor();recolor();};
+/* 고대비를 켜고 끌 때 이미 쓴 글씨 색도 바꿈 (검정 바탕에 검정 글씨가 안 보이는 문제) */
+function recolor(){if(!pad.width)return;ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation="source-in";
+  ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(0,0,pad.width,pad.height);ctx.restore();}
 window.addEventListener("resize",()=>{fit();sizePad();});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&pd.classList.contains("on"))wake();});
 
