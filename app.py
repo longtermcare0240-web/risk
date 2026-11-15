@@ -18926,7 +18926,7 @@ TRIP_CSS += r'''
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
 .wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1;height:50px}
-.btn.mic{color:var(--board);border-color:var(--board)}.btn.wclr{color:var(--sub)}
+.btn.mic{color:var(--board);border-color:var(--board);flex:1.4!important;gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px}.btn.wclr{color:var(--sub)}
 .btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
 .myadd input{flex:1}
@@ -18983,6 +18983,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
   <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
   <div class="wrow">
   <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말로 입력</span></button>
+  <button class="btn wpad" type="button" id="wPad">손글씨</button>
   <button class="btn wclr" type="button" id="wClr">지우기</button>
   </div>
   <button class="btn main" type="button" id="showW">크게 보여주기</button>
@@ -18999,7 +19000,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
   </div>
   <p class="hint" id="myHint" style="display:none">내 문장은 이 기기에만 남아요.<br>이름·주소·전화번호는 넣지 마세요.</p>
 </div>
-<p class="note">누르면 화면 가득 크게 보여요.<br>어르신이 버튼으로 답하게 하려면 큰 화면에서 [답 버튼]을 켜세요.</p>
+<p class="note">누르면 화면 가득 크게 보여요.<br>어르신이 버튼으로 답하게 하려면 큰 화면에서 [답변]을 켜세요.</p>
 
 <div class="pd" id="pd">
   <div class="pd-zoom"><button type="button" id="zOut" aria-label="글자 작게">−</button><button type="button" id="zIn" aria-label="글자 크게">+</button></div>
@@ -19017,7 +19018,7 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
     <button type="button" id="tFlip">뒤집기</button>
     <button type="button" id="tHc">고대비</button>
     <button type="button" id="tPad">손글씨</button>
-    <button type="button" id="tAns">답 버튼</button>
+    <button type="button" id="tAns">답변</button>
     <button type="button" id="tClr" class="clr">지우기</button>
   </div>
 </div>
@@ -19098,6 +19099,15 @@ function show(t){
   setText(t);wake();
   if(!was)history.pushState({pd:1},"");
 }
+/* 손글씨로 바로 열기 (입력 화면의 [손글씨] 버튼) */
+function openPad(){
+  const was=pd.classList.contains("on");
+  if(!cur){cur=" ";setText("");}
+  pd.classList.add("on","drawing");$("#tPad").classList.add("on");
+  document.body.style.overflow="hidden";wake();
+  if(!was)history.pushState({pd:1},"");
+  requestAnimationFrame(sizePad);
+}
 function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lock&&lock.release();}catch(e){}lock=null;}
 /* 말로 입력: 브라우저 음성인식이 되면 버튼을 보여줌 (앱 화면 등 안 되는 곳은 키보드 마이크 안내) */
 (function(){
@@ -19136,6 +19146,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
     try{rec.start();}catch(e){stop();}
   };
 })();
+$("#wPad").onclick=()=>openPad();
 $("#wClr").onclick=()=>{$("#w").value="";};
 $("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
 document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>{
