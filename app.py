@@ -18909,7 +18909,8 @@ TRIP_CSS += r'''
 .pbtn:active{background:var(--board-bg)}
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
-.btn.mic{width:100%;margin-top:10px;height:50px;color:var(--board);border-color:var(--board)}
+.wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1;height:50px}
+.btn.mic{color:var(--board);border-color:var(--board)}.btn.wclr{color:var(--sub)}
 .btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
 .myadd input{flex:1}
@@ -18949,7 +18950,10 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
 <div class="card">
   <label class="l" for="w">보여줄 말</label>
   <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
+  <div class="wrow">
   <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말로 입력</span></button>
+  <button class="btn wclr" type="button" id="wClr">지우기</button>
+  </div>
   <button class="btn main" type="button" id="showW">크게 보여주기</button>
   <p class="hint" id="wHint">쓴 글은 저장하지 않아요.</p>
 </div>
@@ -19059,6 +19063,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
   mic.hidden=false;
   $("#wHint").innerHTML="말로 입력은 휴대폰 음성인식을 거쳐요.<br>이름·주민번호는 말하지 마세요. 쓴 글은 저장하지 않아요.";
   let rec=null, base="";
+  $("#wClr").addEventListener("click",()=>{if(rec){try{rec.abort();}catch(e){}}});
   function stop(){mic.classList.remove("on");mic.querySelector("span").textContent="말로 입력";rec=null;}
   mic.onclick=()=>{
     if(rec){try{rec.stop();}catch(e){}return;}
@@ -19074,6 +19079,7 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
     try{rec.start();}catch(e){stop();}
   };
 })();
+$("#wClr").onclick=()=>{$("#w").value="";};
 $("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
 document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>setText(b.textContent,b.dataset.a);});
 txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
