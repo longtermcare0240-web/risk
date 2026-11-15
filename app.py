@@ -15033,7 +15033,7 @@ async function renameTeam(){
 # ================================================================================
 # ===============  출장 도구함 모듈 (/trip)  ======================================
 #   - 안전로드 지도앱·매식비 코드와 완전히 분리, /trip 하위 경로로만 동작
-#   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기
+#   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기  5. 필담판  6. 낱말카드(빈 화면)
 #   - 이름·주민번호·전화번호는 받지 않고, 입력·사진·위치는 저장하지 않음 (DB 안 씀)
 #   - 환경변수: KAKAO_KEY, KAKAO_JS_KEY(기존) / DATA_GO_KR_KEY, SAFEMAP_KEY, OPENAI_API_KEY(추가)
 #   - 데이터 파일: trip_toilets.csv(전국 화장실, 없으면 공중화장실.xlsx), pills.csv(케어내비에서 복사)
@@ -17064,6 +17064,10 @@ function attachSuggest(inp,onPick,onClear){
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="4.5" r="1.8"/><circle cx="17" cy="4.5" r="1.8"/><path d="M5 9h4l.6 6H8.5v5.5h-3V15H4.4z"/><path d="M15 9h4l2 7h-2.5v4.5h-3V16H13z"/><path d="M12 7v14"/></svg>
 {%- elif name == 'pill' -%}
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.8" y="8.2" width="18.4" height="7.6" rx="3.8" transform="rotate(-40 12 12)"/><path d="m9.2 8.6 5.6 6.8"/></svg>
+{%- elif name == 'board' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12.5h5"/></svg>
+{%- elif name == 'cards' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="14" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v12"/></svg>
 {%- elif name == 'back' -%}
 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
 {%- endif -%}
@@ -18082,6 +18086,12 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
   <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
+  <a class="tile board" href="{{ url_for('trip.board_page') }}">
+    <span class="ico">{{ icon('board') }}</span>
+    <span><div class="t">필담판</div><div class="d">귀가 어두운 분께 글자를 크게 보여드려요</div></span></a>
+  <a class="tile cards" href="{{ url_for('trip.cards_page') }}">
+    <span class="ico">{{ icon('cards') }}</span>
+    <span><div class="t">낱말카드</div><div class="d">준비 중이에요</div></span></a>
 </div>
 <p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 서버에 저장하지 않아요.<br class="mbr"> 최근 검색 주소만 이 기기에 5개까지 남아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
@@ -18853,6 +18863,235 @@ $("#find").onclick=()=>{
 {% endblock %}
 ''',
 }
+
+# ---------- 5. 필담판 · 6. 낱말카드 ----------
+#   - 필담판: 귀가 어두운 분께 문장을 화면 가득 크게 보여주고, 예/아니요/모르겠어요로 답을 받음
+#   - 쓴 글·손글씨는 서버로 보내지도, 저장하지도 않음 (직원이 추가한 '내 문장'만 그 기기에 남음)
+#   - 낱말카드: 자리만 만들어 둠 (내용은 나중에)
+TRIP_BOARD_PHRASES = [  # (탭 이름, 문장들) — 문장을 고치거나 더하려면 여기만 바꾸면 됨
+    ("인사", ["안녕하세요", "국민건강보험공단에서 왔어요", "요양 등급 때문에 확인하러 왔어요",
+            "잠깐 앉아서 이야기해도 될까요?", "천천히 말씀해 주세요", "다시 한 번 말씀해 주세요",
+            "글로 써서 보여 드릴게요"]),
+    ("생활", ["혼자 사세요?", "같이 사는 가족이 있어요?", "식사는 잘 하세요?", "약은 잘 드세요?",
+            "밤에 잠은 잘 주무세요?", "혼자 화장실 가실 수 있어요?", "혼자 씻으실 수 있어요?",
+            "최근에 넘어진 적 있어요?"]),
+    ("몸 상태", ["어디가 제일 불편하세요?", "아픈 곳을 손으로 가리켜 주세요", "많이 아프세요?",
+              "다니는 병원이 있어요?", "걷기가 불편하세요?", "잘 안 들리세요?", "잘 안 보이세요?"]),
+    ("서류", ["신분증 보여 주세요", "여기에 이름 써 주세요", "여기에 도장 찍어 주세요",
+            "이 서류는 잘 보관하세요", "보호자 연락처가 필요해요"]),
+    ("마무리", ["오늘 확인은 끝났어요", "결과는 우편으로 가요", "궁금하면 공단에 전화하세요\n1577-1000",
+              "고생 많으셨어요", "건강하세요"]),
+]
+
+
+@trip_bp.get("/board", endpoint="board_page")
+def trip_board_page():
+    return render_template("trip/board.html", phrases=TRIP_BOARD_PHRASES)
+
+
+@trip_bp.get("/cards", endpoint="cards_page")
+def trip_cards_page():
+    return render_template("trip/cards.html")
+
+
+TRIP_CSS += r'''
+/* 5. 필담판 · 6. 낱말카드 */
+:root{--board:#c23a63;--board-bg:#fbe9ef;--cards:#4a6b8a;--cards-bg:#e8eef4}
+.tile.board .ico{background:var(--board-bg);color:var(--board)}
+.tile.cards .ico{background:var(--cards-bg);color:var(--cards)}
+@media (min-width:960px){.tiles{grid-template-columns:repeat(3,1fr)}}
+.t-board .btn.main{background:var(--board)}
+.t-board .ctabs button.on{background:var(--board);border-color:var(--board);color:#fff}
+.t-board textarea{width:100%;min-height:110px;border:1px solid var(--line);border-radius:13px;padding:12px 14px;font-family:inherit;font-size:20px;font-weight:600;line-height:1.45;background:#fbfaf7;color:var(--ink);resize:vertical}
+.t-board textarea:focus{outline:none;border-color:var(--ink);background:#fff}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pbtn{position:relative;min-height:58px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:13px;background:#fff;font-family:inherit;font-size:15px;font-weight:600;line-height:1.35;color:var(--ink);cursor:pointer;white-space:pre-line}
+.pbtn:active{background:var(--board-bg)}
+.pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
+.pbtn.my{padding-right:30px}
+.myadd{display:flex;gap:8px;margin-top:10px}
+.myadd input{flex:1}
+/* 크게 보기 화면 */
+.pd{display:none;position:fixed;inset:0;z-index:60;background:#fff;color:#111;flex-direction:column}
+.pd.on{display:flex}
+.pd.hc{background:#000;color:#ffe600}
+.pd-face{flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 14px 10px;transition:transform .25s}
+.pd.flip .pd-face{transform:rotate(180deg)}
+.pd-txt{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;cursor:pointer}
+.pd-txt span{display:inline-block;max-width:100%;font-weight:800;line-height:1.25;letter-spacing:-0.02em;white-space:pre-line;word-break:keep-all;overflow-wrap:normal}
+.pd-txt.ans span{color:#fff;padding:.1em .5em;border-radius:.25em}
+.pd-txt.ans.yes span{background:#13863f}.pd-txt.ans.no span{background:#c0262d}.pd-txt.ans.dk span{background:#6b6f72}
+.pd-ans{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px}
+.pd-ans button{height:84px;border:none;border-radius:18px;color:#fff;font-family:inherit;font-size:28px;font-weight:800;line-height:1;cursor:pointer}
+.pd-ans .yes{background:#13863f}.pd-ans .no{background:#c0262d}.pd-ans .dk{background:#6b6f72;font-size:20px;letter-spacing:-0.04em}
+.pd-pad{display:none;flex:1;min-height:0;margin:16px 14px 10px;border:2px dashed #c9c6bd;border-radius:18px;touch-action:none;background:#fff}
+.pd.hc .pd-pad{background:#000;border-color:#555}
+.pd.drawing .pd-face{display:none}.pd.drawing .pd-pad{display:block}
+.pd-tools{display:flex;gap:8px;padding:8px 14px calc(12px + env(safe-area-inset-bottom));border-top:1px solid #e7e4dc;background:#f4f2ec}
+.pd.hc .pd-tools{background:#111;border-color:#333}
+.pd-tools button{flex:1;height:50px;border:1px solid #d9d6cd;border-radius:13px;background:#fff;color:#1b1d1c;font-family:inherit;font-size:14px;font-weight:700;line-height:1.2;cursor:pointer;padding:0 4px}
+.pd-tools button.on{background:#1b1d1c;color:#fff;border-color:#1b1d1c}
+.pd.hc .pd-tools button{background:#222;color:#ffe600;border-color:#444}.pd.hc .pd-tools button.on{background:#ffe600;color:#000;border-color:#ffe600}
+.pd-tools .clr{display:none}.pd.drawing .pd-tools .clr{display:block}
+@media (min-width:960px){.pbtn{font-size:17px;min-height:64px}.pgrid{grid-template-columns:1fr 1fr 1fr}.pd-ans button{height:110px;font-size:40px}.pd-ans .dk{font-size:30px}}
+'''
+
+
+TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}필담판 · 출장 도구함{% endblock %}
+{% block theme %}t-board{% endblock %}
+{% block body %}
+{{ topbar('필담판') }}
+<div class="card">
+  <label class="l" for="w">보여줄 말</label>
+  <textarea id="w" placeholder="여기에 쓰거나, 키보드의 마이크 버튼을 눌러 말하세요"></textarea>
+  <button class="btn main" type="button" id="showW">크게 보여주기</button>
+  <p class="hint">키보드 마이크로 말하면 글자로 바뀌어요.<br>쓴 글은 저장하지 않아요.</p>
+</div>
+
+<div class="card">
+  <div class="sec">자주 쓰는 말</div>
+  <div class="ctabs" id="tabs"></div>
+  <div class="pgrid" id="grid"></div>
+  <div class="myadd" id="myadd" style="display:none">
+    <input type="text" id="myIn" maxlength="60" placeholder="내 문장 추가">
+    <button class="btn" type="button" id="myBtn">추가</button>
+  </div>
+  <p class="hint" id="myHint" style="display:none">내 문장은 이 기기에만 남아요.<br>이름·주소·전화번호는 넣지 마세요.</p>
+</div>
+<p class="note">누르면 화면 가득 크게 보여요.<br>어르신은 아래 버튼으로 예·아니요를 답할 수 있어요.</p>
+
+<div class="pd" id="pd">
+  <div class="pd-face">
+    <div class="pd-txt" id="txt"><span id="txtS"></span></div>
+    <div class="pd-ans">
+      <button type="button" class="yes" data-a="yes">예</button>
+      <button type="button" class="no" data-a="no">아니요</button>
+      <button type="button" class="dk" data-a="dk">모르겠어요</button>
+    </div>
+  </div>
+  <canvas class="pd-pad" id="pad"></canvas>
+  <div class="pd-tools">
+    <button type="button" id="tClose">닫기</button>
+    <button type="button" id="tFlip">뒤집기</button>
+    <button type="button" id="tHc">고대비</button>
+    <button type="button" id="tPad">손글씨</button>
+    <button type="button" id="tClr" class="clr">지우기</button>
+  </div>
+</div>
+<script type="application/json" id="phr">{{ phrases|tojson }}</script>
+{% endblock %}
+{% block script %}
+{% raw %}
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const PH=JSON.parse($("#phr").textContent), MYKEY="trip_board_my", MYTAB="내 문장";
+const PII=/\d{6,}|\d{2,4}[-\s.]\d{3,4}[-\s.]\d{4}/;
+let tab=0, lock=null;
+
+function loadMy(){try{const a=JSON.parse(localStorage.getItem(MYKEY)||"[]");return Array.isArray(a)?a.filter(x=>typeof x==="string"):[];}catch(e){return [];}}
+function saveMy(a){try{localStorage.setItem(MYKEY,JSON.stringify(a.slice(0,30)));}catch(e){}}
+
+function tabs(){
+  const names=PH.map(p=>p[0]).concat([MYTAB]);
+  $("#tabs").innerHTML="";
+  names.forEach((n,i)=>{const b=document.createElement("button");b.type="button";b.textContent=n;
+    if(i===tab)b.className="on";b.onclick=()=>{tab=i;tabs();grid();};$("#tabs").appendChild(b);});
+}
+function grid(){
+  const my=tab===PH.length, list=my?loadMy():PH[tab][1], g=$("#grid");
+  g.innerHTML="";
+  $("#myadd").style.display=my?"flex":"none";$("#myHint").style.display=my?"block":"none";
+  if(my&&!list.length){g.innerHTML='<p class="hint" style="grid-column:1/-1;margin:0">자주 쓰는 말을 추가해 두세요.</p>';return;}
+  list.forEach((t,i)=>{
+    const b=document.createElement("button");b.type="button";b.className="pbtn"+(my?" my":"");b.textContent=t;
+    b.onclick=()=>show(t);
+    if(my){const x=document.createElement("button");x.type="button";x.className="x";x.textContent="×";x.setAttribute("aria-label","지우기");
+      x.onclick=e=>{e.stopPropagation();const a=loadMy();a.splice(i,1);saveMy(a);grid();};b.appendChild(x);}
+    g.appendChild(b);
+  });
+}
+$("#myBtn").onclick=()=>{
+  const v=$("#myIn").value.trim();if(!v)return;
+  if(PII.test(v)){alertLine("숫자가 긴 내용(전화·주민번호 등)은 저장할 수 없어요.");return;}
+  const a=loadMy();if(!a.includes(v))a.unshift(v);saveMy(a);$("#myIn").value="";grid();
+};
+$("#myIn").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#myBtn").click();}});
+function alertLine(m){const h=$("#myHint");h.style.display="block";h.style.color="var(--bad)";h.textContent=m;
+  setTimeout(()=>{h.style.color="";h.innerHTML="내 문장은 이 기기에만 남아요.<br>이름·주소·전화번호는 넣지 마세요.";},3000);}
+
+/* 크게 보기 */
+const pd=$("#pd"), txt=$("#txt"), sp=$("#txtS");
+let cur="";
+function fit(){
+  if(!pd.classList.contains("on")||pd.classList.contains("drawing"))return;
+  const W=txt.clientWidth, H=txt.clientHeight, ans=txt.classList.contains("ans");
+  let lo=16, hi=Math.floor(Math.max(24,Math.min(H,W)*(ans?0.45:1)));
+  while(hi-lo>1){const m=(lo+hi)>>1;sp.style.fontSize=m+"px";
+    if(sp.scrollWidth<=sp.clientWidth+1&&sp.offsetWidth<=W&&sp.offsetHeight<=H)lo=m;else hi=m;}
+  sp.style.fontSize=lo+"px";
+}
+function setText(t,cls){sp.textContent=t;txt.className="pd-txt"+(cls?" ans "+cls:"");fit();}
+async function wake(){try{if("wakeLock" in navigator)lock=await navigator.wakeLock.request("screen");}catch(e){lock=null;}}
+function show(t){
+  t=String(t||"").trim();if(!t)return;cur=t;
+  const was=pd.classList.contains("on");
+  pd.classList.add("on");pd.classList.remove("drawing");$("#tPad").classList.remove("on");
+  document.body.style.overflow="hidden";
+  setText(t);wake();
+  if(!was)history.pushState({pd:1},"");
+}
+function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lock&&lock.release();}catch(e){}lock=null;}
+$("#showW").onclick=()=>{const v=$("#w").value;if(!v.trim()){$("#w").focus();return;}show(v);};
+document.querySelectorAll(".pd-ans button").forEach(b=>{b.onclick=()=>setText(b.textContent,b.dataset.a);});
+txt.onclick=()=>{if(txt.classList.contains("ans"))setText(cur);};
+$("#tClose").onclick=()=>history.back();
+window.addEventListener("popstate",hide);
+$("#tFlip").onclick=()=>{pd.classList.toggle("flip");$("#tFlip").classList.toggle("on");};
+$("#tHc").onclick=()=>{pd.classList.toggle("hc");$("#tHc").classList.toggle("on");drawColor();};
+window.addEventListener("resize",()=>{fit();sizePad();});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&pd.classList.contains("on"))wake();});
+
+/* 손글씨 (어르신이 손가락으로 쓰기, 저장 안 함) */
+const pad=$("#pad"), ctx=pad.getContext("2d");let drawing=false, last=null;
+function drawColor(){ctx.strokeStyle=pd.classList.contains("hc")?"#ffe600":"#111";}
+function sizePad(){
+  if(!pd.classList.contains("drawing"))return;
+  const r=pad.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  pad.width=Math.round(r.width*d);pad.height=Math.round(r.height*d);
+  ctx.setTransform(d,0,0,d,0,0);ctx.lineWidth=6;ctx.lineCap="round";ctx.lineJoin="round";drawColor();
+}
+$("#tPad").onclick=()=>{
+  const on=pd.classList.toggle("drawing");$("#tPad").classList.toggle("on",on);
+  if(on)sizePad();else fit();
+};
+$("#tClr").onclick=()=>ctx.clearRect(0,0,pad.width,pad.height);
+function pt(e){const r=pad.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
+pad.addEventListener("pointerdown",e=>{drawing=true;last=pt(e);pad.setPointerCapture(e.pointerId);
+  ctx.beginPath();ctx.arc(last.x,last.y,3,0,Math.PI*2);ctx.fillStyle=ctx.strokeStyle;ctx.fill();});
+pad.addEventListener("pointermove",e=>{if(!drawing)return;const p=pt(e);
+  ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();last=p;});
+["pointerup","pointercancel","pointerleave"].forEach(n=>pad.addEventListener(n,()=>{drawing=false;}));
+
+tabs();grid();
+})();
+</script>
+{% endraw %}
+{% endblock %}
+'''
+
+
+TRIP_TEMPLATES["trip/cards.html"] = r'''{% extends "trip/base.html" %}
+{% from "trip/_m.html" import topbar with context %}
+{% block title %}낱말카드 · 출장 도구함{% endblock %}
+{% block theme %}t-cards{% endblock %}
+{% block body %}
+{{ topbar('낱말카드') }}
+{% endblock %}
+'''
+
 
 app.jinja_loader = _TripChoiceLoader([app.jinja_loader, _TripDictLoader(TRIP_TEMPLATES)])
 app.register_blueprint(trip_bp)
