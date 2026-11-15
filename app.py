@@ -15033,7 +15033,7 @@ async function renameTeam(){
 # ================================================================================
 # ===============  출장 도구함 모듈 (/trip)  ======================================
 #   - 안전로드 지도앱·매식비 코드와 완전히 분리, /trip 하위 경로로만 동작
-#   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기  5. 필담판  6. 낱말카드(빈 화면)
+#   - 도구: 1. 최적 동선  2. 집 미리보기  3. 내 근처 화장실  4. 복용약 찾기  5. 큰 글씨 대화  6. 통합판정 낱말카드(빈 화면)
 #   - 이름·주민번호·전화번호는 받지 않고, 입력·사진·위치는 저장하지 않음 (DB 안 씀)
 #   - 환경변수: KAKAO_KEY, KAKAO_JS_KEY(기존) / DATA_GO_KR_KEY, SAFEMAP_KEY, OPENAI_API_KEY(추가)
 #   - 데이터 파일: trip_toilets.csv(전국 화장실, 없으면 공중화장실.xlsx), pills.csv(케어내비에서 복사)
@@ -18068,10 +18068,12 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
 ''',
     "trip/home.html": r'''{% extends "trip/base.html" %}
 {% from "trip/_m.html" import icon %}
+{% block theme %}t-home{% endblock %}
 {% block body %}
+<div class="fit">
 <div class="hello">
   <div class="date" id="today"></div>
-  <h1>오늘 출장,<br>무엇부터 할까요?</h1>
+  <h1>오늘 출장,<br> 무엇부터 할까요?</h1>
 </div>
 <div class="tiles">
   <a class="tile route" href="{{ url_for('trip.route_page') }}">
@@ -18082,16 +18084,17 @@ function shortAddr(s){s=String(s||"").trim();const t=s.split(" ");
     <span><div class="t">집 미리보기</div><div class="d">주소 하나로 어떤 집인지 미리 알고 가요</div></span></a>
   <a class="tile board" href="{{ url_for('trip.board_page') }}">
     <span class="ico">{{ icon('board') }}</span>
-    <span><div class="t">필담판</div><div class="d">귀가 어두운 분께 글자를 크게 보여드려요</div></span></a>
+    <span><div class="t">큰 글씨 대화</div><div class="d">귀가 어두운 분께 글자를 크게 보여드려요</div></span></a>
   <a class="tile cards" href="{{ url_for('trip.cards_page') }}">
     <span class="ico">{{ icon('cards') }}</span>
-    <span><div class="t">낱말카드</div><div class="d">준비 중이에요</div></span></a>
+    <span><div class="t">통합판정<br>낱말카드</div><div class="d">준비 중이에요</div></span></a>
   <a class="tile toilet" href="{{ url_for('trip.toilet_page') }}">
     <span class="ico">{{ icon('toilet') }}</span>
     <span><div class="t">내 근처 화장실</div><div class="d">지금 위치에서 가까운 공중화장실</div></span></a>
   <a class="tile pill" href="{{ url_for('trip.pill_page') }}">
     <span class="ico">{{ icon('pill') }}</span>
     <span><div class="t">복용약 찾기</div><div class="d">알약 사진으로 어떤 약인지 확인</div></span></a>
+</div>
 </div>
 <p class="note">이름·주민번호·전화번호는 받지 않고,<br class="mbr"> 입력한 주소·위치·사진은 서버에 저장하지 않아요.<br class="mbr"> 최근 검색 주소만 이 기기에 5개까지 남아요.{% if demo %}<br>지금은 예시 모드라 실제 조회 대신 예시 값이 나와요.{% endif %}</p>
 {% endblock %}
@@ -18864,8 +18867,8 @@ $("#find").onclick=()=>{
 ''',
 }
 
-# ---------- 5. 필담판 · 6. 낱말카드 ----------
-#   - 필담판: 귀가 어두운 분께 문장을 화면 가득 크게 보여주고, 예/아니요/모르겠어요로 답을 받음
+# ---------- 5. 큰 글씨 대화 · 6. 낱말카드 ----------
+#   - 큰 글씨 대화: 귀가 어두운 분께 문장을 화면 가득 크게 보여주고, 예/아니요/모르겠어요로 답을 받음
 #   - 쓴 글·손글씨는 서버로 보내지도, 저장하지도 않음 (직원이 추가한 '내 문장'만 그 기기에 남음)
 #   - 낱말카드: 자리만 만들어 둠 (내용은 나중에)
 TRIP_BOARD_PHRASES = [  # (탭 이름, 문장들) — 문장을 고치거나 더하려면 여기만 바꾸면 됨
@@ -18895,9 +18898,27 @@ def trip_cards_page():
 
 
 TRIP_CSS += r'''
-/* 5. 필담판 · 6. 낱말카드 */
+/* 5. 큰 글씨 대화 · 6. 낱말카드 */
 :root{--board:#c23a63;--board-bg:#fbe9ef;--cards:#4a6b8a;--cards-bg:#e8eef4}
 .tile.board .ico{background:var(--board-bg);color:var(--board)}
+/* 홈: 폰에서는 메뉴 6개가 항상 한 화면에 꽉 차게 (안내 문구는 그 아래로 스크롤) */
+@media (max-width:959px){
+  .t-home .fit{display:flex;flex-direction:column;height:calc(100vh - 30px);height:calc(100dvh - 30px);min-height:480px}
+  .t-home .hello{flex:none;margin-bottom:14px}
+  .t-home .tiles{flex:1;min-height:0;grid-template-rows:repeat(3,minmax(0,1fr));gap:10px}
+  .t-home .tile{min-height:0;padding:14px;border-radius:20px}
+  .t-home .tile .t{margin:8px 0 2px}
+  .t-home .tile .d{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+}
+@media (max-width:959px) and (max-height:760px){
+  .t-home .hello h1{font-size:22px}
+  .t-home .hello h1 br{display:none}
+  .t-home .tile .ico{width:40px;height:40px;border-radius:13px}
+  .t-home .tile .ico svg{width:22px;height:22px}
+  .t-home .tile .t{font-size:16px;margin:6px 0 1px}
+  .t-home .tile .d{font-size:12px}
+}
+@media (max-width:959px) and (max-height:600px){.t-home .tile .d{display:none}}
 .tile.cards .ico{background:var(--cards-bg);color:var(--cards)}
 @media (min-width:960px){.tiles{grid-template-columns:repeat(3,1fr)}}
 .t-board .btn.main{background:var(--board)}
@@ -18943,10 +18964,10 @@ TRIP_CSS += r'''
 
 TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
 {% from "trip/_m.html" import topbar with context %}
-{% block title %}필담판 · 출장 도구함{% endblock %}
+{% block title %}큰 글씨 대화 · 출장 도구함{% endblock %}
 {% block theme %}t-board{% endblock %}
 {% block body %}
-{{ topbar('필담판') }}
+{{ topbar('큰 글씨 대화') }}
 <div class="card">
   <label class="l" for="w">보여줄 말</label>
   <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
@@ -19122,10 +19143,10 @@ tabs();grid();
 
 TRIP_TEMPLATES["trip/cards.html"] = r'''{% extends "trip/base.html" %}
 {% from "trip/_m.html" import topbar with context %}
-{% block title %}낱말카드 · 출장 도구함{% endblock %}
+{% block title %}통합판정 낱말카드 · 출장 도구함{% endblock %}
 {% block theme %}t-cards{% endblock %}
 {% block body %}
-{{ topbar('낱말카드') }}
+{{ topbar('통합판정 낱말카드') }}
 {% endblock %}
 '''
 
