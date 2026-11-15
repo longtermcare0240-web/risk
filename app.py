@@ -18926,7 +18926,7 @@ TRIP_CSS += r'''
 .pbtn .x{position:absolute;top:2px;right:2px;width:30px;height:30px;border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer}
 .pbtn.my{padding-right:30px}
 .wrow{display:flex;gap:8px;margin-top:10px}.wrow .btn{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;height:50px}  /* 글자가 바뀌어도 세 버튼 폭 고정 */
-.btn.mic{color:var(--board);border-color:var(--board);gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px}.btn.wclr{color:var(--sub)}
+.btn.mic{color:var(--board);border-color:var(--board);gap:4px;white-space:nowrap;padding:0 6px}.btn.wpad,.btn.wclr{white-space:nowrap;padding:0 6px;display:flex;align-items:center;justify-content:center;gap:4px}.wrow .btn svg{flex:none}.btn.wclr{color:var(--sub)}
 .btn.mic.on{background:var(--board);color:#fff}
 .myadd{display:flex;gap:8px;margin-top:10px}
 .myadd input{flex:1}
@@ -18983,8 +18983,8 @@ TRIP_TEMPLATES["trip/board.html"] = r'''{% extends "trip/base.html" %}
   <textarea id="w" placeholder="여기에 쓰거나, 아래 버튼을 눌러 말하세요"></textarea>
   <div class="wrow">
   <button class="btn mic" type="button" id="mic" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>말하기</span></button>
-  <button class="btn wpad" type="button" id="wPad">글쓰기</button>
-  <button class="btn wclr" type="button" id="wClr">지우기</button>
+  <button class="btn wpad" type="button" id="wPad"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5l4 4L8 20l-5 1 1-5z"/><path d="M14 6l4 4"/></svg><span>글쓰기</span></button>
+  <button class="btn wclr" type="button" id="wClr"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21l-4-4a2 2 0 0 1 0-2.8L13.2 4a2 2 0 0 1 2.8 0l4.6 4.6a2 2 0 0 1 0 2.8L11 21z"/><path d="M8.5 9.5l6 6M7 21h14"/></svg><span>지우기</span></button>
   </div>
   <button class="btn main" type="button" id="showW">크게 보여주기</button>
   <p class="hint" id="wHint">쓴 글은 저장하지 않아요.</p>
