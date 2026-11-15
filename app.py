@@ -19063,12 +19063,14 @@ function hide(){pd.classList.remove("on");document.body.style.overflow="";try{lo
   mic.onclick=()=>{
     if(rec){try{rec.stop();}catch(e){}return;}
     try{rec=new SR();}catch(e){return;}
-    rec.lang="ko-KR";rec.interimResults=true;rec.continuous=true;
+    /* 안드로이드 크롬은 연속 듣기(continuous)에서 같은 말을 반복해서 돌려주는 문제가 있어
+       한 번 말하면 멈추게 하고, 마지막 결과만 씀. 더 말하려면 버튼을 다시 누르면 뒤에 이어 붙음 */
+    rec.lang="ko-KR";rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
     base=w.value.trim()?w.value.trim()+" ":"";
-    rec.onresult=e=>{let t="";for(let i=0;i<e.results.length;i++)t+=e.results[i][0].transcript;w.value=base+t.trim();};
+    rec.onresult=e=>{const r=e.results[e.results.length-1];w.value=base+String(r[0].transcript||"").trim();};
     rec.onerror=e=>{if(e.error==="not-allowed")$("#wHint").textContent="마이크 권한을 허용해 주세요.";};
     rec.onend=stop;
-    mic.classList.add("on");mic.querySelector("span").textContent="듣는 중 · 누르면 멈춤";
+    mic.classList.add("on");mic.querySelector("span").textContent="듣는 중 · 말이 끝나면 멈춰요";
     try{rec.start();}catch(e){stop();}
   };
 })();
