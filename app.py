@@ -18913,7 +18913,6 @@ TRIP_CSS += r'''
   .t-home .tile .ico svg{width:22px;height:22px}
   .t-home .tile .t{font-size:16px;margin:10px 0 2px}
   .t-home .tile .d{font-size:12px}
-  .t-home .tile.cards .d{display:none}
 }
 .tile.cards .ico{background:var(--cards-bg);color:var(--cards)}
 @media (min-width:960px){.tiles{grid-template-columns:repeat(3,1fr)}}
@@ -19194,6 +19193,10 @@ TRIP_TEMPLATES["trip/cards.html"] = r'''{% extends "trip/base.html" %}
 {% block theme %}t-cards{% endblock %}
 {% block body %}
 {{ topbar('통합판정 낱말카드') }}
+<div class="card" style="text-align:center;padding:36px 20px">
+  <div style="font-size:18px;font-weight:800">준비 중이에요</div>
+  <p class="hint" style="margin-top:8px">통합판정 낱말카드는 곧 열릴 예정이에요.</p>
+</div>
 {% endblock %}
 '''
 
