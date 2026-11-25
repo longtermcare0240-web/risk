@@ -319,6 +319,14 @@ def search_place():
 
 app.config["JSON_AS_ASCII"] = False
 
+# 바깥 서버가 답을 안 주면 무한정 기다리던 요청들: 기본 한도(연결 5초, 응답 20초). 따로 정한 곳은 그대로
+_requests_orig = requests.Session.request
+def _requests_with_timeout(self, method, url, **kw):
+    if kw.get("timeout") is None:
+        kw["timeout"] = (5, 20)
+    return _requests_orig(self, method, url, **kw)
+requests.Session.request = _requests_with_timeout
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FILE_PATH = "mapdata_geocoded.xlsx"
@@ -2461,6 +2469,7 @@ let userLat = null;
 let userLng = null;
 
 function showMsg(text){
+  srLoadDogStop();
   const _lx = document.getElementById("msgBox"); if(_lx) _lx.classList.remove("sr-loading");
 
 
@@ -2497,7 +2506,17 @@ function showMsg(text){
 
 
 
+function srLoadDogStop(){ if(window._srLoadDog){ clearTimeout(window._srLoadDog); window._srLoadDog = null; } }
 function showLoadingLocation(){
+  srLoadDogStop();
+  window._srLoadDog = setTimeout(function(){
+    window._srLoadDog = null;
+    const x = document.getElementById("msgBox");
+    if(x && x.classList.contains("sr-loading")){
+      closeMsg();
+      showMsg("응답이 너무 늦어요.\n잠시 후 다시 눌러 주세요.");
+    }
+  }, 60000);
   if(window.FEATURE_DETAIL){
     loadingStartTime = Date.now();
     const _m = document.getElementById("msgModal"), _t = document.getElementById("msgText"), _b = document.getElementById("msgBtn"), _x = document.getElementById("msgBox");
@@ -2909,6 +2928,7 @@ function srCatOk(item, which){
   return on.some(v => v === g || (v === "주차장" && (g === "공영주차장" || g === "민영주차장")));
 }
 function closeMsg(){
+  srLoadDogStop();
   const _lx2 = document.getElementById("msgBox"); if(_lx2) _lx2.classList.remove("sr-loading");
   const _h = document.getElementById("srMsgHead");
   if(_h) _h.classList.remove("on");
@@ -6398,9 +6418,16 @@ async function geocodeAddress(query, inputId){
 
 
 
-  const res = await fetch("/search_place?q=" + encodeURIComponent(query));
-
-  const data = await res.json();
+  let data;
+  try{
+    const ctl = window.AbortController ? new AbortController() : null;
+    const h = ctl ? setTimeout(function(){ ctl.abort(); }, 10000) : null;
+    const res = await fetch("/search_place?q=" + encodeURIComponent(query), ctl ? {signal: ctl.signal} : {});
+    data = await res.json();
+    if(h) clearTimeout(h);
+  }catch(e){
+    return null;          // 서버·카카오가 늦거나 실패 → 부른 곳에서 '찾을 수 없습니다' 안내
+  }
 
 
 
@@ -6512,21 +6539,19 @@ async function getRoadRoute(startLat,startLng,endLat,endLng){
 
 
 
-  const res = await fetch(url);
-
-  const data = await res.json();
-
-
-
-  if(!data.routes || data.routes.length === 0){
-
-    return null;
-
+  try{
+    const ctl = window.AbortController ? new AbortController() : null;
+    const h = ctl ? setTimeout(function(){ ctl.abort(); }, 8000) : null;
+    const res = await fetch(url, ctl ? {signal: ctl.signal} : {});
+    const data = await res.json();
+    if(h) clearTimeout(h);
+    if(!data.routes || data.routes.length === 0){
+      return null;
+    }
+    return data.routes[0].geometry.coordinates;
+  }catch(e){
+    return null;          // 공개 길찾기 서버가 느리거나 막힘 → 출발지~도착지 직선 주변으로 찾음
   }
-
-
-
-  return data.routes[0].geometry.coordinates;
 
 
 
@@ -9827,18 +9852,8 @@ def _fetch_feature():
 
 
 def feature_detail_on():
-    now = time.time()
-    if _FEATURE_CACHE["v"] is not None and now - _FEATURE_CACHE["t"] < 30:
-        return _FEATURE_CACHE["v"]
-    v = _FEATURE_CACHE["v"] or False
-    try:
-        _v, _err = _fetch_feature()
-        if not _err:
-            v = _v
-    except Exception:
-        pass   # 조회 실패 시 직전 값 유지 (처음이면 OFF)
-    _FEATURE_CACHE.update(v=v, t=now)
-    return v
+    """토글은 없앰 — 항상 신버전(Ver.2). 예전 코드가 부르는 곳이 많아 함수는 남겨 둠"""
+    return True
 
 
 # ===== 토글 ON: 공중화장실을 엑셀 대신 출장 도구함 화장실 자료(행안부 전국 자료, 매주 월요일 새벽 자동 갱신)로 =====
@@ -10045,25 +10060,27 @@ SR_LIVE_CATS = ["상습결빙지역", "주차장", "자동심장충격기", "교
 SR_LIVE_SIDOS = ["전남광주통합특별시", "전북특별자치도", "제주특별자치도"]
 SR_LIVE_REFRESH_SEC = 7 * 86400
 SR_NIGHT_HOURS = (2, 5)        # 다시 받는 건 새벽 2시~5시(한국시간)에만 시작. 한 번도 못 받은 항목은 바로 받음
-SR_REFRESH_WEEKDAY = 0         # 받는 요일: 월요일 (일요일 밤 → 월요일 새벽). 0=월 … 6=일
+SR_REFRESH_WEEKDAY = 0         # 안전로드 자료(결빙·사고·주차장·AED): 월요일 새벽 (일 → 월). 0=월 … 6=일
+TRIP_TOILET_WEEKDAY = 6        # 출장 도구함 화장실: 일요일 새벽 (토 → 일). 같은 날 받으면 메모리가 겹쳐서 하루 엇갈림
 SR_FAIL_RETRY_SEC = 20 * 3600  # 받다가 실패하면 다음 날 새벽에 다시
 
 
-def _sr_week_start(now=None):
+def _sr_week_start(now=None, weekday=None):
     """가장 최근 '월요일 새벽 2시'(한국시간). 이 시각 뒤에 받은 자료면 이번 주 몫은 받은 것"""
     from datetime import timedelta
     d = datetime.fromtimestamp(now or time.time(), KST)
     start = d.replace(hour=SR_NIGHT_HOURS[0], minute=0, second=0, microsecond=0)
-    start -= timedelta(days=(d.weekday() - SR_REFRESH_WEEKDAY) % 7)
+    wd = SR_REFRESH_WEEKDAY if weekday is None else weekday
+    start -= timedelta(days=(d.weekday() - wd) % 7)
     if start > d:
         start -= timedelta(days=7)
     return start.timestamp()
 
 
-def _sr_weekly_due(at, fail_at, now):
+def _sr_weekly_due(at, fail_at, now, weekday=None):
     """이번 주 몫을 아직 안 받았고, 최근에 실패하지도 않았으면 받을 차례.
     월요일 새벽을 놓치면(서버 꺼짐·실패) 그다음 날 새벽에 받음"""
-    return (at or 0) < _sr_week_start(now) and now - (fail_at or 0) > SR_FAIL_RETRY_SEC
+    return (at or 0) < _sr_week_start(now, weekday) and now - (fail_at or 0) > SR_FAIL_RETRY_SEC
 SR_LIVE_PAGE_SIZE = 1000
 SR_LIVE_MAX_PAGES = 2000
 SR_LIVE_SHRINK_GUARD = 0.5
@@ -10840,6 +10857,8 @@ def sr_live_tick(excel_counts):
             _sr_live_load_store()
         if _SR_LIVE["busy"]:
             return
+        if _TRIP_TOILET_LIVE["busy"]:
+            return          # 출장 도구함 화장실을 받는 중이면 끝난 뒤에 (메모리 겹침 방지)
         due = [c for c in SR_LIVE_CATS if _sr_weekly_due(_SR_LIVE["at"].get(c, 0), _SR_LIVE["fail"].get(c, 0), now)]
         if due:
             _sr_live_reload_due(due, now)
@@ -10892,16 +10911,8 @@ def sr_live_status():
 @app.route("/api/admin/feature", methods=["GET"])
 @admin_required
 def admin_get_feature():
-    try:
-        v, err = _fetch_feature()
-    except Exception as e:
-        v, err = None, str(e)
-    if err and _FEATURE_CACHE["v"] is None:
-        return jsonify(ok=False, on=False, error=err)
-    if err:
-        v = _FEATURE_CACHE["v"]          # 잠깐 응답이 늦은 것: 직전 값 그대로 (화면에 OFF로 잘못 안 보이게)
-    else:
-        _FEATURE_CACHE.update(v=v, t=time.time())
+    """관리자 페이지 '자료 자동 갱신' 현황 (토글은 없앰, 항상 신버전)"""
+    v = True
     try:
         if v:
             _b = load_df()
@@ -10920,22 +10931,6 @@ def admin_get_feature():
     return jsonify(ok=True, on=v, live=live)
 
 
-@app.route("/api/admin/feature", methods=["POST"])
-@admin_required
-def admin_set_feature():
-    on = bool((request.get_json() or {}).get("on"))
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return jsonify(ok=False, error="Supabase 환경변수 없음")
-    try:
-        r = requests.post(f"{SUPABASE_URL}/rest/v1/app_settings",
-                          headers=_sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
-                          json={"key": FEATURE_KEY, "value": "on" if on else "off"}, timeout=5)
-        if r.status_code >= 400:
-            return jsonify(ok=False, error="저장 실패 — app_settings 표가 있는지 확인 (" + str(r.status_code) + ")")
-    except Exception as e:
-        return jsonify(ok=False, error=str(e))
-    _FEATURE_CACHE.update(v=on, t=time.time())
-    return jsonify(ok=True, on=on)
 
 
 
@@ -11643,9 +11638,7 @@ def stats():
         {% endif %}
         <div class="ft-card">
           <div style="display:flex;align-items:center;gap:12px;">
-            <div style="font-size:16px;font-weight:800;">안전로드 Ver.2</div>
-            <label class="ft-switch"><input type="checkbox" id="featureDetailToggle" onchange="setFeatureDetail(this.checked)"><span class="ft-slider"></span></label>
-            <span id="featureDetailState" class="ft-state" style="background:#f1f5f9;color:#64748b;">확인 중</span>
+            <div style="font-size:16px;font-weight:800;">안전로드 자료 현황</div>
           </div>
           <div id="srLiveStatus" style="margin-top:10px;font-size:12.5px;color:#475569;line-height:1.7;"></div>
         </div>
@@ -11895,7 +11888,7 @@ def stats():
             if(box && d.live){
               const e = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
               const badge = (t, bg, fg) => '<span style="flex:none;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:800;background:' + bg + ';color:' + fg + ';white-space:nowrap;">' + t + '</span>';
-              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 매주 월요일 새벽 2~5시</span></div>' + d.live.map(x => {
+              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· 매주 월요일 새벽 2~5시</span></div>' + d.live.map(x => {
                 const n = String(x.note || '');
                 let b, sub = x.sub || '';
                 if(x.busy && n !== '차례 기다리는 중'){ b = badge('받는 중', '#dbeafe', '#1d4ed8'); sub = n; }
@@ -11919,15 +11912,6 @@ def stats():
             }
           }catch(e){ showFeatureDetail(false, '확인 실패'); }
           if(!window._srLiveTimer){ window._srLiveTimer = setTimeout(function(){ window._srLiveTimer = null; loadFeatureDetail(); }, 10000); }
-        }
-        async function setFeatureDetail(on){
-          showFeatureDetail(on, '');
-          try{
-            const r = await fetch('/api/admin/feature', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({on: on})});
-            const d = await r.json();
-            if(!d.ok){ alert('저장 실패: ' + (d.error || '')); showFeatureDetail(!on, ''); return; }
-            showFeatureDetail(d.on, '');
-          }catch(e){ alert('저장 실패: ' + e.message); showFeatureDetail(!on, ''); }
         }
         loadFeatureDetail();
         loadAdminComments();
@@ -12800,9 +12784,14 @@ def _sr_warm_data_all():
     _SR_WARM["started"] = True
 
     def run():
+        time.sleep(2)
         try:
-            time.sleep(2)
-            _sr_warm_now()
+            trip_load_toilets()          # 출장 도구함 화장실 자료 (전국)
+            print("출장 도구함 화장실 자료 미리 준비 완료")
+        except Exception as e:
+            print("출장 도구함 화장실 자료 미리 준비 실패:", e)
+        try:
+            _sr_warm_now()               # 안전로드 지도 전체 자료
             print("지도 전체 자료 미리 준비 완료")
         except Exception as e:
             print("지도 전체 자료 미리 준비 실패:", e)
@@ -15180,11 +15169,11 @@ class TripRouteFail(Exception):
         self.code = code
 
 
-def trip_directions(a, b, geometry=False):
+def trip_directions(a, b, geometry=False, timeout=None):
     """a → b 자동차 경로. 실시간 교통 반영 추천 경로. 반환: 거리(m), 시간(초), 경로 좌표."""
     params = {"origin": f"{a['lng']},{a['lat']}", "destination": f"{b['lng']},{b['lat']}",
               "priority": "RECOMMEND", "summary": "false" if geometry else "true"}
-    r = requests.get(TRIP_KAKAO_NAVI, headers=_trip_kakao_headers(), params=params, timeout=TRIP_HTTP_TIMEOUT)
+    r = requests.get(TRIP_KAKAO_NAVI, headers=_trip_kakao_headers(), params=params, timeout=timeout or TRIP_HTTP_TIMEOUT)
     r.raise_for_status()
     route = (r.json().get("routes") or [{}])[0]
     code = route.get("result_code", -1)
@@ -15671,16 +15660,18 @@ def trip_load_toilets():
                 got = _trip_toilet_load_store()
                 if got and got[1] >= _TRIP_TOILET_CACHE["date"]:  # 새로 push한 파일이 더 최신이면 파일 우선
                     _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
-            # 한 번도 안 받았으면 바로 받음. 그 뒤로는 매주 월요일 새벽 2~5시에만 (놓치면 그다음 날 새벽)
+            # 한 번도 안 받았으면 바로 받음. 그 뒤로는 매주 일요일 새벽 2~5시에만 (놓치면 그다음 날 새벽)
             now, at = time.time(), _TRIP_TOILET_LIVE["at"]
-            due = (not at) or (_sr_is_night() and _sr_weekly_due(at, _TRIP_TOILET_LIVE["fail"], now))
+            due = (not at) or (_sr_is_night() and _sr_weekly_due(at, _TRIP_TOILET_LIVE["fail"], now, TRIP_TOILET_WEEKDAY))
             if due and at and not _TRIP_TOILET_LIVE["busy"] and now - _TRIP_TOILET_LIVE["checked"] > 600:
                 # 다른 서버 프로세스가 방금 받아 저장소에 올렸으면 그걸 씀 (같은 걸 두 번 받지 않게)
                 _TRIP_TOILET_LIVE["checked"] = now
                 got = _trip_toilet_load_store()
                 if got and got[2] > at:
                     _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
-                    due = got[2] < _sr_week_start(now)
+                    due = got[2] < _sr_week_start(now, TRIP_TOILET_WEEKDAY)
+            if due and at and _SR_LIVE["busy"]:
+                due = False          # 안전로드 자료를 받는 중이면 끝난 뒤에 (메모리 겹침 방지)
             if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
                 _TRIP_TOILET_LIVE["busy"] = True
                 threading.Thread(target=_trip_toilet_refresh, args=(_TRIP_TOILET_LIVE["rows"] or base,), daemon=True).start()
@@ -16409,21 +16400,22 @@ def trip_api_toilets():
     def car(t):
         if not trip_demo():
             try:
-                leg = trip_directions({"lat": lat, "lng": lng}, {"lat": t["lat"], "lng": t["lng"]})
+                leg = trip_directions({"lat": lat, "lng": lng}, {"lat": t["lat"], "lng": t["lng"]}, timeout=3)
                 return max(1, round(leg["duration"] / 60)), True
             except Exception:
                 pass
         return max(1, round(t["distance"] * 1.4 / 400)), False
-    if found:
-        with ThreadPoolExecutor(max_workers=8) as ex:
+    here = "광주 광산구 (예시 위치)" if trip_demo() else ""
+    with ThreadPoolExecutor(max_workers=16) as ex:          # 한 번에 다 물어봄 (원래는 8곳씩 두 번 + 주소는 그 뒤에)
+        here_f = None if trip_demo() else ex.submit(trip_where, lat, lng)
+        if found:
             for t, (m, real) in zip(found, ex.map(car, found)):
                 t["car_min"], t["car_real"] = m, real
-    here = "광주 광산구 (예시 위치)" if trip_demo() else ""
-    if not trip_demo():
-        try:
-            here = trip_where(lat, lng)
-        except Exception:
-            here = ""
+        if here_f is not None:
+            try:
+                here = here_f.result()
+            except Exception:
+                here = ""
     return jsonify(ok=True, items=found, demo=trip_demo(), here=here, date="" if trip_demo() else trip_toilet_data_date(),
                    message="" if found else "주변 5km 안에 조건에 맞는 화장실이 없어요.")
 
@@ -18902,7 +18894,7 @@ $("#find").onclick=()=>{
   if(!navigator.geolocation){ if(DEMO) return search(35.1395,126.7935); done(); $("#msg").innerHTML='<div class="err" style="margin:12px 0 0">위치를 쓸 수 없는 기기예요.</div>'; return;}
   navigator.geolocation.getCurrentPosition(p=>search(p.coords.latitude,p.coords.longitude),
     ()=>{ if(DEMO) return search(35.1395,126.7935); done(); $("#msg").innerHTML='<div class="err" style="margin:12px 0 0">위치를 가져오지 못했어요. 위치 권한을 켜주세요.</div>'; },
-    {enableHighAccuracy:true,timeout:10000,maximumAge:0});
+    {enableHighAccuracy:true,timeout:10000,maximumAge:60000});
 };
 </script>
 {% endblock %}
