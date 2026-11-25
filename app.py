@@ -1609,6 +1609,13 @@ html,body{font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo','
 .mobile-map-close{height:44px;padding:0 16px 0 12px;border-radius:14px;background:#fff;color:var(--sr-ink);font-size:14px;font-weight:800;box-shadow:0 6px 18px rgba(17,24,39,.16);}
 .mobile-map-close::before{content:"‹";font-size:22px;line-height:0;margin-right:6px;position:relative;top:2px;}
 #mobilePillBar{top:66px!important;}
+/* 모바일 알약: 고른 것만 이름이 보이고 나머지는 아이콘만 (작은 화면에서 잘리지 않게) */
+#mobilePillBar .mobile-pill{padding:0 11px;min-width:38px;justify-content:center;gap:5px;}
+#mobilePillBar .mobile-pill svg{width:16px;height:16px;flex-shrink:0;}
+#mobilePillBar .mobile-pill .pl{display:none;}
+#mobilePillBar .mobile-pill.active .pl{display:inline;}
+#mobilePillBar .mobile-pill.active svg{stroke:#fff;}
+#mobileMapPopup.no-pills .leaflet-top.leaflet-left{top:66px!important;}
 #mobileMapPopup .leaflet-top.leaflet-left{top:116px!important;}
 .mobile-result-panel{border-top-left-radius:24px;border-top-right-radius:24px;box-shadow:0 -10px 30px rgba(17,24,39,.14);}
 .mobile-result-panel::before{content:"";display:block;flex-shrink:0;width:40px;height:4px;border-radius:4px;background:#d1d5db;margin:10px auto 0;}
@@ -4945,6 +4952,8 @@ items.forEach(item=>{
 
 showMobileResults(items,userLat,userLng);
 
+try{ srUpdatePillBar(items); }catch(e){}   // 알약 줄 정리가 실패해도 결과 표시는 그대로
+
 }
 
 
@@ -7222,6 +7231,31 @@ const PILL_IDS = {
 
 
 
+// 결과에 있는 항목의 알약만 보여 줌. 한 가지뿐이면(예: 내 근처 화장실) 눌러도 나올 게 없으니 알약 줄을 숨김
+function srUpdatePillBar(items){
+  var bar = document.getElementById("mobilePillBar");
+  if(!bar) return;
+  var kinds = {}, has = {};
+  (items || []).forEach(function(it){
+    var g = it.구분 || "";
+    kinds[(g === "공영주차장" || g === "민영주차장") ? "주차장" : g] = true;
+    Object.keys(PILL_IDS).forEach(function(k){
+      if(k !== "전체" && catMatch(g, k)) has[k] = true;
+    });
+  });
+  var single = Object.keys(kinds).length <= 1;
+  Object.keys(PILL_IDS).forEach(function(k){
+    var el = document.getElementById(PILL_IDS[k]);
+    if(el && k !== "전체") el.style.display = has[k] ? "" : "none";
+  });
+  bar.style.display = single ? "none" : "";
+  var popup = document.getElementById("mobileMapPopup");
+  if(popup) popup.classList.toggle("no-pills", single);
+  mobilePillFilter("전체");      // 새로 검색하면 항상 '전체'부터 (예전 검색에서 고른 알약이 남지 않게)
+}
+
+
+
 function mobilePillFilter(cat){
 
   mobilePillActive = cat;
@@ -8410,19 +8444,19 @@ window.addEventListener("load", function(){
 
   <div class="mobile-pill-bar" id="mobilePillBar" style="top:62px;left:8px;right:8px;transform:none;justify-content:flex-start;gap:5px;">
 
-    <button class="mobile-pill active" id="pill_all"
+    <button class="mobile-pill active" id="pill_all" aria-label="전체"
 
       style="border-color:#475569;color:#1a202c;"
 
       onclick="mobilePillFilter('전체')">
 
-      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
 
-      전체
+      <span class="pl">전체</span>
 
     </button>
 
-    <button class="mobile-pill" id="pill_ice"
+    <button class="mobile-pill" id="pill_ice" aria-label="상습결빙지역"
 
       style="color:#1a202c;"
 
@@ -8430,11 +8464,11 @@ window.addEventListener("load", function(){
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M4.93 4.93l14.14 14.14M2 12h20M4.93 19.07l14.14-14.14"/><circle cx="12" cy="12" r="3"/></svg>
 
-      상습결빙지역
+      <span class="pl">상습결빙지역</span>
 
     </button>
 
-    <button class="mobile-pill" id="pill_toilet"
+    <button class="mobile-pill" id="pill_toilet" aria-label="공중화장실"
 
       style="color:#1a202c;"
 
@@ -8442,11 +8476,11 @@ window.addEventListener("load", function(){
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6v2H9zM12 4v4M9 8H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1h-4"/><path d="M10 12v4M14 12v4"/></svg>
 
-      공중화장실
+      <span class="pl">공중화장실</span>
 
     </button>
 
-    <button class="mobile-pill" id="pill_accident"
+    <button class="mobile-pill" id="pill_accident" aria-label="교통사고위험지역"
 
       style="color:#1a202c;"
 
@@ -8454,11 +8488,11 @@ window.addEventListener("load", function(){
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 
-      교통사고위험지역
+      <span class="pl">교통사고위험지역</span>
 
     </button>
 
-    <button class="mobile-pill" id="pill_parking"
+    <button class="mobile-pill" id="pill_parking" aria-label="주차장"
 
       style="color:#1a202c;"
 
@@ -8466,7 +8500,7 @@ window.addEventListener("load", function(){
 
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
 
-      주차장
+      <span class="pl">주차장</span>
 
     </button>
 
