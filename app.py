@@ -2281,6 +2281,27 @@ html body .sr-hero-deco{right:16px!important;bottom:14px!important;width:60px!im
 {% raw %}<script>
 
 let ALL_DATA_CACHE = null;
+let ALL_DATA_PROMISE = null;   // 지금 받는 중인 요청 (여러 번 눌러도 한 번만 받음)
+function srLoadAllData(){
+  if(ALL_DATA_CACHE) return Promise.resolve(ALL_DATA_CACHE);
+  if(ALL_DATA_PROMISE) return ALL_DATA_PROMISE;
+  function once(ms){
+    const ctl = window.AbortController ? new AbortController() : null;
+    const h = ctl ? setTimeout(function(){ ctl.abort(); }, ms) : null;
+    return fetch("/data/all", ctl ? {signal: ctl.signal} : {})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function(j){ if(h) clearTimeout(h); return j; }, function(e){ if(h) clearTimeout(h); throw e; });
+  }
+  ALL_DATA_PROMISE = once(25000)
+    .catch(function(){ return once(30000); })          // 한 번 실패하면 바로 한 번 더
+    .then(function(result){ ALL_DATA_CACHE = result.data || []; ALL_DATA_PROMISE = null; return ALL_DATA_CACHE; },
+          function(e){ ALL_DATA_PROMISE = null; throw e; });
+  return ALL_DATA_PROMISE;
+}
+function srDataFail(){
+  try{ closeMsg(); }catch(e){}
+  showMsg("지도 자료를 불러오지 못했어요.\n인터넷 연결을 확인하고 다시 눌러 주세요.");
+}
 
 
 
@@ -3781,15 +3802,7 @@ async function loadAllMarkers(){
 
 
 
-  if(!ALL_DATA_CACHE){
-
-  const res = await fetch("/data/all");
-
-  const result = await res.json();
-
-  ALL_DATA_CACHE = result.data || [];
-
-}
+  if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
 
 
@@ -4908,6 +4921,7 @@ showMobileResults(items,userLat,userLng);
 
 
 async function findNearestToilet(){
+  srLoadAllData().catch(function(){});   // GPS와 동시에 지도 자료 받기
 
 
 
@@ -4992,6 +5006,7 @@ async function findNearestToilet(){
 
 
 async function findNearestFacility(targetType){
+  srLoadAllData().catch(function(){});   // GPS와 동시에 지도 자료 받기
   closeFacilityFab();
   clearRoute();
   showLoadingLocation();
@@ -5013,6 +5028,7 @@ function toggleFacilityFab(){
   if(!m) return;
   const open = (m.style.display !== "flex");
   m.style.display = open ? "flex" : "none";
+  if(open) srLoadAllData().catch(function(){});   // 메뉴 열 때 미리 받기
   document.body.style.overflow = open ? "hidden" : "";
 }
 
@@ -5025,6 +5041,7 @@ function closeFacilityFab(){
 
 
 async function findNearestDanger(){
+  srLoadAllData().catch(function(){});   // GPS와 동시에 지도 자료 받기
 
 
 
@@ -5108,15 +5125,7 @@ async function runNearestSearch(lat,lng,targetType){
 
 
 
-  if(!ALL_DATA_CACHE){
-
-  const res = await fetch("/data/all");
-
-  const result = await res.json();
-
-  ALL_DATA_CACHE = result.data || [];
-
-}
+  if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
 
 
@@ -5136,7 +5145,6 @@ const data = ALL_DATA_CACHE;
 
     
 
-    console.log(item.구분,targetType);
 
 
 
@@ -5608,15 +5616,7 @@ async function runRadius(lat,lng,km){
 
 
 
-  if(!ALL_DATA_CACHE){
-
-  const res = await fetch("/data/all");
-
-  const result = await res.json();
-
-  ALL_DATA_CACHE = result.data || [];
-
-}
+  if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
 
 
@@ -6709,15 +6709,7 @@ if(road){
 
 
 
- if(!ALL_DATA_CACHE){
-
-  const res = await fetch("/data/all");
-
-  const result = await res.json();
-
-  ALL_DATA_CACHE = result.data || [];
-
-}
+ if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
 
 
@@ -7085,15 +7077,7 @@ async function runAddressSearch(){
 
 
 
-  if(!ALL_DATA_CACHE){
-
-    const res = await fetch("/data/all");
-
-    const result = await res.json();
-
-    ALL_DATA_CACHE = result.data || [];
-
-  }
+  if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
   const data = ALL_DATA_CACHE;
 
@@ -8182,15 +8166,7 @@ window.addEventListener("load", function(){
 
     async function doGotoSpot(){
 
-      if(!ALL_DATA_CACHE){
-
-        const res = await fetch("/data/all");
-
-        const result = await res.json();
-
-        ALL_DATA_CACHE = result.data || [];
-
-      }
+      if(!ALL_DATA_CACHE){ try{ await srLoadAllData(); }catch(e){ srDataFail(); return; } }
 
       // 순번은 엑셀 갱신 때 바뀌므로 좌표로 가장 가까운 장소(30m 이내)를 찾음
       let found = null, best = 30;
@@ -9865,7 +9841,7 @@ def feature_detail_on():
     return v
 
 
-# ===== 토글 ON: 공중화장실을 엑셀 대신 출장 도구함 화장실 자료(행안부 전국 자료, 7일마다 자동 갱신)로 =====
+# ===== 토글 ON: 공중화장실을 엑셀 대신 출장 도구함 화장실 자료(행안부 전국 자료, 매주 월요일 새벽 자동 갱신)로 =====
 # 안전로드는 광주·전남·전북·제주만 보여줌. 다른 항목(결빙·사고·주차장·AED)은 엑셀 그대로.
 # 첫 이름으로 통일 (광주·전남은 2026.7.1 전남광주통합특별시로 통합. 옛 주소 표기도 같은 곳으로 봄)
 SR_TOILET_REGIONS = {
@@ -10053,7 +10029,7 @@ def sr_df():
 
 
 # =====================================================================
-# 안전로드 자료 자동 갱신 (토글 ON) — 데이터 갱신 프로그램(exe)과 같은 API·같은 규칙을 서버에서 7일마다
+# 안전로드 자료 자동 갱신 (토글 ON) — 데이터 갱신 프로그램(exe)과 같은 API·같은 규칙을 서버에서 매주 월요일 새벽 2~5시에
 #   상습결빙지역·교통사고위험지역: 생활안전지도(safemap) IF_0103 / IF_0093  (SAFEMAP_KEY)
 #   주차장: 공공데이터포털 전국주차장 표준데이터                       (PARKING_KEY, 없으면 DATA_GO_KR_KEY)
 #   자동심장충격기: 공공데이터포털 AED 정보                           (DATA_GO_KR_KEY)
@@ -10069,6 +10045,25 @@ SR_LIVE_CATS = ["상습결빙지역", "주차장", "자동심장충격기", "교
 SR_LIVE_SIDOS = ["전남광주통합특별시", "전북특별자치도", "제주특별자치도"]
 SR_LIVE_REFRESH_SEC = 7 * 86400
 SR_NIGHT_HOURS = (2, 5)        # 다시 받는 건 새벽 2시~5시(한국시간)에만 시작. 한 번도 못 받은 항목은 바로 받음
+SR_REFRESH_WEEKDAY = 0         # 받는 요일: 월요일 (일요일 밤 → 월요일 새벽). 0=월 … 6=일
+SR_FAIL_RETRY_SEC = 20 * 3600  # 받다가 실패하면 다음 날 새벽에 다시
+
+
+def _sr_week_start(now=None):
+    """가장 최근 '월요일 새벽 2시'(한국시간). 이 시각 뒤에 받은 자료면 이번 주 몫은 받은 것"""
+    from datetime import timedelta
+    d = datetime.fromtimestamp(now or time.time(), KST)
+    start = d.replace(hour=SR_NIGHT_HOURS[0], minute=0, second=0, microsecond=0)
+    start -= timedelta(days=(d.weekday() - SR_REFRESH_WEEKDAY) % 7)
+    if start > d:
+        start -= timedelta(days=7)
+    return start.timestamp()
+
+
+def _sr_weekly_due(at, fail_at, now):
+    """이번 주 몫을 아직 안 받았고, 최근에 실패하지도 않았으면 받을 차례.
+    월요일 새벽을 놓치면(서버 꺼짐·실패) 그다음 날 새벽에 받음"""
+    return (at or 0) < _sr_week_start(now) and now - (fail_at or 0) > SR_FAIL_RETRY_SEC
 SR_LIVE_PAGE_SIZE = 1000
 SR_LIVE_MAX_PAGES = 2000
 SR_LIVE_SHRINK_GUARD = 0.5
@@ -10099,7 +10094,7 @@ SR_LIVE_EXTRA = {"주차장": ["요금", "요금상세", "운영평일", "운영
                  "자동심장충격기": ["설치장소", "사용시간", "일요일사용"],
                  "교통사고위험지역": ["사고건수", "보행자사고", "야간사고", "중상이상"]}
 SR_LIVE_OBJ = {"상습결빙지역": "ice", "교통사고위험지역": "acc", "주차장": "parking", "자동심장충격기": "aed"}
-_SR_LIVE = {"data": {}, "at": {}, "note": {}, "count": {}, "busy": False, "loaded": False, "ver": 0}
+_SR_LIVE = {"data": {}, "at": {}, "note": {}, "count": {}, "fail": {}, "busy": False, "loaded": False, "ver": 0}
 _SR_LIVE_LOCK = threading.Lock()
 _SR_KAKAO_USE = {"date": "", "n": {}}
 _SR_KAKAO_CACHE = {"d": None, "dirty": 0}
@@ -10703,6 +10698,7 @@ def _sr_live_refresh(due, old_counts):
                 kept = "저장소 보관" if _sr_store_put(f"{SR_LIVE_OBJ[cat]}.csv", data, "text/csv") else "저장소 보관 실패"
                 df = _sr_csv_to_df(data)
                 _SR_LIVE["data"][cat], _SR_LIVE["at"][cat], _SR_LIVE["count"][cat] = df, time.time(), len(df)
+                _SR_LIVE["fail"].pop(cat, None)
                 _SR_LIVE["note"][cat] = f"{len(df):,}건 · " + ", ".join(f"{k} {v:,}" for k, v in stats.items()) + f" · {kept}"
                 _SR_LIVE["ver"] += 1
             except _SrStop as e:
@@ -10710,7 +10706,7 @@ def _sr_live_refresh(due, old_counts):
                 break
             except Exception as e:
                 _SR_LIVE["note"][cat] = f"갱신 실패: {e}"
-                _SR_LIVE["at"][cat] = time.time() - SR_LIVE_REFRESH_SEC + 86400   # 실패하면 하루 뒤 다시
+                _SR_LIVE["fail"][cat] = time.time()   # 실패하면 다음 날 새벽에 다시
             finally:
                 _sr_kakao_save()
     finally:
@@ -10785,7 +10781,7 @@ def _sr_live_reload_due(due, now):
     _SR_LIVE["checked"] = now
     for cat in due:
         got = _sr_store_get(f"{SR_LIVE_OBJ[cat]}.csv")
-        if got and got[1] > _SR_LIVE["at"].get(cat, 0) and now - got[1] < SR_LIVE_REFRESH_SEC:
+        if got and got[1] > _SR_LIVE["at"].get(cat, 0) and got[1] >= _sr_week_start(now):
             try:
                 df = _sr_csv_to_df(got[0])
             except Exception:
@@ -10801,17 +10797,30 @@ def _sr_is_night():
 
 
 def _sr_night_loop():
-    """아무도 접속 안 하는 새벽에도 갱신이 시작되게 10분마다 확인 (토글 ON일 때만)"""
-    time.sleep(300)
+    """아무도 접속 안 하는 새벽에도 갱신이 시작되게 10분마다 확인.
+    결빙·사고·주차장·AED는 토글 ON일 때만, 출장 도구함 화장실은 토글과 상관없이"""
+    time.sleep(300 + (os.getpid() % 10) * 60)     # 서버 프로세스끼리 확인 시각을 엇갈리게
     while True:
-        try:
-            if _sr_is_night() and feature_detail_on():
-                b = load_df()
-                cnt = b["구분"].value_counts().to_dict()
-                cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
-                sr_live_tick(cnt)
-        except Exception as e:
-            print("안전로드 새벽 갱신 확인 실패:", e)
+        if _sr_is_night():
+            try:
+                if feature_detail_on():
+                    b = load_df()
+                    cnt = b["구분"].value_counts().to_dict()
+                    cnt["주차장"] = cnt.get("공영주차장", 0) + cnt.get("민영주차장", 0)
+                    sr_live_tick(cnt)
+            except Exception as e:
+                print("안전로드 새벽 갱신 확인 실패:", e)
+            try:
+                if os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
+                    trip_load_toilets()
+            except Exception as e:
+                print("화장실 새벽 갱신 확인 실패:", e)
+            try:
+                # 새 자료가 들어왔으면 지도 전체 자료(/data/all)를 미리 다시 만들어 둠 → 아침 첫 사용자가 기다리지 않게
+                if not _SR_LIVE["busy"] and not _TRIP_TOILET_LIVE["busy"]:
+                    _sr_warm_now()
+            except Exception as e:
+                print("지도 전체 자료 새벽 준비 실패:", e)
         time.sleep(600)
 
 
@@ -10820,7 +10829,7 @@ if os.environ.get("SR_LIVE_AUTO", "1") != "0":
 
 
 def sr_live_tick(excel_counts):
-    """토글 ON 상태에서 지도 자료·관리자 페이지를 부를 때: 처음이면 저장소 자료를 읽고, 7일 지난 항목은 뒤에서 새로 받음"""
+    """토글 ON 상태에서 지도 자료·관리자 페이지를 부를 때: 처음이면 저장소 자료를 읽고, 이번 주(월요일 새벽) 몫을 안 받은 항목은 뒤에서 새로 받음"""
     if os.environ.get("SR_LIVE_AUTO", "1") == "0":
         return
     with _SR_LIVE_LOCK:
@@ -10831,10 +10840,10 @@ def sr_live_tick(excel_counts):
             _sr_live_load_store()
         if _SR_LIVE["busy"]:
             return
-        due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
+        due = [c for c in SR_LIVE_CATS if _sr_weekly_due(_SR_LIVE["at"].get(c, 0), _SR_LIVE["fail"].get(c, 0), now)]
         if due:
             _sr_live_reload_due(due, now)
-            due = [c for c in SR_LIVE_CATS if now - _SR_LIVE["at"].get(c, 0) > SR_LIVE_REFRESH_SEC]
+            due = [c for c in SR_LIVE_CATS if _sr_weekly_due(_SR_LIVE["at"].get(c, 0), _SR_LIVE["fail"].get(c, 0), now)]
         if not _sr_is_night():
             due = [c for c in due if c not in _SR_LIVE["data"]]      # 낮에는 처음 받는 항목만
         if not due:
@@ -10863,7 +10872,7 @@ def sr_live_status():
     out = []
     for cat in SR_LIVE_CATS:
         at = _SR_LIVE["at"].get(cat)
-        has = cat in _SR_LIVE["data"] and now - (at or 0) < SR_LIVE_REFRESH_SEC
+        has = cat in _SR_LIVE["data"] and (at or 0) >= _sr_week_start(now)
         note, busy = _SR_LIVE["note"].get(cat, ""), False
         if running and info.get("cur") == cat:
             ago = int((now - float(info["t"])) // 60)
@@ -10873,7 +10882,7 @@ def sr_live_status():
         elif running and not has and not note:
             note, busy = "차례 기다리는 중", True
         elif not running and cat in _SR_LIVE["data"] and not has and not note:
-            note = f"새벽 {SR_NIGHT_HOURS[0]}~{SR_NIGHT_HOURS[1]}시에 새로 받음"
+            note = f"새벽 {SR_NIGHT_HOURS[0]}~{SR_NIGHT_HOURS[1]}시에 새로 받을 차례"
         out.append({"cat": cat, "count": _SR_LIVE["count"].get(cat, 0), "busy": busy,
                     "date": datetime.fromtimestamp(at, KST).strftime("%Y-%m-%d") if at and cat in _SR_LIVE["data"] else "",
                     "note": note})
@@ -11630,7 +11639,7 @@ def stats():
         .ft-state{display:inline-block;padding:2px 10px;border-radius:8px;font-weight:800;font-size:13px;}
         </style>
         {% if detail_on %}
-        {# 데이터 갱신 프로그램(exe) 내려받기 카드는 뺌 — 토글 ON이면 서버가 7일마다 직접 받음 #}
+        {# 데이터 갱신 프로그램(exe) 내려받기 카드는 뺌 — 토글 ON이면 서버가 매주 월요일 새벽에 직접 받음 #}
         {% endif %}
         <div class="ft-card">
           <div style="display:flex;align-items:center;gap:12px;">
@@ -11886,7 +11895,7 @@ def stats():
             if(box && d.live){
               const e = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
               const badge = (t, bg, fg) => '<span style="flex:none;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:800;background:' + bg + ';color:' + fg + ';white-space:nowrap;">' + t + '</span>';
-              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 7일마다 새벽 2~5시</span></div>' + d.live.map(x => {
+              box.innerHTML = '<div style="font-weight:800;color:#334155;margin-bottom:6px;">자료 자동 갱신 <span style="font-weight:500;color:#94a3b8;">· ON일 때 매주 월요일 새벽 2~5시</span></div>' + d.live.map(x => {
                 const n = String(x.note || '');
                 let b, sub = x.sub || '';
                 if(x.busy && n !== '차례 기다리는 중'){ b = badge('받는 중', '#dbeafe', '#1d4ed8'); sub = n; }
@@ -12777,6 +12786,33 @@ def data_all():
     resp.headers["Vary"] = "Accept-Encoding"
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+_SR_WARM = {"started": False}
+
+
+@app.before_request
+def _sr_warm_data_all():
+    """서버(프로세스)가 뜬 뒤 첫 요청이 오면, 뒤에서 /data/all 자료를 한 번 만들어 둠.
+    원래는 '내 주변 찾기'를 처음 누른 사람이 이 작업(수십 초)을 기다려야 했음"""
+    if _SR_WARM["started"]:
+        return
+    _SR_WARM["started"] = True
+
+    def run():
+        try:
+            time.sleep(2)
+            _sr_warm_now()
+            print("지도 전체 자료 미리 준비 완료")
+        except Exception as e:
+            print("지도 전체 자료 미리 준비 실패:", e)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _sr_warm_now():
+    """/data/all 자료를 지금 만들어 둠. 이미 최신이면 그대로 (금방 끝남)"""
+    with app.test_request_context("/data/all", headers={"Accept-Encoding": "gzip"}):
+        data_all()
 
 
 @app.route("/sample-image")
@@ -15414,7 +15450,7 @@ TRIP_TOILET_NEW_GEOCODE_MAX = 800
 
 # 행: (관리번호, 이름, 주소, 위도, 경도, 개방시간, 비상벨, 장애인화장실, 그 화장실 자료 마지막 수정일)
 _TRIP_TOILET_CACHE = {"key": None, "rows": [], "date": ""}
-_TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False, "ok_at": 0.0}
+_TRIP_TOILET_LIVE = {"rows": None, "at": 0.0, "busy": False, "date": "", "note": "", "store_tried": False, "ok_at": 0.0, "fail": 0.0, "checked": 0.0}
 _TRIP_TOILET_LOCK = threading.Lock()
 
 
@@ -15619,9 +15655,9 @@ def _trip_toilet_refresh(old):
             kept = _trip_toilet_save_live(rows, date)
         except Exception as e:
             kept = f"저장소 보관 실패 {e}"
-        _TRIP_TOILET_LIVE.update(rows=rows, date=date, ok_at=time.time(), at=time.time(), note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}")
+        _TRIP_TOILET_LIVE.update(rows=rows, date=date, ok_at=time.time(), at=time.time(), note=f"갱신 {len(rows)}건, 새 좌표 {new}건, {kept}", fail=0.0)
     except Exception as e:
-        _TRIP_TOILET_LIVE.update(note=f"갱신 실패: {e}", at=time.time() - TRIP_TOILET_REFRESH_SEC + 86400)   # 실패하면 하루 뒤 다시
+        _TRIP_TOILET_LIVE.update(note=f"갱신 실패: {e}", fail=time.time())   # 실패하면 다음 날 새벽에 다시
     finally:
         _TRIP_TOILET_LIVE["busy"] = False
 
@@ -15635,8 +15671,16 @@ def trip_load_toilets():
                 got = _trip_toilet_load_store()
                 if got and got[1] >= _TRIP_TOILET_CACHE["date"]:  # 새로 push한 파일이 더 최신이면 파일 우선
                     _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
-            # push·재시작과 상관없이 '마지막으로 받은 때'(저장소 보관 시각)부터 7일. 한 번도 안 받았으면 바로 받음
-            due = time.time() - _TRIP_TOILET_LIVE["at"] > TRIP_TOILET_REFRESH_SEC
+            # 한 번도 안 받았으면 바로 받음. 그 뒤로는 매주 월요일 새벽 2~5시에만 (놓치면 그다음 날 새벽)
+            now, at = time.time(), _TRIP_TOILET_LIVE["at"]
+            due = (not at) or (_sr_is_night() and _sr_weekly_due(at, _TRIP_TOILET_LIVE["fail"], now))
+            if due and at and not _TRIP_TOILET_LIVE["busy"] and now - _TRIP_TOILET_LIVE["checked"] > 600:
+                # 다른 서버 프로세스가 방금 받아 저장소에 올렸으면 그걸 씀 (같은 걸 두 번 받지 않게)
+                _TRIP_TOILET_LIVE["checked"] = now
+                got = _trip_toilet_load_store()
+                if got and got[2] > at:
+                    _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
+                    due = got[2] < _sr_week_start(now)
             if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
                 _TRIP_TOILET_LIVE["busy"] = True
                 threading.Thread(target=_trip_toilet_refresh, args=(_TRIP_TOILET_LIVE["rows"] or base,), daemon=True).start()
