@@ -9449,6 +9449,31 @@ function closePrivacyNotice(){
 
 
 
+<style>
+/* 창(알림·위치 찾는 중·내 주변 찾기·경로·별점·댓글 등)이 떠 있는 동안 뒤 화면 스크롤 막기 */
+html.sr-noscroll, html.sr-noscroll body{overflow:hidden!important;overscroll-behavior:none!important;}
+</style>
+<script>
+(function(){
+  var IDS = ["msgModal","facilityFabMenu","routePopup","addrSearchPopup","commentModal","ratingModal","privacyNoticeModal","adminPwModal"];
+  function shown(el){
+    if(!el) return false;
+    var cs = getComputedStyle(el);
+    return cs.display !== "none" && cs.visibility !== "hidden" && cs.pointerEvents !== "none";
+  }
+  function check(){
+    var open = false;
+    for(var i = 0; i < IDS.length && !open; i++) open = shown(document.getElementById(IDS[i]));
+    if(!open){
+      var sh = document.querySelectorAll(".sr-sheet");
+      for(var j = 0; j < sh.length && !open; j++) open = shown(sh[j]);
+    }
+    document.documentElement.classList.toggle("sr-noscroll", open);
+  }
+  setInterval(check, 150);
+  check();
+})();
+</script>
 </body>
 
 </html>
