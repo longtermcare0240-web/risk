@@ -743,6 +743,24 @@ HTML = r"""
 <html lang="ko">
 
 <head>
+<script>
+/* 위치 찾기: GPS를 10초 안에 못 잡으면(실내·차 안·LTE) 통신망 위치로 한 번 더 시도 (최근 5분 안 위치도 허용).
+   출장 도구함 화장실처럼 최근 위치를 쓰게 함. 위치 권한을 거부한 경우만 바로 실패 */
+(function(){
+  try{
+    var g = navigator.geolocation;
+    if(!g || g.__srRetry) return;
+    var orig = g.getCurrentPosition.bind(g);
+    g.getCurrentPosition = function(ok, fail, opt){
+      orig(ok, function(err){
+        if(err && err.code === 1){ if(fail) fail(err); return; }
+        orig(ok, function(err2){ if(fail) fail(err2); }, {enableHighAccuracy:false, timeout:15000, maximumAge:300000});
+      }, opt);
+    };
+    g.__srRetry = true;
+  }catch(e){}
+})();
+</script>
 
 <meta charset="UTF-8">
 
