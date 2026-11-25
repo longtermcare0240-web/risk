@@ -338,6 +338,8 @@ DATA_DIR = os.path.join(BASE_DIR, "mapdata") if os.path.isdir(os.path.join(BASE_
 SPLIT_FILES = ["공중화장실.xlsx", "상습결빙지역.xlsx", "교통사고위험지역.xlsx", "주차장.xlsx", "자동심장충격기.xlsx"]
 
 DATA_CACHE = None
+# 무거운 자료(엑셀·화장실·지도 전체·알약)를 만들 때 한 번에 하나씩만 → 서버가 막 켜졌을 때 여러 요청이 동시에 같은 자료를 만들어 메모리가 두세 배로 튀는 것 방지
+_HEAVY_LOCK = threading.RLock()
 
 
 
@@ -498,6 +500,13 @@ def build_photo_url(row):
 
 
 def load_df():
+    if DATA_CACHE is not None:
+        return DATA_CACHE
+    with _HEAVY_LOCK:
+        return _load_df_build()
+
+
+def _load_df_build():
 
 
 
@@ -10027,6 +10036,16 @@ def sr_df():
     key = (id(base), id(rows), len(rows), _SR_LIVE["ver"])
     if _SR_LIVE_DF["key"] == key:
         return _SR_LIVE_DF["df"]
+    # 뒤에서 자료를 받는 중이면 다 받을 때까지 지금 자료 그대로 (받는 메모리 + 다시 만드는 메모리가 겹치지 않게)
+    if _SR_LIVE_DF["df"] is not None and (_SR_LIVE["busy"] or _TRIP_TOILET_LIVE["busy"]):
+        return _SR_LIVE_DF["df"]
+    with _HEAVY_LOCK:
+        if _SR_LIVE_DF["key"] == key:
+            return _SR_LIVE_DF["df"]
+        return _sr_df_build(base, rows, key)
+
+
+def _sr_df_build(base, rows, key):
     _SR_LIVE_DF.update(key=None, df=None)      # 예전 결과를 먼저 버려 메모리에 두 벌 안 겹치게
     try:
         df = _sr_df_with_trip_toilets(base)
@@ -10729,6 +10748,8 @@ def _sr_live_refresh(due, old_counts):
     finally:
         _SR_LIVE["busy"] = False
         _SR_LIVE["cur"], _SR_LIVE["prog"] = "", ""
+        if not _SR_KAKAO_CACHE["dirty"]:
+            _SR_KAKAO_CACHE["d"] = None      # 저장소에 다 보관됐으면 메모리에서 내림 (다음 갱신 때 다시 읽음)
         try:
             _sr_store_put("refresh_lock.txt", b'{"t": 0}', "application/json")
         except Exception:
@@ -12754,12 +12775,13 @@ def data_all():
     with _DATA_ALL_LOCK:
         if _DATA_ALL_CACHE["key"] != key:
             _DATA_ALL_CACHE.update(key=None, gz=None)
-            records = df.apply(row_to_dict, axis=1).tolist()
-            raw = json.dumps({"total": len(records), "too_many": False, "data": records},
-                             ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            del records
-            gz = gzip.compress(raw, 6)
-            del raw
+            with _HEAVY_LOCK:
+                records = df.apply(row_to_dict, axis=1).tolist()
+                raw = json.dumps({"total": len(records), "too_many": False, "data": records},
+                                 ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                del records
+                gz = gzip.compress(raw, 6)
+                del raw
             _DATA_ALL_CACHE.update(key=key, gz=gz)
         gz = _DATA_ALL_CACHE["gz"]
     if "gzip" in request.headers.get("Accept-Encoding", ""):
@@ -15477,7 +15499,7 @@ TRIP_TOILET_CSV_HEAD = ["관리번호", "화장실명", "주소", "위도", "경
 
 def _trip_toilet_rows_from_csv(text):
     rows, date = [], ""
-    for r in csv.DictReader(io.StringIO(text)):
+    for r in csv.DictReader(io.StringIO(text) if isinstance(text, str) else text):
         try:
             lat, lng = float(r["위도"]), float(r["경도"])
         except (KeyError, TypeError, ValueError):
@@ -15500,7 +15522,8 @@ def _trip_toilet_rows_to_csv(rows, date):
 
 
 def _trip_toilet_load_national(path):
-    return _trip_toilet_rows_from_csv(open(path, encoding="utf-8-sig").read())
+    with open(path, encoding="utf-8-sig", newline="") as f:     # 통째로 읽지 않고 줄 단위로 (메모리 절약)
+        return _trip_toilet_rows_from_csv(f)
 
 
 # ---- 새로 받은 자료를 Supabase 저장소(버킷 trip, 비공개)에 보관 → 서버가 재시작돼도 마지막 자료·날짜 유지 ----
@@ -15565,11 +15588,13 @@ def _trip_toilet_base():
         return [], False
     key = (path, os.path.getmtime(path))
     if _TRIP_TOILET_CACHE["key"] != key:
-        if national:
-            rows, date = _trip_toilet_load_national(path)
-        else:
-            rows, date = _trip_toilet_load_xlsx(path), ""
-        _TRIP_TOILET_CACHE.update(key=key, rows=rows, date=date)
+        with _HEAVY_LOCK:
+            if _TRIP_TOILET_CACHE["key"] != key:
+                if national:
+                    rows, date = _trip_toilet_load_national(path)
+                else:
+                    rows, date = _trip_toilet_load_xlsx(path), ""
+                _TRIP_TOILET_CACHE.update(key=key, rows=rows, date=date)
     return _TRIP_TOILET_CACHE["rows"], national
 
 
@@ -15607,22 +15632,39 @@ def _trip_toilet_refresh(old):
             s.get(TRIP_TOILET_INFO_URL, timeout=15)
         except Exception:
             pass
-        r = s.get(TRIP_TOILET_CSV_URL, headers={"Referer": TRIP_TOILET_INFO_URL}, timeout=120)
+        # 전국 파일(수십 MB)을 메모리에 통째로 올리면 서버가 재시작됨 → 임시 파일에 받아 줄 단위로 읽음
+        import tempfile, codecs
+        tmp = tempfile.TemporaryFile()
+        r = s.get(TRIP_TOILET_CSV_URL, headers={"Referer": TRIP_TOILET_INFO_URL}, timeout=120, stream=True)
         r.raise_for_status()
-        raw = r.content
+        for chunk in r.iter_content(1 << 20):
+            tmp.write(chunk)
+        r.close()
         text = None
         for enc in ("utf-8-sig", "cp949"):
+            tmp.seek(0)
+            dec = codecs.getincrementaldecoder(enc)()
             try:
-                text = raw.decode(enc)
-                break
+                while True:
+                    b = tmp.read(1 << 20)
+                    if not b:
+                        dec.decode(b"", final=True)
+                        break
+                    dec.decode(b)
             except UnicodeDecodeError:
                 continue
-        if not text or "관리번호" not in text[:2000]:
+            tmp.seek(0)
+            if "관리번호" in tmp.read(6000).decode(enc, "ignore")[:2000]:
+                tmp.seek(0)
+                text = io.TextIOWrapper(tmp, encoding=enc, newline="")
+            break
+        if text is None:
+            tmp.close()
             raise ValueError("전국 화장실 파일 형식이 아님")
         by_id = {t[0]: (t[3], t[4]) for t in old if t[0]}
         by_addr = {t[2]: (t[3], t[4]) for t in old if t[2]}
         rows, new, date = [], 0, ""
-        for rec in csv.DictReader(io.StringIO(text)):
+        for rec in csv.DictReader(text):
             t = _trip_toilet_from_localdata(rec)
             if not t or _trip_s(t["open"]) == "미개방":
                 continue
@@ -15638,6 +15680,8 @@ def _trip_toilet_refresh(old):
                 continue
             rows.append((t["id"], t["name"], addr, xy[0], xy[1], t["open"], t["bell"], t["acc"], t["date"]))
             date = max(date, t["date"])
+        text.close()
+        del by_id, by_addr
         if len(rows) < len(old) * 0.8:
             raise ValueError(f"받은 건수가 너무 적음 ({len(rows)} / 기존 {len(old)})")
         try:
@@ -15670,11 +15714,13 @@ def trip_load_toilets():
                 if got and got[2] > at:
                     _TRIP_TOILET_LIVE.update(rows=got[0], date=got[1], at=got[2], ok_at=got[2])
                     due = got[2] < _sr_week_start(now, TRIP_TOILET_WEEKDAY)
-            if due and at and _SR_LIVE["busy"]:
-                due = False          # 안전로드 자료를 받는 중이면 끝난 뒤에 (메모리 겹침 방지)
+            if due and _SR_LIVE["busy"]:
+                due = False          # 안전로드 자료를 받는 중이면 끝난 뒤에 (메모리 겹침 방지, 처음 받는 것도)
             if due and not _TRIP_TOILET_LIVE["busy"] and os.environ.get("TRIP_TOILET_AUTO", "1") != "0":
                 _TRIP_TOILET_LIVE["busy"] = True
                 threading.Thread(target=_trip_toilet_refresh, args=(_TRIP_TOILET_LIVE["rows"] or base,), daemon=True).start()
+    if _TRIP_TOILET_LIVE["rows"] and _TRIP_TOILET_CACHE["rows"]:
+        _TRIP_TOILET_CACHE["rows"] = []     # 저장소 자료를 쓰면 파일 자료(전국 한 벌)는 필요 없음 → 메모리에서 내림 (날짜는 남김)
     return _TRIP_TOILET_LIVE["rows"] if _TRIP_TOILET_LIVE["rows"] is not None else base
 
 
@@ -15751,6 +15797,13 @@ def trip_load_pills():
         return []
     if _TRIP_PILL_CACHE["mtime"] == mtime:
         return _TRIP_PILL_CACHE["rows"]
+    with _HEAVY_LOCK:
+        if _TRIP_PILL_CACHE["mtime"] == mtime:
+            return _TRIP_PILL_CACHE["rows"]
+        return _trip_load_pills_build(mtime)
+
+
+def _trip_load_pills_build(mtime):
     try:
         pdf = pd.read_csv(TRIP_PILL_FILE, dtype=str).fillna("")
     except Exception as e:
